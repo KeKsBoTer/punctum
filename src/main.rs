@@ -1,20 +1,14 @@
 use std::sync::Arc;
 
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess};
-use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer, SubpassContents,
-};
+use pc_render::PointCloudRenderer;
+use vulkano::command_buffer::PrimaryAutoCommandBuffer;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::image::view::ImageView;
 use vulkano::image::{ImageUsage, SwapchainImage};
 use vulkano::instance::Instance;
-use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
-use vulkano::pipeline::graphics::vertex_input::BuffersDefinition;
-use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
-use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::{Framebuffer, RenderPass, Subpass};
-use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{self, AcquireError, Surface, Swapchain, SwapchainCreationError};
 use vulkano::sync::{FenceSignalFuture, FlushError, GpuFuture};
 use vulkano::{sync, Version};
@@ -25,6 +19,7 @@ use winit::window::{Window, WindowBuilder};
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::ControlFlow;
 
+mod pc_render;
 mod vertex;
 
 fn select_physical_device<'a>(
@@ -111,62 +106,14 @@ fn get_framebuffers(
         .collect::<Vec<_>>()
 }
 
-mod vs {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        src: "
-#version 450
-
-layout(location = 0) in vec3 position;
-
-void main() {
-    gl_Position = vec4(position.xy, 0.0, 1.0);
-}"
-    }
-}
-
-mod fs {
-    vulkano_shaders::shader! {
-        ty: "fragment",
-        src: "
-#version 450
-
-layout(location = 0) out vec4 f_color;
-
-void main() {
-    f_color = vec4(1.0, 0.0, 0.0, 1.0);
-}"
-    }
-}
-
-fn get_pipeline(
-    device: Arc<Device>,
-    vs: Arc<ShaderModule>,
-    fs: Arc<ShaderModule>,
-    render_pass: Arc<RenderPass>,
-    viewport: Viewport,
-) -> Arc<GraphicsPipeline> {
-    GraphicsPipeline::start()
-        .vertex_input_state(BuffersDefinition::new().vertex::<vertex::Vertex>())
-        .vertex_shader(vs.entry_point("main").unwrap(), ())
-        .input_assembly_state(InputAssemblyState::new())
-        .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([viewport]))
-        .fragment_shader(fs.entry_point("main").unwrap(), ())
-        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-        .build(device.clone())
-        .unwrap()
-}
-
 fn get_command_buffers(
-    device: Arc<Device>,
-    queue: Arc<Queue>,
-    pipeline: Arc<GraphicsPipeline>,
     framebuffers: &Vec<Arc<Framebuffer>>,
-    vertex_buffer: Arc<CpuAccessibleBuffer<[vertex::Vertex]>>,
+    pc_renderer: Arc<PointCloudRenderer>,
 ) -> Vec<Arc<PrimaryAutoCommandBuffer>> {
     framebuffers
         .iter()
         .map(|framebuffer| {
+
             let mut builder = AutoCommandBufferBuilder::primary(
                 device.clone(),
                 queue.family(),
@@ -180,15 +127,10 @@ fn get_command_buffers(
                     SubpassContents::Inline,
                     vec![[0.0, 0.0, 1.0, 1.0].into()],
                 )
-                .unwrap()
-                .bind_pipeline_graphics(pipeline.clone())
-                .bind_vertex_buffers(0, vertex_buffer.clone())
-                .draw(vertex_buffer.len() as u32, 1, 0, 0)
-                .unwrap()
-                .end_render_pass()
-                .unwrap();
 
-            Arc::new(builder.build().unwrap())
+            let pc = pc_renderer.draw([800, 600]);
+
+            Arc::new()
         })
         .collect()
 }
@@ -236,47 +178,19 @@ fn main() {
 
     let framebuffers = get_framebuffers(&images, render_pass.clone());
 
-    let vertex1 = vertex::Vertex {
-        position: [-0.5, -0.5, 1.],
-    };
-    let vertex2 = vertex::Vertex {
-        position: [0.0, 0.5, 1.],
-    };
-    let vertex3 = vertex::Vertex {
-        position: [0.5, -0.25, 1.],
-    };
-    let vertex_buffer = CpuAccessibleBuffer::from_iter(
-        device.clone(),
-        BufferUsage::vertex_buffer(),
-        false,
-        vec![vertex1, vertex2, vertex3].into_iter(),
-    )
-    .unwrap();
-
-    let vs = vs::load(device.clone()).expect("failed to create shader module");
-    let fs = fs::load(device.clone()).expect("failed to create shader module");
-
     let mut viewport = Viewport {
         origin: [0.0, 0.0],
         dimensions: surface.window().inner_size().into(),
         depth_range: 0.0..1.0,
     };
+    let point_cloud_subpass = Subpass::from(render_pass.clone(), 1).unwrap();
 
-    let pipeline = get_pipeline(
-        device.clone(),
-        vs.clone(),
-        fs.clone(),
-        render_pass.clone(),
-        viewport.clone(),
-    );
-
-    let mut command_buffers = get_command_buffers(
-        device.clone(),
+    let renderer = Arc::new(pc_render::PointCloudRenderer::new(
         queue.clone(),
-        pipeline,
-        &framebuffers,
-        vertex_buffer.clone(),
-    );
+        point_cloud_subpass,
+    ));
+
+    let mut command_buffers = get_command_buffers(&framebuffers, renderer.clone());
     let mut window_resized = false;
     let mut recreate_swapchain = false;
 
@@ -322,20 +236,7 @@ fn main() {
                     window_resized = false;
 
                     viewport.dimensions = new_dimensions.into();
-                    let new_pipeline = get_pipeline(
-                        device.clone(),
-                        vs.clone(),
-                        fs.clone(),
-                        render_pass.clone(),
-                        viewport.clone(),
-                    );
-                    command_buffers = get_command_buffers(
-                        device.clone(),
-                        queue.clone(),
-                        new_pipeline,
-                        &new_framebuffers,
-                        vertex_buffer.clone(),
-                    );
+                    command_buffers = get_command_buffers(&new_framebuffers, renderer.clone());
                 }
             }
         }

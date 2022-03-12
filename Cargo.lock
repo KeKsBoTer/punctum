@@ -659,16 +659,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4fd5641d01c8f18a23da7b6fe29298ff4b55afcccdf78973b24cf3175fee32e"
 
 [[package]]
-name = "pit"
-version = "0.1.0"
-dependencies = [
- "vulkano",
- "vulkano-shaders",
- "vulkano-win",
- "winit",
-]
-
-[[package]]
 name = "pkg-config"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -691,6 +681,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7342d5883fbccae1cc37a2353b09c87c9b0f3afd73f5fb9bba687a1f733b029"
 dependencies = [
  "unicode-xid",
+]
+
+[[package]]
+name = "punctum"
+version = "0.1.0"
+dependencies = [
+ "vulkano",
+ "vulkano-shaders",
+ "vulkano-win",
+ "winit",
 ]
 
 [[package]]
