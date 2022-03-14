@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use pc_render::PointCloudRenderer;
-use vulkano::command_buffer::PrimaryAutoCommandBuffer;
+use vulkano::command_buffer::{PrimaryAutoCommandBuffer, AutoCommandBufferBuilder, SubpassContents, CommandBufferUsage};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::image::view::ImageView;
@@ -107,6 +107,8 @@ fn get_framebuffers(
 }
 
 fn get_command_buffers(
+    device: Arc<Device>,
+    queue:Arc<Queue>,
     framebuffers: &Vec<Arc<Framebuffer>>,
     pc_renderer: Arc<PointCloudRenderer>,
 ) -> Vec<Arc<PrimaryAutoCommandBuffer>> {
@@ -124,13 +126,14 @@ fn get_command_buffers(
             builder
                 .begin_render_pass(
                     framebuffer.clone(),
-                    SubpassContents::Inline,
+                    SubpassContents::SecondaryCommandBuffers,
                     vec![[0.0, 0.0, 1.0, 1.0].into()],
-                )
+                ).unwrap();
 
             let pc = pc_renderer.draw([800, 600]);
-
-            Arc::new()
+            builder.execute_commands(pc).unwrap();  
+            builder.end_render_pass().unwrap();
+            Arc::new(builder.build().unwrap())
         })
         .collect()
 }
@@ -183,14 +186,14 @@ fn main() {
         dimensions: surface.window().inner_size().into(),
         depth_range: 0.0..1.0,
     };
-    let point_cloud_subpass = Subpass::from(render_pass.clone(), 1).unwrap();
+    let point_cloud_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
     let renderer = Arc::new(pc_render::PointCloudRenderer::new(
         queue.clone(),
         point_cloud_subpass,
     ));
 
-    let mut command_buffers = get_command_buffers(&framebuffers, renderer.clone());
+    let mut command_buffers = get_command_buffers(device.clone(),queue.clone(),&framebuffers, renderer.clone());
     let mut window_resized = false;
     let mut recreate_swapchain = false;
 
@@ -236,7 +239,7 @@ fn main() {
                     window_resized = false;
 
                     viewport.dimensions = new_dimensions.into();
-                    command_buffers = get_command_buffers(&new_framebuffers, renderer.clone());
+                    command_buffers = get_command_buffers(device.clone(),queue.clone(),&new_framebuffers, renderer.clone());
                 }
             }
         }
