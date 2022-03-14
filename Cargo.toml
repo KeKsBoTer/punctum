@@ -6,8 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-vulkano = "0.28.0"
-vulkano-shaders = "0.28.0"
+vulkano = "0.29.0"
+vulkano-shaders = "0.29.0"
 
-vulkano-win = "0.28.0"
+vulkano-win = "0.29.0"
 winit = "0.26"
+
+cgmath="0.18.0"
+
+bytemuck = { version = "1.5.1", features = [ "derive" ] }

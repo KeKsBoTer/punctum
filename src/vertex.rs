@@ -1,4 +1,7 @@
-#[derive(Default, Copy, Clone)]
+use bytemuck::{Pod, Zeroable};
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct Vertex {
     pub(crate) position: [f32; 3],
 }

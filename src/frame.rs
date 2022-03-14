@@ -5,11 +5,12 @@ use vulkano::{
         AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
-    format::Format,
     image::{view::ImageView, ImageUsage, SwapchainImage},
     pipeline::graphics::viewport::Viewport,
-    render_pass::{Framebuffer, RenderPass},
-    swapchain::{self, AcquireError, Surface, Swapchain, SwapchainCreationError},
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
+    swapchain::{
+        self, AcquireError, Surface, Swapchain, SwapchainCreateInfo, SwapchainCreationError,
+    },
     sync::{self, FlushError, GpuFuture},
 };
 use winit::{dpi::PhysicalSize, window::Window};
@@ -31,7 +32,7 @@ impl Frame {
         physical_device: PhysicalDevice,
         queue: Arc<Queue>,
         render_pass: Arc<RenderPass>,
-        swapchain_format: Format,
+        swapchain_format: vulkano::format::Format,
         pass: Arc<RenderPass>,
     ) -> Self {
         let (swapchain, images) = create_swapchain(
@@ -69,12 +70,17 @@ impl Frame {
 
     pub fn recreate_if_necessary(&mut self) {
         let size = self.surface.window().inner_size();
-        let (new_swapchain, new_images) =
-            match self.swapchain.recreate().dimensions(size.into()).build() {
-                Ok(r) => r,
-                Err(SwapchainCreationError::UnsupportedDimensions) => return,
-                Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-            };
+        // TODO change swapchain size
+        let (new_swapchain, new_images) = match self.swapchain.recreate(SwapchainCreateInfo {
+            image_extent: self.surface.window().inner_size().into(),
+            ..self.swapchain.create_info()
+        }) {
+            Ok(r) => r,
+            // This error tends to happen when the user is manually resizing the window.
+            // Simply restarting the loop is the easiest way to fix this issue.
+            Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
+            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+        };
         self.swapchain = new_swapchain;
         self.buffers = get_framebuffers(&new_images, self.render_pass.clone());
     }
@@ -142,12 +148,15 @@ fn get_framebuffers(
     images
         .iter()
         .map(|image| {
-            let view = ImageView::new(image.clone()).unwrap();
-            Framebuffer::start(render_pass.clone())
-                .add(view)
-                .unwrap()
-                .build()
-                .unwrap()
+            let view = ImageView::new_default(image.clone()).unwrap();
+            Framebuffer::new(
+                render_pass.clone(),
+                FramebufferCreateInfo {
+                    attachments: vec![view],
+                    ..Default::default()
+                },
+            )
+            .unwrap()
         })
         .collect::<Vec<_>>()
 }
@@ -157,21 +166,39 @@ fn create_swapchain(
     device: Arc<Device>,
     physical_device: PhysicalDevice,
     queue: Arc<Queue>,
-    format: Format,
+    format: vulkano::format::Format,
 ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
-    let caps = surface
-        .capabilities(physical_device)
-        .expect("failed to get surface capabilities");
+    let surface_capabilities = physical_device
+        .surface_capabilities(&surface, Default::default())
+        .unwrap();
     let dimensions: [u32; 2] = surface.window().inner_size().into();
-    let composite_alpha = caps.supported_composite_alpha.iter().next().unwrap();
+    let composite_alpha = surface_capabilities
+        .supported_composite_alpha
+        .iter()
+        .next()
+        .unwrap();
 
-    Swapchain::start(device.clone(), surface.clone())
-        .num_images(caps.min_image_count + 1) // How many buffers to use in the swapchain
-        .format(format)
-        .dimensions(dimensions)
-        .usage(ImageUsage::color_attachment()) // What the images are going to be used for
-        .sharing_mode(&queue) // The queue(s) that the resource will be used
-        .composite_alpha(composite_alpha)
-        .build()
-        .expect("failed to create swapchain")
+    Swapchain::new(
+        device.clone(),
+        surface.clone(),
+        SwapchainCreateInfo {
+            min_image_count: surface_capabilities.min_image_count,
+
+            image_format: Some(format),
+            image_extent: surface.window().inner_size().into(),
+
+            image_usage: ImageUsage::color_attachment(),
+
+            // The alpha mode indicates how the alpha value of the final image will behave. For
+            // example, you can choose whether the window will be opaque or transparent.
+            composite_alpha: surface_capabilities
+                .supported_composite_alpha
+                .iter()
+                .next()
+                .unwrap(),
+
+            ..Default::default()
+        },
+    )
+    .unwrap()
 }

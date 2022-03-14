@@ -3,12 +3,11 @@ use std::time::{Duration, Instant};
 
 use frame::Frame;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
-use vulkano::device::{Device, DeviceExtensions, Features};
-use vulkano::format::Format;
-use vulkano::instance::Instance;
+use vulkano::device::DeviceExtensions;
+use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
+use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::render_pass::{RenderPass, Subpass};
 use vulkano::swapchain::Surface;
-use vulkano::Version;
 use vulkano_win::VkSurfaceBuild;
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
@@ -16,6 +15,7 @@ use winit::window::{Window, WindowBuilder};
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::ControlFlow;
 
+mod camera;
 mod frame;
 mod pc_render;
 mod vertex;
@@ -29,7 +29,7 @@ fn select_physical_device<'a>(
         .filter(|&p| p.supported_extensions().is_superset_of(&device_extensions))
         .filter_map(|p| {
             p.queue_families()
-                .find(|&q| q.supports_graphics() && surface.is_supported(q).unwrap_or(false))
+                .find(|&q| q.supports_graphics() && q.supports_surface(&surface).unwrap_or(false))
                 .map(|q| (p, q))
         })
         .min_by_key(|(p, _)| match p.properties().device_type {
@@ -44,7 +44,10 @@ fn select_physical_device<'a>(
     (physical_device, queue_family)
 }
 
-fn get_render_pass(device: Arc<Device>, swapchain_format: Format) -> Arc<RenderPass> {
+fn get_render_pass(
+    device: Arc<Device>,
+    swapchain_format: vulkano::format::Format,
+) -> Arc<RenderPass> {
     vulkano::single_pass_renderpass!(
         device.clone(),
         attachments: {
@@ -65,8 +68,11 @@ fn get_render_pass(device: Arc<Device>, swapchain_format: Format) -> Arc<RenderP
 
 fn main() {
     let required_extensions = vulkano_win::required_extensions();
-    let instance = Instance::new(None, Version::V1_1, &required_extensions, None)
-        .expect("failed to create instance");
+    let instance = Instance::new(InstanceCreateInfo {
+        enabled_extensions: required_extensions,
+        ..Default::default()
+    })
+    .unwrap();
 
     let event_loop = EventLoop::new(); // ignore this for now
     let surface = WindowBuilder::new()
@@ -81,25 +87,27 @@ fn main() {
     let (physical_device, queue_family) =
         select_physical_device(&instance, surface.clone(), &device_extensions);
 
-    let (device, mut queues) = {
-        Device::new(
-            physical_device,
-            &Features::none(),
-            &physical_device
+    let (device, mut queues) = Device::new(
+        // Which physical device to connect to.
+        physical_device,
+        DeviceCreateInfo {
+            enabled_extensions: physical_device
                 .required_extensions()
-                .union(&device_extensions), // new
-            [(queue_family, 0.5)].iter().cloned(),
-        )
-        .expect("failed to create device")
-    };
+                .union(&device_extensions),
+
+            queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
+
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let queue = queues.next().unwrap();
 
-    let caps = surface
-        .capabilities(physical_device)
-        .expect("failed to get surface capabilities");
-
-    let swapchain_format = caps.supported_formats[0].0;
+    let swapchain_format = physical_device
+        .surface_formats(&surface, Default::default())
+        .unwrap()[0]
+        .0;
 
     let render_pass = get_render_pass(device.clone(), swapchain_format);
 
