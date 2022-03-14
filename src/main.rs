@@ -1,17 +1,13 @@
 use std::sync::Arc;
 
-use pc_render::PointCloudRenderer;
-use vulkano::command_buffer::{PrimaryAutoCommandBuffer, AutoCommandBufferBuilder, SubpassContents, CommandBufferUsage};
+use frame::Frame;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
-use vulkano::device::{Device, DeviceExtensions, Features, Queue};
-use vulkano::image::view::ImageView;
-use vulkano::image::{ImageUsage, SwapchainImage};
+use vulkano::device::{Device, DeviceExtensions, Features};
+use vulkano::format::Format;
 use vulkano::instance::Instance;
-use vulkano::pipeline::graphics::viewport::Viewport;
-use vulkano::render_pass::{Framebuffer, RenderPass, Subpass};
-use vulkano::swapchain::{self, AcquireError, Surface, Swapchain, SwapchainCreationError};
-use vulkano::sync::{FenceSignalFuture, FlushError, GpuFuture};
-use vulkano::{sync, Version};
+use vulkano::render_pass::{RenderPass, Subpass};
+use vulkano::swapchain::Surface;
+use vulkano::Version;
 use vulkano_win::VkSurfaceBuild;
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
@@ -19,6 +15,7 @@ use winit::window::{Window, WindowBuilder};
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::ControlFlow;
 
+mod frame;
 mod pc_render;
 mod vertex;
 
@@ -46,38 +43,14 @@ fn select_physical_device<'a>(
     (physical_device, queue_family)
 }
 
-fn create_swapchain(
-    surface: Arc<Surface<Window>>,
-    device: Arc<Device>,
-    physical_device: PhysicalDevice,
-    queue: Arc<Queue>,
-) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
-    let caps = surface
-        .capabilities(physical_device)
-        .expect("failed to get surface capabilities");
-    let dimensions: [u32; 2] = surface.window().inner_size().into();
-    let composite_alpha = caps.supported_composite_alpha.iter().next().unwrap();
-    let format = caps.supported_formats[0].0;
-
-    Swapchain::start(device.clone(), surface.clone())
-        .num_images(caps.min_image_count + 1) // How many buffers to use in the swapchain
-        .format(format)
-        .dimensions(dimensions)
-        .usage(ImageUsage::color_attachment()) // What the images are going to be used for
-        .sharing_mode(&queue) // The queue(s) that the resource will be used
-        .composite_alpha(composite_alpha)
-        .build()
-        .expect("failed to create swapchain")
-}
-
-fn get_render_pass(device: Arc<Device>, swapchain: Arc<Swapchain<Window>>) -> Arc<RenderPass> {
+fn get_render_pass(device: Arc<Device>, swapchain_format: Format) -> Arc<RenderPass> {
     vulkano::single_pass_renderpass!(
         device.clone(),
         attachments: {
             color: {
                 load: Clear,
                 store: Store,
-                format: swapchain.format(),  // set the format the same as the swapchain
+                format: swapchain_format,
                 samples: 1,
             }
         },
@@ -87,55 +60,6 @@ fn get_render_pass(device: Arc<Device>, swapchain: Arc<Swapchain<Window>>) -> Ar
         }
     )
     .unwrap()
-}
-
-fn get_framebuffers(
-    images: &[Arc<SwapchainImage<Window>>],
-    render_pass: Arc<RenderPass>,
-) -> Vec<Arc<Framebuffer>> {
-    images
-        .iter()
-        .map(|image| {
-            let view = ImageView::new(image.clone()).unwrap();
-            Framebuffer::start(render_pass.clone())
-                .add(view)
-                .unwrap()
-                .build()
-                .unwrap()
-        })
-        .collect::<Vec<_>>()
-}
-
-fn get_command_buffers(
-    device: Arc<Device>,
-    queue:Arc<Queue>,
-    framebuffers: &Vec<Arc<Framebuffer>>,
-    pc_renderer: Arc<PointCloudRenderer>,
-) -> Vec<Arc<PrimaryAutoCommandBuffer>> {
-    framebuffers
-        .iter()
-        .map(|framebuffer| {
-
-            let mut builder = AutoCommandBufferBuilder::primary(
-                device.clone(),
-                queue.family(),
-                CommandBufferUsage::MultipleSubmit, // don't forget to write the correct buffer usage
-            )
-            .unwrap();
-
-            builder
-                .begin_render_pass(
-                    framebuffer.clone(),
-                    SubpassContents::SecondaryCommandBuffers,
-                    vec![[0.0, 0.0, 1.0, 1.0].into()],
-                ).unwrap();
-
-            let pc = pc_renderer.draw([800, 600]);
-            builder.execute_commands(pc).unwrap();  
-            builder.end_render_pass().unwrap();
-            Arc::new(builder.build().unwrap())
-        })
-        .collect()
 }
 
 fn main() {
@@ -170,36 +94,29 @@ fn main() {
 
     let queue = queues.next().unwrap();
 
-    let (mut swapchain, images) = create_swapchain(
+    let caps = surface
+        .capabilities(physical_device)
+        .expect("failed to get surface capabilities");
+
+    let swapchain_format = caps.supported_formats[0].0;
+
+    let render_pass = get_render_pass(device.clone(), swapchain_format);
+
+    let mut frame = Frame::new(
         surface.clone(),
         device.clone(),
-        physical_device,
+        physical_device.clone(),
         queue.clone(),
+        render_pass.clone(),
+        swapchain_format,
+        render_pass.clone(),
     );
 
-    let render_pass = get_render_pass(device.clone(), swapchain.clone());
-
-    let framebuffers = get_framebuffers(&images, render_pass.clone());
-
-    let mut viewport = Viewport {
-        origin: [0.0, 0.0],
-        dimensions: surface.window().inner_size().into(),
-        depth_range: 0.0..1.0,
-    };
     let point_cloud_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let renderer = Arc::new(pc_render::PointCloudRenderer::new(
-        queue.clone(),
-        point_cloud_subpass,
-    ));
+    let renderer = pc_render::PointCloudRenderer::new(queue.clone(), point_cloud_subpass);
 
-    let mut command_buffers = get_command_buffers(device.clone(),queue.clone(),&framebuffers, renderer.clone());
     let mut window_resized = false;
-    let mut recreate_swapchain = false;
-
-    let frames_in_flight = images.len();
-    let mut fences: Vec<Option<Arc<FenceSignalFuture<_>>>> = vec![None; frames_in_flight];
-    let mut previous_fence_i = 0;
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -218,80 +135,13 @@ fn main() {
         Event::MainEventsCleared => {}
 
         Event::RedrawEventsCleared => {
-            if window_resized || recreate_swapchain {
-                recreate_swapchain = false;
-
-                let new_dimensions = surface.window().inner_size();
-
-                let (new_swapchain, new_images) = match swapchain
-                    .recreate()
-                    .dimensions(new_dimensions.into())
-                    .build()
-                {
-                    Ok(r) => r,
-                    Err(SwapchainCreationError::UnsupportedDimensions) => return,
-                    Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-                };
-                swapchain = new_swapchain;
-                let new_framebuffers = get_framebuffers(&new_images, render_pass.clone());
-
-                if window_resized {
-                    window_resized = false;
-
-                    viewport.dimensions = new_dimensions.into();
-                    command_buffers = get_command_buffers(device.clone(),queue.clone(),&new_framebuffers, renderer.clone());
-                }
+            if window_resized {
+                frame.recreate(window_resized.then(|| surface.window().inner_size()));
             }
         }
         Event::RedrawRequested(..) => {
-            let (image_i, suboptimal, acquire_future) =
-                match swapchain::acquire_next_image(swapchain.clone(), None) {
-                    Ok(r) => r,
-                    Err(AcquireError::OutOfDate) => {
-                        recreate_swapchain = true;
-                        return;
-                    }
-                    Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                };
-            if suboptimal {
-                recreate_swapchain = true;
-            }
-
-            if let Some(image_fence) = &fences[image_i] {
-                image_fence.wait(None).unwrap();
-            }
-            let previous_future = match fences[previous_fence_i].clone() {
-                // Create a NowFuture
-                None => {
-                    let mut now = sync::now(device.clone());
-                    now.cleanup_finished();
-
-                    now.boxed()
-                }
-                // Use the existing FenceSignalFuture
-                Some(fence) => fence.boxed(),
-            };
-
-            let future = previous_future
-                .join(acquire_future)
-                .then_execute(queue.clone(), command_buffers[image_i].clone())
-                .unwrap()
-                .then_swapchain_present(queue.clone(), swapchain.clone(), image_i)
-                .then_signal_fence_and_flush();
-
-            fences[image_i] = match future {
-                Ok(value) => Some(Arc::new(value)),
-                Err(FlushError::OutOfDate) => {
-                    recreate_swapchain = true;
-                    None
-                }
-                Err(e) => {
-                    println!("Failed to flush future: {:?}", e);
-                    None
-                }
-            };
-
-            previous_fence_i = image_i;
+            let cb = renderer.draw([800, 600]);
+            frame.next_frame(queue.clone(), cb);
         }
         _ => (),
     });

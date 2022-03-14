@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer, SecondaryCommandBuffer, SecondaryAutoCommandBuffer},
+    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
     device::Queue,
     pipeline::{
         graphics::{
@@ -10,7 +10,7 @@ use vulkano::{
             vertex_input::BuffersDefinition,
             viewport::{Viewport, ViewportState},
         },
-        GraphicsPipeline, PartialStateMode, Pipeline, StateMode,
+        GraphicsPipeline, PartialStateMode, StateMode,
     },
     render_pass::Subpass,
 };
@@ -83,7 +83,7 @@ impl PointCloudRenderer {
         }
     }
 
-    pub fn draw(&self, viewport_dimensions: [u32; 2]) -> SecondaryAutoCommandBuffer {
+    pub fn draw(&self, viewport_dimensions: [u32; 2]) -> Arc<SecondaryAutoCommandBuffer> {
         // let layout = self.pipeline.layout();
 
         let viewport = Viewport {
@@ -107,6 +107,6 @@ impl PointCloudRenderer {
             .draw(self.vertex_buffer.len() as u32, 1, 0, 0)
             .unwrap();
 
-        builder.build().unwrap()
+        Arc::new(builder.build().unwrap())
     }
 }
