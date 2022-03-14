@@ -83,19 +83,11 @@ impl PointCloudRenderer {
         }
     }
 
-    pub fn draw(&self, viewport_dimensions: [u32; 2]) -> Arc<SecondaryAutoCommandBuffer> {
-        // let layout = self.pipeline.layout();
-
-        let viewport = Viewport {
-            origin: [0.0, 0.0],
-            dimensions: [viewport_dimensions[0] as f32, viewport_dimensions[1] as f32],
-            depth_range: 0.0..1.0,
-        };
-
+    pub fn draw(&self, viewport: Viewport) -> Arc<SecondaryAutoCommandBuffer> {
         let mut builder = AutoCommandBufferBuilder::secondary_graphics(
             self.queue.device().clone(),
             self.queue.family(),
-            CommandBufferUsage::MultipleSubmit,
+            CommandBufferUsage::OneTimeSubmit,
             self.pipeline.subpass().clone(),
         )
         .unwrap();

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use frame::Frame;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
@@ -116,7 +117,7 @@ fn main() {
 
     let renderer = pc_render::PointCloudRenderer::new(queue.clone(), point_cloud_subpass);
 
-    let mut window_resized = false;
+    let mut last_update_inst = Instant::now();
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -126,22 +127,32 @@ fn main() {
             *control_flow = ControlFlow::Exit;
         }
         Event::WindowEvent {
-            event: WindowEvent::Resized(_),
+            event: WindowEvent::Resized(size),
             ..
         } => {
-            window_resized = true;
+            frame.resize(size);
             surface.window().request_redraw();
         }
-        Event::MainEventsCleared => {}
 
         Event::RedrawEventsCleared => {
-            if window_resized {
-                frame.recreate(window_resized.then(|| surface.window().inner_size()));
+            frame.recreate_if_necessary();
+
+            // limit FPS to 60
+            let target_frametime = Duration::from_secs_f64(1.0 / 60.0);
+            let time_since_last_frame = last_update_inst.elapsed();
+            if time_since_last_frame >= target_frametime {
+                surface.window().request_redraw();
+                println!("FPS: {:}", 1. / time_since_last_frame.as_secs_f32());
+                last_update_inst = Instant::now();
+            } else {
+                *control_flow = ControlFlow::WaitUntil(
+                    Instant::now() + target_frametime - time_since_last_frame,
+                );
             }
         }
         Event::RedrawRequested(..) => {
-            let cb = renderer.draw([800, 600]);
-            frame.next_frame(queue.clone(), cb);
+            let cb = renderer.draw(frame.viewport().clone());
+            frame.render(queue.clone(), cb);
         }
         _ => (),
     });

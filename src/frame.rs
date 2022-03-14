@@ -58,8 +58,17 @@ impl Frame {
         }
     }
 
-    pub fn recreate(&mut self, new_size: Option<PhysicalSize<u32>>) {
-        let size = new_size.unwrap_or(self.surface.window().inner_size().into());
+    pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
+        self.viewport.dimensions = new_size.into();
+        self.recreate_swapchain = true;
+    }
+
+    pub fn viewport(&self) -> &Viewport {
+        &self.viewport
+    }
+
+    pub fn recreate_if_necessary(&mut self) {
+        let size = self.surface.window().inner_size();
         let (new_swapchain, new_images) =
             match self.swapchain.recreate().dimensions(size.into()).build() {
                 Ok(r) => r,
@@ -68,13 +77,9 @@ impl Frame {
             };
         self.swapchain = new_swapchain;
         self.buffers = get_framebuffers(&new_images, self.render_pass.clone());
-
-        if new_size.is_some() {
-            self.viewport.dimensions = size.into();
-        }
     }
 
-    pub fn next_frame(&mut self, queue: Arc<Queue>, cb: Arc<SecondaryAutoCommandBuffer>) {
+    pub fn render(&mut self, queue: Arc<Queue>, cb: Arc<SecondaryAutoCommandBuffer>) {
         let device = self.swapchain.device();
         let (image_i, suboptimal, acquire_future) =
             match swapchain::acquire_next_image(self.swapchain.clone(), None) {
