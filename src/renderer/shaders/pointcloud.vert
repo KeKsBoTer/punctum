@@ -2,6 +2,13 @@
 
 layout(location = 0) in vec3 position;
 
+layout(set = 0, binding = 0) uniform UniformData {
+    mat4 world;
+    mat4 view;
+    mat4 proj;
+} uniforms;
+
+
 out gl_PerVertex
 {
 	vec4 gl_Position;
@@ -9,6 +16,7 @@ out gl_PerVertex
 };
 
 void main() {
-    gl_Position = vec4(position.xy, 0.0, 1.0);
+    mat4 worldview = uniforms.view * uniforms.world;
+    gl_Position = uniforms.proj * worldview * vec4(position, 1.0);
     gl_PointSize = 20.0;
 }

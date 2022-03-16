@@ -5,7 +5,7 @@ use vulkano::{
         AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
-    image::{view::ImageView, ImageUsage, SwapchainImage},
+    image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
     pipeline::graphics::viewport::Viewport,
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
     swapchain::{
@@ -110,7 +110,7 @@ impl Frame {
             .begin_render_pass(
                 fb.clone(),
                 SubpassContents::SecondaryCommandBuffers,
-                vec![[0.0, 0.0, 1.0, 1.0].into()],
+                vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()],
             )
             .unwrap();
 
@@ -147,10 +147,19 @@ fn get_framebuffers(
         .iter()
         .map(|image| {
             let view = ImageView::new_default(image.clone()).unwrap();
+            let depth_buffer = ImageView::new_default(
+                AttachmentImage::transient(
+                    render_pass.device().clone(),
+                    image.dimensions().width_height(),
+                    vulkano::format::Format::D16_UNORM,
+                )
+                .unwrap(),
+            )
+            .unwrap();
             Framebuffer::new(
                 render_pass.clone(),
                 FramebufferCreateInfo {
-                    attachments: vec![view],
+                    attachments: vec![view, depth_buffer.clone()],
                     ..Default::default()
                 },
             )

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use renderer::SceneRenderer;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
@@ -60,11 +59,17 @@ fn get_render_pass(
                 store: Store,
                 format: swapchain_format,
                 samples: 1,
+            },
+            depth: {
+                load: Clear,
+                store: DontCare,
+                format: vulkano::format::Format::D16_UNORM,
+                samples: 1,
             }
         },
         pass: {
             color: [color],
-            depth_stencil: {}
+            depth_stencil: {depth}
         }
     )
     .unwrap()
@@ -126,7 +131,7 @@ fn main() {
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let renderer = SceneRenderer::new(device.clone(), scene_subpass);
+    let mut renderer = renderer::PointCloudRenderer::new(device.clone(), scene_subpass);
 
     let pc = PointCloud::new(device.clone());
     let scene = Scene::new(pc);

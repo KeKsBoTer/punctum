@@ -20,4 +20,8 @@ impl Scene {
     pub fn point_cloud(&self) -> &PointCloud {
         &self.pc
     }
+
+    pub fn camera(&self) -> &Camera {
+        &self.camera
+    }
 }
