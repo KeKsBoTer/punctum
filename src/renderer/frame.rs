@@ -30,7 +30,6 @@ impl Frame {
         surface: Arc<Surface<Window>>,
         device: Arc<Device>,
         physical_device: PhysicalDevice,
-        queue: Arc<Queue>,
         render_pass: Arc<RenderPass>,
         swapchain_format: vulkano::format::Format,
         pass: Arc<RenderPass>,
@@ -39,7 +38,6 @@ impl Frame {
             surface.clone(),
             device.clone(),
             physical_device,
-            queue.clone(),
             swapchain_format,
         );
 
@@ -72,7 +70,7 @@ impl Frame {
         let size = self.surface.window().inner_size();
         // TODO change swapchain size
         let (new_swapchain, new_images) = match self.swapchain.recreate(SwapchainCreateInfo {
-            image_extent: self.surface.window().inner_size().into(),
+            image_extent: size.into(),
             ..self.swapchain.create_info()
         }) {
             Ok(r) => r,
@@ -165,17 +163,10 @@ fn create_swapchain(
     surface: Arc<Surface<Window>>,
     device: Arc<Device>,
     physical_device: PhysicalDevice,
-    queue: Arc<Queue>,
     format: vulkano::format::Format,
 ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
     let surface_capabilities = physical_device
         .surface_capabilities(&surface, Default::default())
-        .unwrap();
-    let dimensions: [u32; 2] = surface.window().inner_size().into();
-    let composite_alpha = surface_capabilities
-        .supported_composite_alpha
-        .iter()
-        .next()
         .unwrap();
 
     Swapchain::new(

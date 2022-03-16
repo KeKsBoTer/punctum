@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use frame::Frame;
+use renderer::SceneRenderer;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
@@ -15,9 +15,13 @@ use winit::window::{Window, WindowBuilder};
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::ControlFlow;
 
+use pointcloud::PointCloud;
+use scene::Scene;
+
 mod camera;
-mod frame;
-mod pc_render;
+mod pointcloud;
+mod renderer;
+mod scene;
 mod vertex;
 
 fn select_physical_device<'a>(
@@ -111,19 +115,21 @@ fn main() {
 
     let render_pass = get_render_pass(device.clone(), swapchain_format);
 
-    let mut frame = Frame::new(
+    let mut frame = renderer::Frame::new(
         surface.clone(),
         device.clone(),
         physical_device.clone(),
-        queue.clone(),
         render_pass.clone(),
         swapchain_format,
         render_pass.clone(),
     );
 
-    let point_cloud_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
+    let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let renderer = pc_render::PointCloudRenderer::new(queue.clone(), point_cloud_subpass);
+    let renderer = SceneRenderer::new(device.clone(), scene_subpass);
+
+    let pc = PointCloud::new(device.clone());
+    let scene = Scene::new(pc);
 
     let mut last_update_inst = Instant::now();
 
@@ -159,8 +165,7 @@ fn main() {
             }
         }
         Event::RedrawRequested(..) => {
-            let cb = renderer.draw(frame.viewport().clone());
-            frame.render(queue.clone(), cb);
+            renderer.render_to_frame(queue.clone(), &scene, &mut frame);
         }
         _ => (),
     });

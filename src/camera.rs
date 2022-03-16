@@ -12,17 +12,12 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new<V: Into<Point3<f32>>, Y: Into<Rad<f32>>, P: Into<Rad<f32>>, R: Into<Rad<f32>>>(
-        position: V,
-        yaw: Y,
-        pitch: P,
-        roll: R,
-    ) -> Self {
+    pub fn new(position: Point3<f32>) -> Self {
         Self {
             position: position.into(),
-            yaw: yaw.into(),
-            pitch: pitch.into(),
-            roll: roll.into(),
+            yaw: Rad::zero(),
+            pitch: Rad::zero(),
+            roll: Rad::zero(),
         }
     }
 

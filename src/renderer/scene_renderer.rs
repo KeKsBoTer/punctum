@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use std::{borrow::BorrowMut, sync::Arc};
 
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
+    buffer::TypedBufferAccess,
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
-    device::Queue,
+    device::{Device, Queue},
     pipeline::{
         graphics::{
             input_assembly::{InputAssemblyState, PrimitiveTopology},
@@ -15,55 +15,35 @@ use vulkano::{
     render_pass::Subpass,
 };
 
-use crate::vertex::{self, Vertex};
+use crate::{pointcloud::PointCloud, scene::Scene, vertex::Vertex};
+
+use super::Frame;
 
 mod vs {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "src/vert.glsl"
+        path: "src/renderer/shaders/pointcloud.vert"
     }
 }
 
 mod fs {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "src/frag.glsl"
+        path: "src/renderer/shaders/pointcloud.frag"
     }
 }
 
 pub struct PointCloudRenderer {
-    queue: Arc<Queue>,
     pipeline: Arc<GraphicsPipeline>,
-    vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
 }
 
 impl PointCloudRenderer {
-    pub fn new(queue: Arc<Queue>, subpass: Subpass) -> Self {
-        let vertex1 = vertex::Vertex {
-            position: [-0.5, -0.5, 1.],
-        };
-        let vertex2 = vertex::Vertex {
-            position: [0.0, 0.5, 1.],
-        };
-        let vertex3 = vertex::Vertex {
-            position: [0.5, -0.25, 1.],
-        };
-
-        let device = queue.device();
-
-        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            device.clone(),
-            BufferUsage::vertex_buffer(),
-            false,
-            vec![vertex1, vertex2, vertex3].into_iter(),
-        )
-        .unwrap();
-
+    pub fn new(device: Arc<Device>, subpass: Subpass) -> Self {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
         let pipeline = GraphicsPipeline::start()
-            .vertex_input_state(BuffersDefinition::new().vertex::<vertex::Vertex>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState::new())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
@@ -76,17 +56,18 @@ impl PointCloudRenderer {
             .build(device.clone())
             .unwrap();
 
-        PointCloudRenderer {
-            queue: queue.clone(),
-            pipeline: pipeline,
-            vertex_buffer: vertex_buffer,
-        }
+        PointCloudRenderer { pipeline: pipeline }
     }
 
-    pub fn draw(&self, viewport: Viewport) -> Arc<SecondaryAutoCommandBuffer> {
+    pub fn draw(
+        &self,
+        queue: Arc<Queue>,
+        point_cloud: &PointCloud,
+        viewport: Viewport,
+    ) -> Arc<SecondaryAutoCommandBuffer> {
         let mut builder = AutoCommandBufferBuilder::secondary_graphics(
-            self.queue.device().clone(),
-            self.queue.family(),
+            queue.device().clone(),
+            queue.family(),
             CommandBufferUsage::OneTimeSubmit,
             self.pipeline.subpass().clone(),
         )
@@ -95,10 +76,29 @@ impl PointCloudRenderer {
         builder
             .set_viewport(0, [viewport.clone()])
             .bind_pipeline_graphics(self.pipeline.clone())
-            .bind_vertex_buffers(0, self.vertex_buffer.clone())
-            .draw(self.vertex_buffer.len() as u32, 1, 0, 0)
+            .bind_vertex_buffers(0, point_cloud.buffer.clone())
+            .draw(point_cloud.buffer.len() as u32, 1, 0, 0)
             .unwrap();
 
         Arc::new(builder.build().unwrap())
+    }
+}
+
+pub struct SceneRenderer {
+    pc_renderer: PointCloudRenderer,
+}
+
+impl SceneRenderer {
+    pub fn new(device: Arc<Device>, subpass: Subpass) -> Self {
+        SceneRenderer {
+            pc_renderer: PointCloudRenderer::new(device, subpass),
+        }
+    }
+
+    pub fn render_to_frame(&self, queue: Arc<Queue>, scene: &Scene, frame: &mut Frame) {
+        let cb =
+            self.pc_renderer
+                .draw(queue.clone(), scene.point_cloud(), frame.viewport().clone());
+        frame.render(queue, cb);
     }
 }
