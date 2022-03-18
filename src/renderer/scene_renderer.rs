@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::DerefMut, sync::Arc};
 
 use bytemuck::Zeroable;
 use vulkano::{
@@ -126,7 +126,7 @@ impl PointCloudRenderer {
     }
 
     pub fn render_to_frame(&mut self, queue: Arc<Queue>, scene: &Scene, frame: &mut Frame) {
-        self.set_camera(scene.camera());
+        self.set_camera(&scene.camera);
         let cb =
             self.render_point_cloud(queue.clone(), scene.point_cloud(), frame.viewport().clone());
         frame.render(queue, cb);

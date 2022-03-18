@@ -15,3 +15,4 @@ winit = "0.26"
 cgmath="0.18.0"
 
 bytemuck = { version = "1.5.1", features = [ "derive" ] }
+ply-rs = "0.1.3"

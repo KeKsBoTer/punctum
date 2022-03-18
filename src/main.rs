@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use camera::CameraController;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
@@ -11,7 +12,7 @@ use vulkano_win::VkSurfaceBuild;
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
-use winit::event::{Event, WindowEvent};
+use winit::event::{DeviceEvent, Event, KeyboardInput, WindowEvent};
 use winit::event_loop::ControlFlow;
 
 use pointcloud::PointCloud;
@@ -85,6 +86,7 @@ fn main() {
 
     let event_loop = EventLoop::new(); // ignore this for now
     let surface = WindowBuilder::new()
+        .with_title("puncTUM")
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 
@@ -133,8 +135,10 @@ fn main() {
 
     let mut renderer = renderer::PointCloudRenderer::new(device.clone(), scene_subpass);
 
-    let pc = PointCloud::new(device.clone());
-    let scene = Scene::new(pc);
+    let pc = PointCloud::from_ply_file(device.clone(), "bunny.ply");
+    let mut scene = Scene::new(pc);
+
+    let mut camera_controller = CameraController::new(0.1, 1.);
 
     let mut last_update_inst = Instant::now();
 
@@ -152,6 +156,24 @@ fn main() {
             frame.resize(size);
             surface.window().request_redraw();
         }
+        Event::DeviceEvent { event, .. } => match event {
+            DeviceEvent::Key(KeyboardInput {
+                virtual_keycode: Some(key),
+                state,
+                ..
+            }) => {
+                camera_controller.process_keyboard(key, state);
+            }
+            DeviceEvent::MouseWheel { delta, .. } => {
+                // camera_controller.process_scroll(&delta);
+            }
+            DeviceEvent::MouseMotion { delta } => {
+                // if mouse_pressed {
+                // camera_controller.process_mouse(delta.0, delta.1);
+                // }
+            }
+            _ => {}
+        },
 
         Event::RedrawEventsCleared => {
             frame.recreate_if_necessary();
@@ -162,6 +184,9 @@ fn main() {
             if time_since_last_frame >= target_frametime {
                 surface.window().request_redraw();
                 println!("FPS: {:}", 1. / time_since_last_frame.as_secs_f32());
+
+                camera_controller.update_camera(&mut scene.camera, time_since_last_frame);
+
                 last_update_inst = Instant::now();
             } else {
                 *control_flow = ControlFlow::WaitUntil(

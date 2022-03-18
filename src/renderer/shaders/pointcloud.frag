@@ -1,5 +1,6 @@
 #version 450
 
+layout(location = 0) in vec3 vertex_color;
 layout(location = 0) out vec4 f_color;
 
 void main() {
@@ -8,5 +9,9 @@ void main() {
     if(d>0.5){
         discard;
     }
-    f_color = vec4(gl_PointCoord, 0.0, 1.0);
+    if(d > 0.4){
+        f_color = vec4(mix(vertex_color,vec3(0.),0.8),1.0);
+    }else{
+        f_color = vec4(vertex_color,1.0);
+    }
 }

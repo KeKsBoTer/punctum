@@ -4,6 +4,8 @@ use bytemuck::{Pod, Zeroable};
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct Vertex {
     pub(crate) position: [f32; 3],
+    pub(crate) normal: [f32; 3],
+    pub(crate) color: [f32; 3],
 }
 
-vulkano::impl_vertex!(Vertex, position);
+vulkano::impl_vertex!(Vertex, position, normal, color);
