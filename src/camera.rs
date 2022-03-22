@@ -1,40 +1,72 @@
-use cgmath::*;
+use cgmath::{vec3, Angle, Deg, InnerSpace, Matrix4, Point3, Rad, SquareMatrix, Vector3, Zero};
 use std::time::Duration;
 use winit::{dpi::PhysicalPosition, event::*};
 
-#[derive(Debug)]
+use crate::pointcloud::BoundingBox;
+
+#[derive(Debug, Clone, Copy)]
+enum Projection {
+    Perspective { fovy: Rad<f32>, aspect_ratio: f32 },
+    Orthographic { width: f32, height: f32 },
+}
+
+impl Projection {
+    fn projection_matrix(&self, camera: &Camera) -> Matrix4<f32> {
+        match self {
+            Projection::Perspective { fovy, aspect_ratio } => {
+                cgmath::perspective(*fovy, *aspect_ratio, camera.znear, camera.zfar)
+            }
+            Projection::Orthographic { width, height } => {
+                let mut proj = cgmath::ortho(
+                    -width / 2.,
+                    width / 2.,
+                    -height / 2.,
+                    height / 2.,
+                    camera.znear,
+                    camera.zfar,
+                );
+                // Opengl y u do this to me?
+                // correct OpenGls f**** up coord system
+                proj.z.z *= -1.0;
+                proj.w.z *= -1.0;
+                return proj;
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Camera {
     pos: Point3<f32>,
     rot: Vector3<Rad<f32>>,
 
-    fovy: Rad<f32>,
     znear: f32,
     zfar: f32,
-    aspect_ratio: f32,
 
     view: Matrix4<f32>,
     proj: Matrix4<f32>,
-    world: Matrix4<f32>,
+
+    projection: Projection,
 }
 
 impl Camera {
-    pub fn new(position: Point3<f32>) -> Self {
-        let mut c = Camera {
-            pos: position,
-            rot: vec3(Rad::zero(), Rad::zero(), Rad::zero()),
+    fn update_view_matrix(&mut self) {
+        let rot = self.rot_mat();
+        let trans = Matrix4::from_translation(vec3(-self.pos.x, -self.pos.y, self.pos.z));
 
-            fovy: Rad(std::f32::consts::FRAC_PI_2),
-            znear: 0.01,
-            zfar: 100.0,
-            aspect_ratio: 1.0,
+        self.view = rot * trans;
+    }
 
-            view: Matrix4::identity(),
-            proj: Matrix4::identity(),
-            world: Matrix4::identity(),
-        };
-        c.update_view_matrix();
-        c.update_proj_matrix();
-        return c;
+    fn update_proj_matrix(&mut self) {
+        self.proj = self.projection.projection_matrix(&self);
+        println!("proj: {:?}", self.proj);
+    }
+
+    pub fn view(&self) -> &Matrix4<f32> {
+        &self.view
+    }
+    pub fn projection(&self) -> &Matrix4<f32> {
+        &self.proj
     }
 
     fn rot_mat(&self) -> Matrix4<f32> {
@@ -43,35 +75,54 @@ impl Camera {
             * Matrix4::from_angle_x(self.rot.x)
     }
 
-    pub fn set_position(&mut self, pos: Point3<f32>) {
-        self.pos = pos;
-        self.update_view_matrix();
-    }
+    // creates a camera that looks at the bounding box (move in z)
+    // ensures that the y of the bounding box fits to screen
+    pub fn look_at_perspective(bbox: BoundingBox) -> Self {
+        let center = bbox.center();
+        let size = bbox.size();
 
-    pub fn position(&self) -> &Point3<f32> {
-        &self.pos
-    }
+        let fovy: Rad<f32> = Deg(90.0).into();
 
-    fn update_view_matrix(&mut self) {
-        let rot = self.rot_mat();
-        let trans = Matrix4::from_translation(vec3(self.pos.x, -self.pos.y, self.pos.z));
+        let distance = 0.5 * size.y / (fovy / 2.0).tan();
+        let pos = center - vec3(0., 0., 0.5 * size.z + distance);
 
-        self.view = rot * trans;
-    }
-    fn update_proj_matrix(&mut self) {
-        self.proj = perspective(self.fovy, self.aspect_ratio, self.znear, self.zfar);
-    }
+        let mut c = Camera {
+            pos: pos,
+            rot: vec3(Rad::zero(), Rad::zero(), Rad::zero()),
 
-    pub fn view(&self) -> &Matrix4<f32> {
-        &self.view
+            view: Matrix4::identity(),
+            proj: Matrix4::identity(),
+            znear: 0.001,
+            zfar: 100.0,
+            projection: Projection::Perspective {
+                fovy: fovy,
+                aspect_ratio: 1.0,
+            },
+        };
+        c.update_view_matrix();
+        c.update_proj_matrix();
+        return c;
     }
+    pub fn look_at_ortho(bbox: BoundingBox) -> Self {
+        let size = bbox.size();
+        let center = bbox.center();
+        println!("center: {:?}", bbox.center());
+        let mut c = Camera {
+            pos: Point3::new(center.x, center.y, center.z - size.z),
+            rot: vec3(Rad::zero(), Rad::zero(), Rad::zero()),
 
-    pub fn projection(&self) -> &Matrix4<f32> {
-        &self.proj
-    }
-
-    pub fn world(&self) -> &Matrix4<f32> {
-        &self.world
+            view: Matrix4::identity(),
+            proj: Matrix4::identity(),
+            znear: 0.01,
+            zfar: 100.0,
+            projection: Projection::Orthographic {
+                width: size.x,
+                height: size.y,
+            },
+        };
+        c.update_view_matrix();
+        c.update_proj_matrix();
+        return c;
     }
 }
 
@@ -167,12 +218,12 @@ impl CameraController {
 
         let move_speed = dt * self.speed;
 
-        let cam_right = cam_front.cross(vec3(0., 1., 0.)).normalize();
+        let cam_left = cam_front.cross(vec3(0., 1., 0.)).normalize();
 
         camera.pos += cam_front * self.amount_forward * move_speed;
         camera.pos -= cam_front * self.amount_backward * move_speed;
-        camera.pos += cam_right * self.amount_right * move_speed;
-        camera.pos -= cam_right * self.amount_left * move_speed;
+        camera.pos -= cam_left * self.amount_right * move_speed;
+        camera.pos += cam_left * self.amount_left * move_speed;
 
         camera.pos.y += self.amount_up * move_speed;
         camera.pos.y -= self.amount_down * move_speed;

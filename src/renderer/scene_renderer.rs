@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytemuck::Zeroable;
+use cgmath::{Matrix4, SquareMatrix};
 use vulkano::{
     buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool, TypedBufferAccess},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
@@ -116,9 +117,9 @@ impl PointCloudRenderer {
         Arc::new(builder.build().unwrap())
     }
 
-    fn set_camera(&mut self, camera: &Camera) {
+    fn set_camera(&mut self, camera: Camera) {
         let uniform_data = vs::ty::UniformData {
-            world: camera.world().clone().into(),
+            world: Matrix4::identity().into(),
             view: camera.view().clone().into(),
             proj: camera.projection().clone().into(),
         };
@@ -126,7 +127,7 @@ impl PointCloudRenderer {
     }
 
     pub fn render_to_frame(&mut self, queue: Arc<Queue>, scene: &Scene, frame: &mut Frame) {
-        self.set_camera(&scene.camera);
+        self.set_camera(scene.camera);
         let cb =
             self.render_point_cloud(queue.clone(), scene.point_cloud(), frame.viewport().clone());
         frame.render(queue, cb);

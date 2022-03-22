@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytemuck::Zeroable;
+use cgmath::{Bounded, EuclideanSpace, Point3, Vector3};
 use ply_rs::ply;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
@@ -11,6 +12,7 @@ use crate::vertex::Vertex;
 
 pub struct PointCloud {
     pub buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
+    bbox: BoundingBox,
 }
 
 impl ply::PropertyAccess for Vertex {
@@ -50,6 +52,7 @@ impl PointCloud {
         let ply = ply.unwrap();
 
         let points = ply.payload.get("vertex").unwrap().clone();
+        let bbox = PointCloud::calc_bbox(&points);
 
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
             device,
@@ -61,6 +64,46 @@ impl PointCloud {
 
         PointCloud {
             buffer: vertex_buffer,
+            bbox: bbox,
         }
+    }
+
+    fn calc_bbox(points: &Vec<Vertex>) -> BoundingBox {
+        let mut min_corner = Point3::max_value();
+        let mut max_corner = Point3::min_value();
+        for v in points.iter() {
+            min_corner = min_corner.zip(v.position.into(), |x: f32, y| x.min(y));
+            max_corner = max_corner.zip(v.position.into(), |x: f32, y| x.max(y));
+        }
+        BoundingBox {
+            min: min_corner,
+            max: max_corner,
+        }
+    }
+
+    pub fn bounding_box(&self) -> &BoundingBox {
+        &self.bbox
+    }
+}
+#[derive(Debug, Clone, Copy)]
+pub struct BoundingBox {
+    min: Point3<f32>,
+    max: Point3<f32>,
+}
+
+impl BoundingBox {
+    pub fn new(p1: Point3<f32>, p2: Point3<f32>) -> Self {
+        BoundingBox {
+            min: p1.zip(p2, |x, y| x.min(y)),
+            max: p1.zip(p2, |x, y| x.max(y)),
+        }
+    }
+
+    pub fn center(&self) -> Point3<f32> {
+        self.min.midpoint(self.max)
+    }
+
+    pub fn size(&self) -> Vector3<f32> {
+        self.max.to_vec() - self.min.to_vec()
     }
 }

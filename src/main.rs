@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use camera::CameraController;
+use camera::{Camera, CameraController};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
@@ -137,9 +137,11 @@ fn main() {
     let mut renderer = renderer::PointCloudRenderer::new(device.clone(), scene_subpass);
 
     let pc = PointCloud::from_ply_file(device.clone(), "bunny.ply");
-    let mut scene = Scene::new(pc);
 
+    let mut camera = Camera::look_at_ortho(*pc.bounding_box());
     let mut camera_controller = CameraController::new(0.1, 0.1);
+
+    let mut scene = Scene::new(pc, camera.into());
 
     let mut last_update_inst = Instant::now();
 
@@ -214,7 +216,8 @@ fn main() {
                 surface.window().request_redraw();
                 println!("FPS: {:}", 1. / time_since_last_frame.as_secs_f32());
 
-                camera_controller.update_camera(&mut scene.camera, time_since_last_frame);
+                camera_controller.update_camera(&mut camera, time_since_last_frame);
+                scene.camera = camera.into();
 
                 last_update_inst = Instant::now();
             } else {
