@@ -8,14 +8,13 @@ edition = "2021"
 [dependencies]
 vulkano = "0.29.0"
 vulkano-shaders = "0.29.0"
-
 vulkano-win = "0.29.0"
 winit = "0.26"
 
 cgmath="0.18.0"
-
 bytemuck = { version = "1.5.1", features = [ "derive" ] }
 ply-rs = "0.1.3"
+image = "0.24"
 
 [lib]
 name = "punctum"

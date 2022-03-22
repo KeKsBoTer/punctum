@@ -22,7 +22,7 @@ use vulkano::{
 
 use crate::{camera::Camera, pointcloud::PointCloud, scene::Scene, vertex::Vertex};
 
-use super::Frame;
+use super::SurfaceFrame;
 
 mod vs {
     vulkano_shaders::shader! {
@@ -117,7 +117,7 @@ impl PointCloudRenderer {
         Arc::new(builder.build().unwrap())
     }
 
-    fn set_camera(&mut self, camera: Camera) {
+    pub fn set_camera(&mut self, camera: &Camera) {
         let uniform_data = vs::ty::UniformData {
             world: Matrix4::identity().into(),
             view: camera.view().clone().into(),
@@ -126,8 +126,8 @@ impl PointCloudRenderer {
         self.uniform_buffer = self.uniform_buffer_pool.next(uniform_data).unwrap();
     }
 
-    pub fn render_to_frame(&mut self, queue: Arc<Queue>, scene: &Scene, frame: &mut Frame) {
-        self.set_camera(scene.camera);
+    pub fn render_to_frame(&mut self, queue: Arc<Queue>, scene: &Scene, frame: &mut SurfaceFrame) {
+        self.set_camera(&scene.camera);
         let cb =
             self.render_point_cloud(queue.clone(), scene.point_cloud(), frame.viewport().clone());
         frame.render(queue, cb);

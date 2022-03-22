@@ -1,73 +1,21 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
 use vulkano::instance::{Instance, InstanceCreateInfo};
-use vulkano::render_pass::{RenderPass, Subpass};
-use vulkano::swapchain::Surface;
+use vulkano::render_pass::Subpass;
 use vulkano_win::VkSurfaceBuild;
 use winit::dpi::PhysicalPosition;
 use winit::event_loop::EventLoop;
-use winit::window::{Window, WindowBuilder};
+use winit::window::WindowBuilder;
 
 use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, WindowEvent};
 use winit::event_loop::ControlFlow;
 
-use punctum::{Camera, CameraController, Frame, PointCloud, PointCloudRenderer, Scene};
-
-fn select_physical_device<'a>(
-    instance: &'a Arc<Instance>,
-    surface: Arc<Surface<Window>>,
-    device_extensions: &DeviceExtensions,
-) -> (PhysicalDevice<'a>, QueueFamily<'a>) {
-    let (physical_device, queue_family) = PhysicalDevice::enumerate(&instance)
-        .filter(|&p| p.supported_extensions().is_superset_of(&device_extensions))
-        .filter_map(|p| {
-            p.queue_families()
-                .find(|&q| q.supports_graphics() && q.supports_surface(&surface).unwrap_or(false))
-                .map(|q| (p, q))
-        })
-        .min_by_key(|(p, _)| match p.properties().device_type {
-            PhysicalDeviceType::DiscreteGpu => 0,
-            PhysicalDeviceType::IntegratedGpu => 1,
-            PhysicalDeviceType::VirtualGpu => 2,
-            PhysicalDeviceType::Cpu => 3,
-            PhysicalDeviceType::Other => 4,
-        })
-        .expect("no device available");
-
-    (physical_device, queue_family)
-}
-
-fn get_render_pass(
-    device: Arc<Device>,
-    swapchain_format: vulkano::format::Format,
-) -> Arc<RenderPass> {
-    vulkano::single_pass_renderpass!(
-        device.clone(),
-        attachments: {
-            color: {
-                load: Clear,
-                store: Store,
-                format: swapchain_format,
-                samples: 1,
-            },
-            depth: {
-                load: Clear,
-                store: DontCare,
-                format: vulkano::format::Format::D16_UNORM,
-                samples: 1,
-            }
-        },
-        pass: {
-            color: [color],
-            depth_stencil: {depth}
-        }
-    )
-    .unwrap()
-}
+use punctum::{
+    get_render_pass, select_physical_device, Camera, CameraController, PointCloud,
+    PointCloudRenderer, Scene, SurfaceFrame,
+};
 
 fn main() {
     let required_extensions = vulkano_win::required_extensions();
@@ -89,7 +37,7 @@ fn main() {
     };
 
     let (physical_device, queue_family) =
-        select_physical_device(&instance, surface.clone(), &device_extensions);
+        select_physical_device(&instance, &device_extensions, Some(surface.clone()));
 
     let (device, mut queues) = Device::new(
         // Which physical device to connect to.
@@ -115,13 +63,12 @@ fn main() {
 
     let render_pass = get_render_pass(device.clone(), swapchain_format);
 
-    let mut frame = Frame::new(
+    let mut frame = SurfaceFrame::new(
         surface.clone(),
         device.clone(),
         physical_device.clone(),
         render_pass.clone(),
         swapchain_format,
-        render_pass.clone(),
     );
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();

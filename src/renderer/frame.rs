@@ -7,48 +7,44 @@ use vulkano::{
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
     image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
     pipeline::graphics::viewport::Viewport,
-    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
-    swapchain::{
-        self, AcquireError, Surface, Swapchain, SwapchainCreateInfo, SwapchainCreationError,
-    },
+    render_pass::{FramebufferCreateInfo, RenderPass},
+    swapchain::{self, AcquireError, Surface, SwapchainAcquireFuture, SwapchainCreateInfo},
     sync::{self, FlushError, GpuFuture},
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
-pub struct Frame {
-    swapchain: Arc<Swapchain<Window>>,
+use vulkano::render_pass::Framebuffer as VulkanFramebuffer;
+use vulkano::swapchain::Swapchain as VulkanSwapchain;
+
+pub struct SurfaceFrame {
+    swapchain: Swapchain,
     surface: Arc<Surface<Window>>,
     viewport: Viewport,
     render_pass: Arc<RenderPass>,
-    buffers: Vec<Arc<Framebuffer>>,
+    buffers: Vec<Framebuffer<SwapchainImage<Window>>>,
 
     recreate_swapchain: bool,
 }
 
-impl Frame {
+impl SurfaceFrame {
     pub fn new(
         surface: Arc<Surface<Window>>,
         device: Arc<Device>,
         physical_device: PhysicalDevice,
         render_pass: Arc<RenderPass>,
         swapchain_format: vulkano::format::Format,
-        pass: Arc<RenderPass>,
     ) -> Self {
-        let (swapchain, images) = create_swapchain(
-            surface.clone(),
-            device.clone(),
-            physical_device,
-            swapchain_format,
-        );
-
         let win_size = surface.window().inner_size();
 
-        Frame {
-            swapchain: swapchain,
+        let sc = Swapchain::new(surface.clone(), device, physical_device, swapchain_format);
+        let fbs = sc.create_framebuffers(&render_pass);
+
+        SurfaceFrame {
+            swapchain: sc,
             surface: surface,
-            viewport: Frame::get_viewport(win_size),
+            viewport: SurfaceFrame::get_viewport(win_size),
             render_pass: render_pass,
-            buffers: get_framebuffers(&images, pass),
+            buffers: fbs,
 
             recreate_swapchain: false,
         }
@@ -66,7 +62,7 @@ impl Frame {
     }
 
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
-        self.viewport = Frame::get_viewport(new_size);
+        self.viewport = SurfaceFrame::get_viewport(new_size);
         self.recreate_swapchain = true;
     }
 
@@ -75,33 +71,24 @@ impl Frame {
     }
 
     pub fn recreate_if_necessary(&mut self) {
-        let size = self.surface.window().inner_size();
-        // TODO change swapchain size
-        let (new_swapchain, new_images) = match self.swapchain.recreate(SwapchainCreateInfo {
-            image_extent: size.into(),
-            ..self.swapchain.create_info()
-        }) {
-            Ok(r) => r,
-            // This error tends to happen when the user is manually resizing the window.
-            // Simply restarting the loop is the easiest way to fix this issue.
-            Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
-            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-        };
-        self.swapchain = new_swapchain;
-        self.buffers = get_framebuffers(&new_images, self.render_pass.clone());
+        if self.recreate_swapchain {
+            let size = self.surface.window().inner_size();
+            self.swapchain.resize(size.into());
+            self.buffers = self.swapchain.create_framebuffers(&self.render_pass);
+            self.recreate_swapchain = false;
+        }
     }
 
     pub fn render(&mut self, queue: Arc<Queue>, cb: Arc<SecondaryAutoCommandBuffer>) {
         let device = self.swapchain.device();
-        let (image_i, suboptimal, acquire_future) =
-            match swapchain::acquire_next_image(self.swapchain.clone(), None) {
-                Ok(r) => r,
-                Err(AcquireError::OutOfDate) => {
-                    self.recreate_swapchain = true;
-                    return;
-                }
-                Err(e) => panic!("Failed to acquire next image: {:?}", e),
-            };
+        let (image_i, suboptimal, acquire_future) = match self.swapchain.acquire_next_image() {
+            Ok(r) => r,
+            Err(AcquireError::OutOfDate) => {
+                self.recreate_swapchain = true;
+                return;
+            }
+            Err(e) => panic!("Failed to acquire next image: {:?}", e),
+        };
         if suboptimal {
             self.recreate_swapchain = true;
         }
@@ -116,7 +103,7 @@ impl Frame {
 
         builder
             .begin_render_pass(
-                fb.clone(),
+                fb.buffer.clone(),
                 SubpassContents::SecondaryCommandBuffers,
                 vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()],
             )
@@ -130,7 +117,7 @@ impl Frame {
             .join(acquire_future)
             .then_execute(queue.clone(), command_buffer)
             .unwrap()
-            .then_swapchain_present(queue.clone(), self.swapchain.clone(), image_i)
+            .then_swapchain_present(queue.clone(), self.swapchain.sc.clone(), image_i)
             .then_signal_fence_and_flush();
 
         match execution {
@@ -147,66 +134,111 @@ impl Frame {
     }
 }
 
-fn get_framebuffers(
-    images: &[Arc<SwapchainImage<Window>>],
-    render_pass: Arc<RenderPass>,
-) -> Vec<Arc<Framebuffer>> {
-    images
-        .iter()
-        .map(|image| {
-            let view = ImageView::new_default(image.clone()).unwrap();
-            let depth_buffer = ImageView::new_default(
-                AttachmentImage::transient(
-                    render_pass.device().clone(),
-                    image.dimensions().width_height(),
-                    vulkano::format::Format::D16_UNORM,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-            Framebuffer::new(
-                render_pass.clone(),
-                FramebufferCreateInfo {
-                    attachments: vec![view, depth_buffer.clone()],
-                    ..Default::default()
-                },
-            )
-            .unwrap()
-        })
-        .collect::<Vec<_>>()
+struct Framebuffer<I>
+where
+    I: ImageAccess + 'static,
+{
+    buffer: Arc<vulkano::render_pass::Framebuffer>,
+    image: Arc<I>,
 }
 
-fn create_swapchain(
-    surface: Arc<Surface<Window>>,
-    device: Arc<Device>,
-    physical_device: PhysicalDevice,
-    format: vulkano::format::Format,
-) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
-    let surface_capabilities = physical_device
-        .surface_capabilities(&surface, Default::default())
+impl<I> Framebuffer<I>
+where
+    I: ImageAccess + 'static,
+{
+    fn new(image: Arc<I>, render_pass: &Arc<RenderPass>) -> Self {
+        let image_view = ImageView::new_default(image.clone()).unwrap();
+
+        let depth_buffer = ImageView::new_default(
+            AttachmentImage::transient(
+                render_pass.device().clone(),
+                image.dimensions().width_height(),
+                vulkano::format::Format::D16_UNORM,
+            )
+            .unwrap(),
+        )
         .unwrap();
 
-    Swapchain::new(
-        device.clone(),
-        surface.clone(),
-        SwapchainCreateInfo {
-            min_image_count: surface_capabilities.min_image_count,
+        let buffer = VulkanFramebuffer::new(
+            render_pass.clone(),
+            FramebufferCreateInfo {
+                attachments: vec![image_view, depth_buffer.clone()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        Framebuffer { buffer, image }
+    }
+}
 
-            image_format: Some(format),
-            image_extent: surface.window().inner_size().into(),
+struct Swapchain {
+    sc: Arc<VulkanSwapchain<Window>>,
+    images: Vec<Arc<SwapchainImage<Window>>>,
+}
 
-            image_usage: ImageUsage::color_attachment(),
+impl Swapchain {
+    fn new(
+        surface: Arc<Surface<Window>>,
+        device: Arc<Device>,
+        physical_device: PhysicalDevice,
+        format: vulkano::format::Format,
+    ) -> Self {
+        let surface_capabilities = physical_device
+            .surface_capabilities(&surface, Default::default())
+            .unwrap();
+        let (sc, images) = VulkanSwapchain::new(
+            device.clone(),
+            surface.clone(),
+            SwapchainCreateInfo {
+                min_image_count: surface_capabilities.min_image_count,
 
-            // The alpha mode indicates how the alpha value of the final image will behave. For
-            // example, you can choose whether the window will be opaque or transparent.
-            composite_alpha: surface_capabilities
-                .supported_composite_alpha
-                .iter()
-                .next()
-                .unwrap(),
+                image_format: Some(format),
+                image_extent: surface.window().inner_size().into(),
 
-            ..Default::default()
-        },
-    )
-    .unwrap()
+                image_usage: ImageUsage::color_attachment(),
+
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        Swapchain { sc, images }
+    }
+
+    fn recreate(&mut self) {
+        let (new_swapchain, new_images) = self.sc.recreate(self.sc.create_info()).unwrap();
+        self.sc = new_swapchain;
+        self.images = new_images;
+    }
+
+    fn resize(&mut self, size: [u32; 2]) {
+        let (new_swapchain, new_images) = self
+            .sc
+            .recreate(SwapchainCreateInfo {
+                image_extent: size,
+                ..self.sc.create_info()
+            })
+            .unwrap();
+        self.sc = new_swapchain;
+        self.images = new_images;
+    }
+
+    fn create_framebuffers(
+        &self,
+        render_pass: &Arc<RenderPass>,
+    ) -> Vec<Framebuffer<SwapchainImage<Window>>> {
+        self.images
+            .iter()
+            .map(|image| Framebuffer::new(image.clone(), render_pass))
+            .collect::<Vec<_>>()
+    }
+
+    fn acquire_next_image(
+        &self,
+    ) -> Result<(usize, bool, SwapchainAcquireFuture<Window>), AcquireError> {
+        swapchain::acquire_next_image(self.sc.clone(), None)
+    }
+
+    fn device(&self) -> &Arc<Device> {
+        &self.sc.device()
+    }
 }
