@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use camera::{Camera, CameraController};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily};
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
@@ -16,14 +15,7 @@ use winit::window::{Window, WindowBuilder};
 use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, WindowEvent};
 use winit::event_loop::ControlFlow;
 
-use pointcloud::PointCloud;
-use scene::Scene;
-
-mod camera;
-mod pointcloud;
-mod renderer;
-mod scene;
-mod vertex;
+use punctum::{Camera, CameraController, Frame, PointCloud, PointCloudRenderer, Scene};
 
 fn select_physical_device<'a>(
     instance: &'a Arc<Instance>,
@@ -123,7 +115,7 @@ fn main() {
 
     let render_pass = get_render_pass(device.clone(), swapchain_format);
 
-    let mut frame = renderer::Frame::new(
+    let mut frame = Frame::new(
         surface.clone(),
         device.clone(),
         physical_device.clone(),
@@ -134,7 +126,7 @@ fn main() {
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let mut renderer = renderer::PointCloudRenderer::new(device.clone(), scene_subpass);
+    let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass);
 
     let pc = PointCloud::from_ply_file(device.clone(), "bunny.ply");
 
