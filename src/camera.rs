@@ -1,14 +1,15 @@
 use cgmath::*;
-use std::f32::consts::FRAC_PI_2;
 use std::time::Duration;
 use winit::{dpi::PhysicalPosition, event::*};
 
 #[derive(Debug)]
 pub struct Camera {
-    position: Point3<f32>,
-    rotation: Vector3<Rad<f32>>,
+    pos: Point3<f32>,
+    rot: Vector3<Rad<f32>>,
 
     fovy: Rad<f32>,
+    znear: f32,
+    zfar: f32,
     aspect_ratio: f32,
 
     view: Matrix4<f32>,
@@ -18,47 +19,47 @@ pub struct Camera {
 
 impl Camera {
     pub fn new(position: Point3<f32>) -> Self {
-        let view = Matrix4::look_at_rh(
-            position,
-            Point3::new(0.0, 0.0, 0.0),
-            Vector3::new(0.0, -1.0, 0.0),
-        );
+        let mut c = Camera {
+            pos: position,
+            rot: vec3(Rad::zero(), Rad::zero(), Rad::zero()),
 
-        let aspect_ratio = 1.0;
-        let fovy = Rad(std::f32::consts::FRAC_PI_2);
+            fovy: Rad(std::f32::consts::FRAC_PI_2),
+            znear: 0.01,
+            zfar: 100.0,
+            aspect_ratio: 1.0,
 
-        let proj = cgmath::perspective(fovy, aspect_ratio, 0.01, 100.0);
+            view: Matrix4::identity(),
+            proj: Matrix4::identity(),
+            world: Matrix4::identity(),
+        };
+        c.update_view_matrix();
+        c.update_proj_matrix();
+        return c;
+    }
 
-        let world = Matrix4::identity();
-
-        Self {
-            position: position,
-            rotation: vec3(Rad::zero(), Rad::zero(), Rad::zero()),
-
-            fovy: fovy,
-            aspect_ratio: aspect_ratio,
-
-            view: view,
-            proj: proj,
-            world: world,
-        }
+    fn rot_mat(&self) -> Matrix4<f32> {
+        Matrix4::from_angle_z(self.rot.z)
+            * Matrix4::from_angle_y(self.rot.y)
+            * Matrix4::from_angle_x(self.rot.x)
     }
 
     pub fn set_position(&mut self, pos: Point3<f32>) {
-        self.position = pos;
+        self.pos = pos;
         self.update_view_matrix();
     }
 
     pub fn position(&self) -> &Point3<f32> {
-        &self.position
+        &self.pos
     }
 
     fn update_view_matrix(&mut self) {
-        self.view = Matrix4::look_at_rh(
-            self.position,
-            Point3::new(0.0, 0.0, 0.0),
-            Vector3::new(0.0, -1.0, 0.0),
-        );
+        let rot = self.rot_mat();
+        let trans = Matrix4::from_translation(vec3(self.pos.x, -self.pos.y, self.pos.z));
+
+        self.view = rot * trans;
+    }
+    fn update_proj_matrix(&mut self) {
+        self.proj = perspective(self.fovy, self.aspect_ratio, self.znear, self.zfar);
     }
 
     pub fn view(&self) -> &Matrix4<f32> {
@@ -157,47 +158,33 @@ impl CameraController {
     pub fn update_camera(&mut self, camera: &mut Camera, dt: Duration) {
         let dt = dt.as_secs_f32();
 
-        let proj = camera.view * camera.world;
+        let cam_front = vec3(
+            -camera.rot.x.cos() * camera.rot.y.sin(),
+            camera.rot.x.sin(),
+            camera.rot.x.cos() * camera.rot.y.cos(),
+        )
+        .normalize();
 
-        let forward: Vector3<f32> = proj.transform_vector(Vector3::new(0., 0., 1.));
-        let right: Vector3<f32> = proj.transform_vector(Vector3::new(1., 0., 0.));
-        camera.position += forward * (self.amount_forward - self.amount_backward) * self.speed * dt;
-        camera.position += right * (self.amount_right - self.amount_left) * self.speed * dt;
+        let move_speed = dt * self.speed;
 
-        // Move forward/backward and left/right
-        let (yaw_sin, yaw_cos) = camera.rotation.y.sin_cos();
+        let cam_right = cam_front.cross(vec3(0., 1., 0.)).normalize();
 
-        // Move in/out (aka. "zoom")
-        // Note: this isn't an actual zoom. The camera's position
-        // changes when zooming. I've added this to make it easier
-        // to get closer to an object you want to focus on.
-        let (pitch_sin, pitch_cos) = camera.rotation.x.sin_cos();
-        let scrollward =
-            Vector3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
-        camera.position += scrollward * self.scroll * self.speed * self.sensitivity * dt;
-        self.scroll = 0.0;
+        camera.pos += cam_front * self.amount_forward * move_speed;
+        camera.pos -= cam_front * self.amount_backward * move_speed;
+        camera.pos += cam_right * self.amount_right * move_speed;
+        camera.pos -= cam_right * self.amount_left * move_speed;
 
-        // Move up/down. Since we don't use roll, we can just
-        // modify the y coordinate directly.
-        camera.position.y += (self.amount_up - self.amount_down) * self.speed * dt;
+        camera.pos.y += self.amount_up * move_speed;
+        camera.pos.y -= self.amount_down * move_speed;
 
-        // Rotate
-        camera.rotation.y += Rad(self.rotate_horizontal) * self.sensitivity * dt;
-        camera.rotation.x += Rad(-self.rotate_vertical) * self.sensitivity * dt;
+        let look_speed = dt * self.sensitivity;
 
-        // If process_mouse isn't called every frame, these values
-        // will not get set to zero, and the camera will rotate
-        // when moving in a non cardinal direction.
-        self.rotate_horizontal = 0.0;
-        self.rotate_vertical = 0.0;
+        camera.rot.x += Rad(self.rotate_vertical * look_speed).normalize();
+        camera.rot.y += Rad(self.rotate_horizontal * look_speed).normalize();
 
-        // Keep the camera's angle from going too high/low.
-        if camera.rotation.x < -Rad(FRAC_PI_2) {
-            camera.rotation.x = -Rad(FRAC_PI_2);
-        } else if camera.rotation.x > Rad(FRAC_PI_2) {
-            camera.rotation.x = Rad(FRAC_PI_2);
-        }
-
+        // done processing, reset to 0
+        self.rotate_horizontal = 0.;
+        self.rotate_vertical = 0.;
         camera.update_view_matrix();
     }
 }

@@ -17,6 +17,7 @@ impl ply::PropertyAccess for Vertex {
     fn new() -> Self {
         Vertex::zeroed()
     }
+
     fn set_property(&mut self, key: String, property: ply::Property) {
         match (key.as_ref(), property) {
             ("x", ply::Property::Float(v)) => self.position[0] = v,

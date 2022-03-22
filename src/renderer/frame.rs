@@ -41,15 +41,12 @@ impl Frame {
             swapchain_format,
         );
 
-        let viewport = Viewport {
-            origin: [0.0, 0.0],
-            dimensions: surface.window().inner_size().into(),
-            depth_range: 0.0..1.0,
-        };
+        let win_size = surface.window().inner_size();
+
         Frame {
             swapchain: swapchain,
             surface: surface,
-            viewport: viewport,
+            viewport: Frame::get_viewport(win_size),
             render_pass: render_pass,
             buffers: get_framebuffers(&images, pass),
 
@@ -57,8 +54,19 @@ impl Frame {
         }
     }
 
+    // build viewport with y flip
+    // see: https://www.saschawillems.de/blog/2019/03/29/flipping-the-vulkan-viewport/
+    fn get_viewport(size: PhysicalSize<u32>) -> Viewport {
+        let win_size: [f32; 2] = size.into();
+        return Viewport {
+            origin: [0.0, win_size[1]],
+            dimensions: [win_size[0], -win_size[1]],
+            depth_range: 0.0..1.0,
+        };
+    }
+
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
-        self.viewport.dimensions = new_size.into();
+        self.viewport = Frame::get_viewport(new_size);
         self.recreate_swapchain = true;
     }
 

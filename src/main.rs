@@ -9,10 +9,11 @@ use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::render_pass::{RenderPass, Subpass};
 use vulkano::swapchain::Surface;
 use vulkano_win::VkSurfaceBuild;
+use winit::dpi::PhysicalPosition;
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
-use winit::event::{DeviceEvent, Event, KeyboardInput, WindowEvent};
+use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, WindowEvent};
 use winit::event_loop::ControlFlow;
 
 use pointcloud::PointCloud;
@@ -138,9 +139,12 @@ fn main() {
     let pc = PointCloud::from_ply_file(device.clone(), "bunny.ply");
     let mut scene = Scene::new(pc);
 
-    let mut camera_controller = CameraController::new(0.1, 1.);
+    let mut camera_controller = CameraController::new(0.1, 0.1);
 
     let mut last_update_inst = Instant::now();
+
+    let mut last_mouse_position: Option<PhysicalPosition<f64>> = None;
+    let mut mouse_pressed = false;
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -156,6 +160,39 @@ fn main() {
             frame.resize(size);
             surface.window().request_redraw();
         }
+        Event::WindowEvent {
+            event: WindowEvent::CursorMoved {
+                position: new_pos, ..
+            },
+            ..
+        } => {
+            if mouse_pressed {
+                if let Some(last_pos) = last_mouse_position {
+                    camera_controller.process_mouse(
+                        (-(new_pos.x - last_pos.x) as f32).into(),
+                        (-(new_pos.y - last_pos.y) as f32).into(),
+                    );
+                }
+                last_mouse_position = Some(new_pos);
+            }
+        }
+        Event::WindowEvent {
+            event:
+                WindowEvent::MouseInput {
+                    state,
+                    button: MouseButton::Left,
+                    ..
+                },
+            ..
+        } => match state {
+            ElementState::Pressed => {
+                mouse_pressed = true;
+            }
+            ElementState::Released => {
+                mouse_pressed = false;
+                last_mouse_position = None;
+            }
+        },
         Event::DeviceEvent { event, .. } => match event {
             DeviceEvent::Key(KeyboardInput {
                 virtual_keycode: Some(key),
@@ -163,14 +200,6 @@ fn main() {
                 ..
             }) => {
                 camera_controller.process_keyboard(key, state);
-            }
-            DeviceEvent::MouseWheel { delta, .. } => {
-                // camera_controller.process_scroll(&delta);
-            }
-            DeviceEvent::MouseMotion { delta } => {
-                // if mouse_pressed {
-                // camera_controller.process_mouse(delta.0, delta.1);
-                // }
             }
             _ => {}
         },
