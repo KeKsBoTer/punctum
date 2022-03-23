@@ -8,10 +8,10 @@ use std::sync::Arc;
 
 pub use camera::{Camera, CameraController};
 pub use pointcloud::PointCloud;
+use renderer::Frame;
 pub use renderer::{PointCloudRenderer, SurfaceFrame};
 pub use scene::Scene;
 use vulkano::{
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily},
         Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
@@ -113,19 +113,29 @@ pub fn render_point_cloud(pc: &PointCloud, img_size: u32) {
 
     let queue = queues.next().unwrap();
 
-    let swapchain_format = vulkano::format::Format::R8G8B8A8_UNORM;
+    let image_format = vulkano::format::Format::R8G8B8A8_UNORM;
 
-    let render_pass = get_render_pass(device.clone(), swapchain_format);
+    let render_pass = get_render_pass(device.clone(), image_format);
+
+    let mut frame = Frame::new(
+        device.clone(),
+        render_pass.clone(),
+        image_format,
+        [img_size, img_size],
+    );
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass);
+    let mut renderer =
+        PointCloudRenderer::new(device.clone(), scene_subpass, frame.viewport().clone());
 
     let pc = PointCloud::from_ply_file(device.clone(), "bunny.ply");
 
     let camera = Camera::look_at_ortho(*pc.bounding_box());
 
-    let mut scene = Scene::new(pc, camera.into());
+    let scene = Scene::new(pc, camera.into());
 
     renderer.set_camera(&camera);
+    let cb = renderer.render_point_cloud(queue.clone(), scene.point_cloud());
+    frame.render(queue, cb);
 }

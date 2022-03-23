@@ -5,7 +5,10 @@ use vulkano::{
         AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
-    image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
+    image::{
+        view::ImageView, AttachmentImage, ImageAccess, ImageDimensions, ImageUsage, StorageImage,
+        SwapchainImage,
+    },
     pipeline::graphics::viewport::Viewport,
     render_pass::{FramebufferCreateInfo, RenderPass},
     swapchain::{self, AcquireError, Surface, SwapchainAcquireFuture, SwapchainCreateInfo},
@@ -15,6 +18,86 @@ use winit::{dpi::PhysicalSize, window::Window};
 
 use vulkano::render_pass::Framebuffer as VulkanFramebuffer;
 use vulkano::swapchain::Swapchain as VulkanSwapchain;
+
+pub struct Frame {
+    viewport: Viewport,
+    render_pass: Arc<RenderPass>,
+    buffer: Framebuffer<StorageImage>,
+}
+
+impl Frame {
+    pub fn new(
+        device: Arc<Device>,
+        render_pass: Arc<RenderPass>,
+        image_format: vulkano::format::Format,
+        image_size: [u32; 2],
+    ) -> Self {
+        let image = StorageImage::new(
+            device,
+            ImageDimensions::Dim2d {
+                width: image_size[0],
+                height: image_size[1],
+                array_layers: 1,
+            },
+            image_format,
+            None,
+        )
+        .unwrap();
+        let fb = Framebuffer::new(image, &render_pass);
+        Frame {
+            viewport: SurfaceFrame::get_viewport(image_size),
+            render_pass: render_pass,
+            buffer: fb,
+        }
+    }
+
+    // build viewport with y flip
+    // see: https://www.saschawillems.de/blog/2019/03/29/flipping-the-vulkan-viewport/
+    fn get_viewport(size: PhysicalSize<u32>) -> Viewport {
+        let win_size: [f32; 2] = size.into();
+        return Viewport {
+            origin: [0.0, win_size[1]],
+            dimensions: [win_size[0], -win_size[1]],
+            depth_range: 0.0..1.0,
+        };
+    }
+
+    pub fn viewport(&self) -> &Viewport {
+        &self.viewport
+    }
+
+    pub fn render(&mut self, queue: Arc<Queue>, cb: Arc<SecondaryAutoCommandBuffer>) {
+        let fb = &self.buffer;
+
+        let device = self.buffer.buffer.device();
+
+        let mut builder = AutoCommandBufferBuilder::primary(
+            device.clone(),
+            queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        builder
+            .begin_render_pass(
+                fb.buffer.clone(),
+                SubpassContents::SecondaryCommandBuffers,
+                vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()],
+            )
+            .unwrap();
+
+        builder.execute_commands(cb).unwrap();
+        builder.end_render_pass().unwrap();
+        let command_buffer = builder.build().unwrap();
+
+        let future = sync::now(device.clone())
+            .then_execute(queue.clone(), command_buffer)
+            .unwrap()
+            .then_signal_fence_and_flush()
+            .unwrap();
+        future.wait(None).unwrap();
+    }
+}
 
 pub struct SurfaceFrame {
     swapchain: Swapchain,
@@ -42,7 +125,7 @@ impl SurfaceFrame {
         SurfaceFrame {
             swapchain: sc,
             surface: surface,
-            viewport: SurfaceFrame::get_viewport(win_size),
+            viewport: SurfaceFrame::get_viewport(win_size.into()),
             render_pass: render_pass,
             buffers: fbs,
 
@@ -52,16 +135,15 @@ impl SurfaceFrame {
 
     // build viewport with y flip
     // see: https://www.saschawillems.de/blog/2019/03/29/flipping-the-vulkan-viewport/
-    fn get_viewport(size: PhysicalSize<u32>) -> Viewport {
-        let win_size: [f32; 2] = size.into();
+    fn get_viewport(size: [u32; 2]) -> Viewport {
         return Viewport {
-            origin: [0.0, win_size[1]],
-            dimensions: [win_size[0], -win_size[1]],
+            origin: [0.0, size[1] as f32],
+            dimensions: [size[0] as f32, -(size[1] as f32)],
             depth_range: 0.0..1.0,
         };
     }
 
-    pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
+    pub fn resize(&mut self, new_size: [u32; 2]) {
         self.viewport = SurfaceFrame::get_viewport(new_size);
         self.recreate_swapchain = true;
     }

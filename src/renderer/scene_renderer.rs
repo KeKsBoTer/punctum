@@ -51,7 +51,7 @@ pub struct PointCloudRenderer {
 }
 
 impl PointCloudRenderer {
-    pub fn new(device: Arc<Device>, subpass: Subpass) -> Self {
+    pub fn new(device: Arc<Device>, subpass: Subpass, viewport: Viewport) -> Self {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
@@ -64,7 +64,7 @@ impl PointCloudRenderer {
                 topology: PartialStateMode::Fixed(PrimitiveTopology::PointList),
                 primitive_restart_enable: StateMode::Fixed(false),
             })
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([viewport]))
             .fragment_shader(fs.entry_point("main").unwrap(), ())
             .depth_stencil_state(DepthStencilState::simple_depth_test())
             .render_pass(subpass)
@@ -82,7 +82,6 @@ impl PointCloudRenderer {
         &self,
         queue: Arc<Queue>,
         point_cloud: &PointCloud,
-        viewport: Viewport,
     ) -> Arc<SecondaryAutoCommandBuffer> {
         // TODO move viewport to pipeline creation
         // TODO dont recreate every time
@@ -102,7 +101,6 @@ impl PointCloudRenderer {
         .unwrap();
 
         builder
-            .set_viewport(0, [viewport.clone()])
             .bind_pipeline_graphics(self.pipeline.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
@@ -126,10 +124,9 @@ impl PointCloudRenderer {
         self.uniform_buffer = self.uniform_buffer_pool.next(uniform_data).unwrap();
     }
 
-    pub fn render_to_frame(&mut self, queue: Arc<Queue>, scene: &Scene, frame: &mut SurfaceFrame) {
-        self.set_camera(&scene.camera);
-        let cb =
-            self.render_point_cloud(queue.clone(), scene.point_cloud(), frame.viewport().clone());
-        frame.render(queue, cb);
-    }
+    // pub fn render_to_frame(&mut self, queue: Arc<Queue>, scene: &Scene, frame: &mut SurfaceFrame) {
+    //     self.set_camera(&scene.camera);
+    //     let cb = self.render_point_cloud(queue.clone(), scene.point_cloud());
+    //     frame.render(queue, cb);
+    // }
 }

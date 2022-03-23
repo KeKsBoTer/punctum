@@ -73,7 +73,8 @@ fn main() {
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass);
+    let mut renderer =
+        PointCloudRenderer::new(device.clone(), scene_subpass, frame.viewport().clone());
 
     let pc = PointCloud::from_ply_file(device.clone(), "bunny.ply");
 
@@ -98,7 +99,7 @@ fn main() {
             event: WindowEvent::Resized(size),
             ..
         } => {
-            frame.resize(size);
+            frame.resize(size.into());
             surface.window().request_redraw();
         }
         Event::WindowEvent {
@@ -166,7 +167,9 @@ fn main() {
             }
         }
         Event::RedrawRequested(..) => {
-            renderer.render_to_frame(queue.clone(), &scene, &mut frame);
+            renderer.set_camera(&scene.camera);
+            let cb = renderer.render_point_cloud(queue.clone(), scene.point_cloud());
+            frame.render(queue.clone(), cb);
         }
         _ => (),
     });
