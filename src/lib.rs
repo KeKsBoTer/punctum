@@ -1,17 +1,17 @@
 mod camera;
 mod pointcloud;
 mod renderer;
-mod scene;
 mod vertex;
 
 use std::sync::Arc;
 
 pub use camera::{Camera, CameraController};
-pub use pointcloud::PointCloud;
+use image::{ImageBuffer, Rgba};
+pub use pointcloud::{PointCloud, PointCloudGPU};
 use renderer::Frame;
-pub use renderer::{PointCloudRenderer, SurfaceFrame};
-pub use scene::Scene;
+pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
 use vulkano::{
+    buffer::{BufferUsage, CpuAccessibleBuffer},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily},
         Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
@@ -80,7 +80,7 @@ pub fn get_render_pass(
     .unwrap()
 }
 
-pub fn render_point_cloud(pc: &PointCloud, img_size: u32) {
+pub fn render_point_cloud(pc: Arc<PointCloud>, img_size: u32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(InstanceCreateInfo {
         enabled_extensions: required_extensions,
@@ -115,7 +115,11 @@ pub fn render_point_cloud(pc: &PointCloud, img_size: u32) {
 
     let image_format = vulkano::format::Format::R8G8B8A8_UNORM;
 
+    println!("size: {:}", image_format.block_size().unwrap());
+
     let render_pass = get_render_pass(device.clone(), image_format);
+
+    let viewport = Viewport::new([img_size, img_size]);
 
     let mut frame = Frame::new(
         device.clone(),
@@ -126,16 +130,25 @@ pub fn render_point_cloud(pc: &PointCloud, img_size: u32) {
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let mut renderer =
-        PointCloudRenderer::new(device.clone(), scene_subpass, frame.viewport().clone());
-
-    let pc = PointCloud::from_ply_file(device.clone(), "bunny.ply");
+    let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass, viewport);
 
     let camera = Camera::look_at_ortho(*pc.bounding_box());
 
-    let scene = Scene::new(pc, camera.into());
+    let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
+
+    let target_buffer = CpuAccessibleBuffer::from_iter(
+        device.clone(),
+        BufferUsage::transfer_destination(),
+        false,
+        (0..img_size * img_size * 4).map(|_| 0u8),
+    )
+    .expect("failed to create buffer");
 
     renderer.set_camera(&camera);
-    let cb = renderer.render_point_cloud(queue.clone(), scene.point_cloud());
-    frame.render(queue, cb);
+    let cb = renderer.render_point_cloud(queue.clone(), &pc_gpu);
+    frame.render(queue, cb, target_buffer.clone());
+
+    let buffer_content = target_buffer.read().unwrap();
+
+    ImageBuffer::<Rgba<u8>, _>::from_raw(img_size, img_size, buffer_content.to_vec()).unwrap()
 }

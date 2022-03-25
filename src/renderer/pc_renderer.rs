@@ -13,16 +13,17 @@ use vulkano::{
             depth_stencil::DepthStencilState,
             input_assembly::{InputAssemblyState, PrimitiveTopology},
             vertex_input::BuffersDefinition,
-            viewport::{Viewport, ViewportState},
+            viewport::ViewportState,
         },
         GraphicsPipeline, PartialStateMode, Pipeline, PipelineBindPoint, StateMode,
     },
     render_pass::Subpass,
+    shader::ShaderModule,
 };
 
-use crate::{camera::Camera, pointcloud::PointCloud, scene::Scene, vertex::Vertex};
+use crate::{camera::Camera, pointcloud::PointCloudGPU, vertex::Vertex};
 
-use super::SurfaceFrame;
+use super::frame::Viewport;
 
 mod vs {
     vulkano_shaders::shader! {
@@ -48,6 +49,9 @@ pub struct PointCloudRenderer {
 
     uniform_buffer_pool: Arc<CpuBufferPool<vs::ty::UniformData, Arc<StdMemoryPool>>>,
     uniform_buffer: Arc<CpuBufferPoolSubbuffer<vs::ty::UniformData, Arc<StdMemoryPool>>>,
+
+    fs: Arc<ShaderModule>,
+    vs: Arc<ShaderModule>,
 }
 
 impl PointCloudRenderer {
@@ -57,31 +61,57 @@ impl PointCloudRenderer {
 
         let pool = Arc::new(CpuBufferPool::new(device.clone(), BufferUsage::all()));
 
-        let pipeline = GraphicsPipeline::start()
+        let pipeline =
+            PointCloudRenderer::build_pipeline(vs.clone(), fs.clone(), subpass, viewport, device);
+
+        PointCloudRenderer {
+            pipeline: pipeline,
+            uniform_buffer_pool: pool.clone(),
+            uniform_buffer: pool.next(vs::ty::UniformData::zeroed()).unwrap(),
+
+            vs: vs,
+            fs: fs,
+        }
+    }
+
+    fn build_pipeline(
+        vs: Arc<ShaderModule>,
+        fs: Arc<ShaderModule>,
+        subpass: Subpass,
+        viewport: Viewport,
+        device: Arc<Device>,
+    ) -> Arc<GraphicsPipeline> {
+        GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState {
                 topology: PartialStateMode::Fixed(PrimitiveTopology::PointList),
                 primitive_restart_enable: StateMode::Fixed(false),
             })
-            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([viewport]))
+            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+                viewport.into()
+            ]))
             .fragment_shader(fs.entry_point("main").unwrap(), ())
             .depth_stencil_state(DepthStencilState::simple_depth_test())
             .render_pass(subpass)
             .build(device.clone())
-            .unwrap();
+            .unwrap()
+    }
 
-        PointCloudRenderer {
-            pipeline: pipeline,
-            uniform_buffer_pool: pool.clone(),
-            uniform_buffer: pool.next(vs::ty::UniformData::zeroed()).unwrap(),
-        }
+    pub fn set_viewport(&mut self, viewport: Viewport) {
+        self.pipeline = PointCloudRenderer::build_pipeline(
+            self.vs.clone(),
+            self.fs.clone(),
+            self.pipeline.subpass().clone(),
+            viewport,
+            self.pipeline.device().clone(),
+        );
     }
 
     pub fn render_point_cloud(
         &self,
         queue: Arc<Queue>,
-        point_cloud: &PointCloud,
+        point_cloud: &PointCloudGPU,
     ) -> Arc<SecondaryAutoCommandBuffer> {
         // TODO move viewport to pipeline creation
         // TODO dont recreate every time
@@ -108,8 +138,8 @@ impl PointCloudRenderer {
                 0,
                 set.clone(),
             )
-            .bind_vertex_buffers(0, point_cloud.buffer.clone())
-            .draw(point_cloud.buffer.len() as u32, 1, 0, 0)
+            .bind_vertex_buffers(0, point_cloud.gpu_buffer.clone())
+            .draw(point_cloud.gpu_buffer.len() as u32, 1, 0, 0)
             .unwrap();
 
         Arc::new(builder.build().unwrap())

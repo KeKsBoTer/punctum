@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vulkano::device::DeviceExtensions;
@@ -13,8 +14,8 @@ use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton,
 use winit::event_loop::ControlFlow;
 
 use punctum::{
-    get_render_pass, select_physical_device, Camera, CameraController, PointCloud,
-    PointCloudRenderer, Scene, SurfaceFrame,
+    get_render_pass, select_physical_device, Camera, CameraController, PointCloud, PointCloudGPU,
+    PointCloudRenderer, SurfaceFrame, Viewport,
 };
 
 fn main() {
@@ -63,6 +64,8 @@ fn main() {
 
     let render_pass = get_render_pass(device.clone(), swapchain_format);
 
+    let mut viewport = Viewport::new(surface.window().inner_size().into());
+
     let mut frame = SurfaceFrame::new(
         surface.clone(),
         device.clone(),
@@ -73,15 +76,13 @@ fn main() {
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let mut renderer =
-        PointCloudRenderer::new(device.clone(), scene_subpass, frame.viewport().clone());
+    let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass, viewport.clone());
 
-    let pc = PointCloud::from_ply_file(device.clone(), "bunny.ply");
+    let pc =
+        PointCloudGPU::from_point_cloud(device, Arc::new(PointCloud::from_ply_file("bunny.ply")));
 
-    let mut camera = Camera::look_at_ortho(*pc.bounding_box());
+    let mut camera = Camera::look_at_ortho(*pc.cpu().bounding_box());
     let mut camera_controller = CameraController::new(0.1, 0.1);
-
-    let mut scene = Scene::new(pc, camera.into());
 
     let mut last_update_inst = Instant::now();
 
@@ -99,8 +100,9 @@ fn main() {
             event: WindowEvent::Resized(size),
             ..
         } => {
-            frame.resize(size.into());
-            surface.window().request_redraw();
+            viewport.resize(size.into());
+            renderer.set_viewport(viewport.clone());
+            frame.force_recreate();
         }
         Event::WindowEvent {
             event: WindowEvent::CursorMoved {
@@ -157,7 +159,6 @@ fn main() {
                 println!("FPS: {:}", 1. / time_since_last_frame.as_secs_f32());
 
                 camera_controller.update_camera(&mut camera, time_since_last_frame);
-                scene.camera = camera.into();
 
                 last_update_inst = Instant::now();
             } else {
@@ -167,8 +168,8 @@ fn main() {
             }
         }
         Event::RedrawRequested(..) => {
-            renderer.set_camera(&scene.camera);
-            let cb = renderer.render_point_cloud(queue.clone(), scene.point_cloud());
+            renderer.set_camera(&camera);
+            let cb = renderer.render_point_cloud(queue.clone(), &pc);
             frame.render(queue.clone(), cb);
         }
         _ => (),

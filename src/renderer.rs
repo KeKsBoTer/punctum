@@ -1,5 +1,5 @@
 mod frame;
-pub use frame::{Frame, SurfaceFrame};
+pub use frame::{Frame, SurfaceFrame, Viewport};
 
-mod scene_renderer;
-pub use scene_renderer::PointCloudRenderer;
+mod pc_renderer;
+pub use pc_renderer::PointCloudRenderer;

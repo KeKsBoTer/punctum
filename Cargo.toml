@@ -22,4 +22,9 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "punctum_viewer"
-path = "src/bin/main.rs"
+path = "src/bin/viewer.rs"
+
+
+[[bin]]
+name = "punctum_headless"
+path = "src/bin/headless.rs"

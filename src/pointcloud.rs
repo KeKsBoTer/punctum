@@ -11,7 +11,7 @@ use vulkano::{
 use crate::vertex::Vertex;
 
 pub struct PointCloud {
-    pub buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
+    data: Vec<Vertex>,
     bbox: BoundingBox,
 }
 
@@ -38,7 +38,7 @@ impl ply::PropertyAccess for Vertex {
 }
 
 impl PointCloud {
-    pub fn from_ply_file(device: Arc<Device>, filename: &str) -> Self {
+    pub fn from_ply_file(filename: &str) -> Self {
         let mut f = std::fs::File::open(filename).unwrap();
 
         // create a parser
@@ -54,16 +54,8 @@ impl PointCloud {
         let points = ply.payload.get("vertex").unwrap().clone();
         let bbox = PointCloud::calc_bbox(&points);
 
-        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            device,
-            BufferUsage::vertex_buffer(),
-            false,
-            points.into_iter(),
-        )
-        .unwrap();
-
         PointCloud {
-            buffer: vertex_buffer,
+            data: points,
             bbox: bbox,
         }
     }
@@ -85,6 +77,33 @@ impl PointCloud {
         &self.bbox
     }
 }
+
+pub struct PointCloudGPU {
+    pub cpu: Arc<PointCloud>,
+    pub gpu_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
+}
+
+impl PointCloudGPU {
+    pub fn from_point_cloud(device: Arc<Device>, pc: Arc<PointCloud>) -> PointCloudGPU {
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(
+            device,
+            BufferUsage::vertex_buffer(),
+            false,
+            pc.data.clone(),
+        )
+        .unwrap();
+
+        PointCloudGPU {
+            gpu_buffer: vertex_buffer,
+            cpu: pc.clone(),
+        }
+    }
+
+    pub fn cpu(&self) -> &Arc<PointCloud> {
+        &self.cpu
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
     min: Point3<f32>,
