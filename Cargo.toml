@@ -20,6 +20,7 @@ image = "0.24"
 name = "punctum"
 path = "src/lib.rs"
 
+
 [[bin]]
 name = "punctum_viewer"
 path = "src/bin/viewer.rs"

@@ -1,6 +1,6 @@
 use std::{env, sync::Arc};
 
-use punctum::{render_point_cloud, PointCloud};
+use punctum::{render_point_cloud, PointCloud, RenderSettings};
 fn main() {
     let args = env::args();
     if args.len() != 3 {
@@ -11,7 +11,7 @@ fn main() {
     let img_file = arguments.get(2).unwrap();
 
     let pc = Arc::new(PointCloud::from_ply_file(ply_file));
-    let result = render_point_cloud(pc, 512);
+    let result = render_point_cloud(pc, 512, RenderSettings::default());
 
     result.save(img_file).unwrap();
     println!("done!");

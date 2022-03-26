@@ -8,6 +8,7 @@ layout(set = 0, binding = 0) uniform UniformData {
     mat4 world;
     mat4 view;
     mat4 proj;
+    float point_size;
 } uniforms;
 
 
@@ -23,11 +24,7 @@ void main() {
     mat4 worldview = uniforms.view * uniforms.world;
     gl_Position = uniforms.proj * worldview * vec4(position, 1.0);
 
-    // angle to camera
-    float angle = dot((worldview * vec4(0,0,1.0,1.0)).xyz,normal);
+    gl_PointSize = uniforms.point_size;
 
-    gl_PointSize = mix(5.0,10., (angle+1.0)/2.0);
-    // gl_PointSize = (1/gl_Position.z);
-
-    vertex_color = color; //*  (angle+1.0)/2.0;
+    vertex_color = color;
 }

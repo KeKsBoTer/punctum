@@ -80,7 +80,26 @@ pub fn get_render_pass(
     .unwrap()
 }
 
-pub fn render_point_cloud(pc: Arc<PointCloud>, img_size: u32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+#[derive(Debug, Clone)]
+pub struct RenderSettings {
+    pub point_size: f32,
+    pub background_color: [f32; 4],
+}
+
+impl Default for RenderSettings {
+    fn default() -> Self {
+        Self {
+            point_size: 10.0,
+            background_color: [0.; 4],
+        }
+    }
+}
+
+pub fn render_point_cloud(
+    pc: Arc<PointCloud>,
+    img_size: u32,
+    render_settings: RenderSettings,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(InstanceCreateInfo {
         enabled_extensions: required_extensions,
@@ -115,8 +134,6 @@ pub fn render_point_cloud(pc: Arc<PointCloud>, img_size: u32) -> ImageBuffer<Rgb
 
     let image_format = vulkano::format::Format::R8G8B8A8_UNORM;
 
-    println!("size: {:}", image_format.block_size().unwrap());
-
     let render_pass = get_render_pass(device.clone(), image_format);
 
     let viewport = Viewport::new([img_size, img_size]);
@@ -136,13 +153,18 @@ pub fn render_point_cloud(pc: Arc<PointCloud>, img_size: u32) -> ImageBuffer<Rgb
 
     let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
 
+    let pixel_format_size = image_format.block_size().unwrap() as u32;
+
     let target_buffer = CpuAccessibleBuffer::from_iter(
         device.clone(),
         BufferUsage::transfer_destination(),
         false,
-        (0..img_size * img_size * 4).map(|_| 0u8),
+        (0..img_size * img_size * pixel_format_size).map(|_| 0u8),
     )
     .expect("failed to create buffer");
+
+    renderer.set_point_size(render_settings.point_size);
+    frame.set_background(render_settings.background_color);
 
     renderer.set_camera(&camera);
     let cb = renderer.render_point_cloud(queue.clone(), &pc_gpu);

@@ -59,7 +59,6 @@ impl Camera {
 
     fn update_proj_matrix(&mut self) {
         self.proj = self.projection.projection_matrix(&self);
-        println!("proj: {:?}", self.proj);
     }
 
     pub fn view(&self) -> &Matrix4<f32> {
@@ -106,7 +105,6 @@ impl Camera {
     pub fn look_at_ortho(bbox: BoundingBox) -> Self {
         let size = bbox.size();
         let center = bbox.center();
-        println!("center: {:?}", bbox.center());
         let mut c = Camera {
             pos: Point3::new(center.x, center.y, center.z - size.z),
             rot: vec3(Rad::zero(), Rad::zero(), Rad::zero()),

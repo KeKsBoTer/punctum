@@ -21,9 +21,7 @@ use vulkano::{
     shader::ShaderModule,
 };
 
-use crate::{camera::Camera, pointcloud::PointCloudGPU, vertex::Vertex};
-
-use super::frame::Viewport;
+use crate::{camera::Camera, pointcloud::PointCloudGPU, vertex::Vertex, Viewport};
 
 mod vs {
     vulkano_shaders::shader! {
@@ -52,6 +50,8 @@ pub struct PointCloudRenderer {
 
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
+
+    uniform_data: vs::ty::UniformData,
 }
 
 impl PointCloudRenderer {
@@ -71,6 +71,8 @@ impl PointCloudRenderer {
 
             vs: vs,
             fs: fs,
+
+            uniform_data: vs::ty::UniformData::zeroed(),
         }
     }
 
@@ -145,18 +147,21 @@ impl PointCloudRenderer {
         Arc::new(builder.build().unwrap())
     }
 
+    pub fn set_point_size(&mut self, point_size: f32) {
+        self.uniform_data = vs::ty::UniformData {
+            point_size,
+            ..self.uniform_data
+        };
+        self.uniform_buffer = self.uniform_buffer_pool.next(self.uniform_data).unwrap();
+    }
+
     pub fn set_camera(&mut self, camera: &Camera) {
-        let uniform_data = vs::ty::UniformData {
+        self.uniform_data = vs::ty::UniformData {
             world: Matrix4::identity().into(),
             view: camera.view().clone().into(),
             proj: camera.projection().clone().into(),
+            ..self.uniform_data
         };
-        self.uniform_buffer = self.uniform_buffer_pool.next(uniform_data).unwrap();
+        self.uniform_buffer = self.uniform_buffer_pool.next(self.uniform_data).unwrap();
     }
-
-    // pub fn render_to_frame(&mut self, queue: Arc<Queue>, scene: &Scene, frame: &mut SurfaceFrame) {
-    //     self.set_camera(&scene.camera);
-    //     let cb = self.render_point_cloud(queue.clone(), scene.point_cloud());
-    //     frame.render(queue, cb);
-    // }
 }
