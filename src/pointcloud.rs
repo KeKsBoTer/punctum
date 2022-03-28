@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytemuck::Zeroable;
-use cgmath::{Bounded, EuclideanSpace, Point3, Vector3};
+use cgmath::{Bounded, EuclideanSpace, MetricSpace, Point3, Vector3};
 use ply_rs::ply;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
@@ -58,6 +58,24 @@ impl PointCloud {
             data: points,
             bbox: bbox,
         }
+    }
+
+    // scales all points to fix into a sphere with radius 1 and center at 0.0;
+    pub fn scale_to_unit_sphere(&mut self) {
+        let center = self.bbox.center();
+        let max_size = self
+            .data
+            .iter()
+            .map(|p| Point3::from(p.position).distance2(center))
+            .reduce(|acum, item| acum.max(item))
+            .unwrap()
+            .sqrt();
+        self.data.iter_mut().for_each(|p| {
+            p.position[0] = (p.position[0] - center.x) / max_size;
+            p.position[1] = (p.position[1] - center.y) / max_size;
+            p.position[2] = (p.position[2] - center.z) / max_size;
+        });
+        self.bbox = PointCloud::calc_bbox(&self.data);
     }
 
     fn calc_bbox(points: &Vec<Vertex>) -> BoundingBox {

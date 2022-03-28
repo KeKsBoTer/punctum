@@ -1,7 +1,6 @@
-use std::sync::Arc;
-
-use bytemuck::Zeroable;
+use crate::{camera::Camera, pointcloud::PointCloudGPU, vertex::Vertex, Viewport};
 use cgmath::{Matrix4, SquareMatrix};
+use std::sync::Arc;
 use vulkano::{
     buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool, TypedBufferAccess},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
@@ -21,17 +20,33 @@ use vulkano::{
     shader::ShaderModule,
 };
 
-use crate::{camera::Camera, pointcloud::PointCloudGPU, vertex::Vertex, Viewport};
-
 mod vs {
+    use bytemuck::{Pod, Zeroable};
+    use cgmath::{Matrix4, SquareMatrix};
+
     vulkano_shaders::shader! {
         ty: "vertex",
         path: "src/renderer/shaders/pointcloud.vert",
-        types_meta: {
-            use bytemuck::{Pod, Zeroable};
+    }
 
-            #[derive(Clone, Copy, Zeroable, Pod)]
-        },
+    #[derive(Clone, Copy, Zeroable, Pod)]
+    #[repr(C)]
+    pub struct UniformData {
+        pub world: [[f32; 4]; 4],
+        pub view: [[f32; 4]; 4],
+        pub proj: [[f32; 4]; 4],
+        pub point_size: f32,
+    }
+
+    impl Default for UniformData {
+        fn default() -> Self {
+            Self {
+                world: Matrix4::identity().into(),
+                view: Matrix4::identity().into(),
+                proj: Matrix4::identity().into(),
+                point_size: 10.,
+            }
+        }
     }
 }
 
@@ -45,13 +60,13 @@ mod fs {
 pub struct PointCloudRenderer {
     pipeline: Arc<GraphicsPipeline>,
 
-    uniform_buffer_pool: Arc<CpuBufferPool<vs::ty::UniformData, Arc<StdMemoryPool>>>,
-    uniform_buffer: Arc<CpuBufferPoolSubbuffer<vs::ty::UniformData, Arc<StdMemoryPool>>>,
+    uniform_buffer_pool: Arc<CpuBufferPool<vs::UniformData, Arc<StdMemoryPool>>>,
+    uniform_buffer: Arc<CpuBufferPoolSubbuffer<vs::UniformData, Arc<StdMemoryPool>>>,
 
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
 
-    uniform_data: vs::ty::UniformData,
+    uniform_data: vs::UniformData,
 }
 
 impl PointCloudRenderer {
@@ -67,12 +82,12 @@ impl PointCloudRenderer {
         PointCloudRenderer {
             pipeline: pipeline,
             uniform_buffer_pool: pool.clone(),
-            uniform_buffer: pool.next(vs::ty::UniformData::zeroed()).unwrap(),
+            uniform_buffer: pool.next(vs::UniformData::default()).unwrap(),
 
             vs: vs,
             fs: fs,
 
-            uniform_data: vs::ty::UniformData::zeroed(),
+            uniform_data: vs::UniformData::default(),
         }
     }
 
@@ -115,7 +130,6 @@ impl PointCloudRenderer {
         queue: Arc<Queue>,
         point_cloud: &PointCloudGPU,
     ) -> Arc<SecondaryAutoCommandBuffer> {
-        // TODO move viewport to pipeline creation
         // TODO dont recreate every time
         let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
         let set = PersistentDescriptorSet::new(
@@ -148,7 +162,7 @@ impl PointCloudRenderer {
     }
 
     pub fn set_point_size(&mut self, point_size: f32) {
-        self.uniform_data = vs::ty::UniformData {
+        self.uniform_data = vs::UniformData {
             point_size,
             ..self.uniform_data
         };
@@ -156,7 +170,7 @@ impl PointCloudRenderer {
     }
 
     pub fn set_camera(&mut self, camera: &Camera) {
-        self.uniform_data = vs::ty::UniformData {
+        self.uniform_data = vs::UniformData {
             world: Matrix4::identity().into(),
             view: camera.view().clone().into(),
             proj: camera.projection().clone().into(),

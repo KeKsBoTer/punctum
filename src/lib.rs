@@ -98,6 +98,7 @@ impl Default for RenderSettings {
 pub fn render_point_cloud(
     pc: Arc<PointCloud>,
     img_size: u32,
+    camera: Camera,
     render_settings: RenderSettings,
 ) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let required_extensions = vulkano_win::required_extensions();
@@ -107,10 +108,7 @@ pub fn render_point_cloud(
     })
     .unwrap();
 
-    let device_extensions = DeviceExtensions {
-        khr_swapchain: true,
-        ..DeviceExtensions::none()
-    };
+    let device_extensions = DeviceExtensions::none();
 
     let (physical_device, queue_family) =
         select_physical_device(&instance, &device_extensions, None);
@@ -148,8 +146,6 @@ pub fn render_point_cloud(
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
     let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass, viewport);
-
-    let camera = Camera::look_at_ortho(*pc.bounding_box());
 
     let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
 

@@ -1,12 +1,12 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::render_pass::Subpass;
 use vulkano_win::VkSurfaceBuild;
-use winit::dpi::PhysicalPosition;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 
@@ -14,7 +14,7 @@ use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton,
 use winit::event_loop::ControlFlow;
 
 use punctum::{
-    get_render_pass, select_physical_device, Camera, CameraController, PointCloud, PointCloudGPU,
+    get_render_pass, select_physical_device, CameraController, PointCloud, PointCloudGPU,
     PointCloudRenderer, SurfaceFrame, Viewport,
 };
 
@@ -29,6 +29,7 @@ fn main() {
     let event_loop = EventLoop::new(); // ignore this for now
     let surface = WindowBuilder::new()
         .with_title("puncTUM")
+        .with_inner_size(PhysicalSize::new(512, 512))
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 
@@ -78,10 +79,15 @@ fn main() {
 
     let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass, viewport.clone());
 
-    let pc =
-        PointCloudGPU::from_point_cloud(device, Arc::new(PointCloud::from_ply_file("bunny.ply")));
+    let mut pc_raw = PointCloud::from_ply_file("bunny.ply");
+    pc_raw.scale_to_unit_sphere();
+    println!("box: {:?}", pc_raw.bounding_box());
+    let pc = PointCloudGPU::from_point_cloud(device, Arc::new(pc_raw));
 
-    let mut camera = Camera::look_at_ortho(*pc.cpu().bounding_box());
+    let cameras = punctum::Camera::load_from_ply("sphere.ply");
+
+    let mut camera = cameras.get(1).unwrap().clone();
+    // let mut camera = Camera::look_at_perspective(*pc.cpu().bounding_box());
     let mut camera_controller = CameraController::new(0.1, 0.1);
 
     let mut last_update_inst = Instant::now();
@@ -102,6 +108,7 @@ fn main() {
         } => {
             viewport.resize(size.into());
             renderer.set_viewport(viewport.clone());
+            // camera.resize(size.into());
             frame.force_recreate();
         }
         Event::WindowEvent {
@@ -151,21 +158,13 @@ fn main() {
         Event::RedrawEventsCleared => {
             frame.recreate_if_necessary();
 
-            // limit FPS to 60
-            let target_frametime = Duration::from_secs_f64(1.0 / 60.0);
             let time_since_last_frame = last_update_inst.elapsed();
-            if time_since_last_frame >= target_frametime {
-                surface.window().request_redraw();
-                println!("FPS: {:}", 1. / time_since_last_frame.as_secs_f32());
+            // println!("FPS: {:}", 1. / time_since_last_frame.as_secs_f32());
 
-                camera_controller.update_camera(&mut camera, time_since_last_frame);
+            // camera_controller.update_camera(&mut camera, time_since_last_frame);
 
-                last_update_inst = Instant::now();
-            } else {
-                *control_flow = ControlFlow::WaitUntil(
-                    Instant::now() + target_frametime - time_since_last_frame,
-                );
-            }
+            last_update_inst = Instant::now();
+            surface.window().request_redraw();
         }
         Event::RedrawRequested(..) => {
             renderer.set_camera(&camera);

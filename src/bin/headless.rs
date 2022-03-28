@@ -10,9 +10,24 @@ fn main() {
     let ply_file = arguments.get(1).unwrap();
     let img_file = arguments.get(2).unwrap();
 
-    let pc = Arc::new(PointCloud::from_ply_file(ply_file));
-    let result = render_point_cloud(pc, 512, RenderSettings::default());
+    let cameras = punctum::Camera::load_from_ply("sphere.ply");
 
-    result.save(img_file).unwrap();
+    let mut pc = PointCloud::from_ply_file(ply_file);
+    pc.scale_to_unit_sphere();
+    println!("pc box: {:?}", pc.bounding_box());
+    let pc_arc = Arc::new(pc);
+    for (i, c) in cameras.iter().enumerate() {
+        // println!("camera: {:?}", c);
+        let result = render_point_cloud(
+            pc_arc.clone(),
+            256,
+            c.clone(),
+            RenderSettings {
+                point_size: 5.0,
+                ..RenderSettings::default()
+            },
+        );
+        result.save(format!("renders/render_{:}.png", i)).unwrap();
+    }
     println!("done!");
 }

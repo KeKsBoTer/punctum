@@ -1,4 +1,8 @@
-use cgmath::{vec3, Angle, Deg, InnerSpace, Matrix4, Point3, Rad, SquareMatrix, Vector3, Zero};
+use cgmath::{
+    num_traits::Float, vec3, Angle, Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad,
+    SquareMatrix, UlpsEq, Vector3, Zero,
+};
+use ply_rs::ply;
 use std::time::Duration;
 use winit::{dpi::PhysicalPosition, event::*};
 
@@ -54,7 +58,7 @@ impl Camera {
         let rot = self.rot_mat();
         let trans = Matrix4::from_translation(vec3(-self.pos.x, -self.pos.y, self.pos.z));
 
-        self.view = rot * trans;
+        self.view = trans * rot;
     }
 
     fn update_proj_matrix(&mut self) {
@@ -67,6 +71,14 @@ impl Camera {
     pub fn projection(&self) -> &Matrix4<f32> {
         &self.proj
     }
+
+    // pub fn resize(&mut self, size: [f32; 2]) {
+    //     self.projection = Projection::Orthographic {
+    //         width: size[0],
+    //         height: size[1],
+    //     };
+    //     self.update_proj_matrix();
+    // }
 
     fn rot_mat(&self) -> Matrix4<f32> {
         Matrix4::from_angle_z(self.rot.z)
@@ -102,7 +114,7 @@ impl Camera {
         c.update_proj_matrix();
         return c;
     }
-    pub fn look_at_ortho(bbox: BoundingBox) -> Self {
+    pub fn look_at_ortho_bbox(bbox: BoundingBox) -> Self {
         let size = bbox.size();
         let center = bbox.center();
         let mut c = Camera {
@@ -112,7 +124,7 @@ impl Camera {
             view: Matrix4::identity(),
             proj: Matrix4::identity(),
             znear: 0.01,
-            zfar: 100.0,
+            zfar: 1.0,
             projection: Projection::Orthographic {
                 width: size.x,
                 height: size.y,
@@ -121,6 +133,52 @@ impl Camera {
         c.update_view_matrix();
         c.update_proj_matrix();
         return c;
+    }
+    pub fn load_from_ply(filename: &str) -> Vec<Camera> {
+        let mut f = std::fs::File::open(filename).unwrap();
+
+        // create a parser
+        let p = ply_rs::parser::Parser::<Camera>::new();
+
+        // use the parser: read the entire file
+        let ply = p.read_ply(&mut f);
+
+        // make sure it did work
+        assert!(ply.is_ok());
+        let ply = ply.unwrap();
+
+        ply.payload
+            .get("vertex")
+            .unwrap()
+            .iter()
+            .map(|c| {
+                let d: f32 = c.pos.to_vec().magnitude();
+                assert!(d.ulps_eq(&1.0, 1e-8, 6), "distance {}", d);
+
+                let mut c = Camera {
+                    pos: Point3::new(c.pos.x, c.pos.y, c.pos.z),
+                    rot: vec3(Rad::zero(), Rad::zero(), Rad::zero()),
+
+                    view: Matrix4::identity(),
+                    proj: Matrix4::identity(),
+                    znear: -2.0,
+                    zfar: 2.0,
+                    projection: Projection::Orthographic {
+                        width: 2.,
+                        height: 2.,
+                    },
+                };
+                // add epsilon z value to avoid NaN in view matrix
+                c.view = Matrix4::look_at_lh(
+                    c.pos + vec3(0., 0., 1e-8),
+                    Point3::origin(),
+                    vec3(0., 1., 0.),
+                );
+                // c.update_view_matrix();
+                c.update_proj_matrix();
+                return c;
+            })
+            .collect::<Vec<Camera>>()
     }
 }
 
@@ -235,5 +293,34 @@ impl CameraController {
         self.rotate_horizontal = 0.;
         self.rotate_vertical = 0.;
         camera.update_view_matrix();
+    }
+}
+
+impl ply::PropertyAccess for Camera {
+    fn new() -> Self {
+        Camera {
+            pos: Point3::origin(),
+            rot: vec3(Rad(0.0), Rad(0.0), Rad(0.0)),
+            znear: 0.01,
+            zfar: 100.,
+            view: Matrix4::identity(),
+            proj: Matrix4::identity(),
+            projection: Projection::Orthographic {
+                width: 100.,
+                height: 100.,
+            },
+        }
+    }
+
+    fn set_property(&mut self, key: String, property: ply::Property) {
+        match (key.as_ref(), property) {
+            ("x", ply::Property::Float(v)) => self.pos[0] = v,
+            ("y", ply::Property::Float(v)) => self.pos[1] = v,
+            ("z", ply::Property::Float(v)) => self.pos[2] = v,
+            ("nx", ply::Property::Float(_)) => {}
+            ("ny", ply::Property::Float(_)) => {}
+            ("nz", ply::Property::Float(_)) => {}
+            (k, _) => panic!("Vertex: Unexpected key/value combination: key: {}", k),
+        }
     }
 }

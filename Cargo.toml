@@ -11,8 +11,8 @@ vulkano-shaders = "0.29.0"
 vulkano-win = "0.29.0"
 winit = "0.26"
 
-cgmath="0.18.0"
-bytemuck = { version = "1.5.1", features = [ "derive" ] }
+cgmath = "0.18.0"
+bytemuck = { version = "1.5.1", features = ["derive"] }
 ply-rs = "0.1.3"
 image = "0.24"
 
@@ -20,12 +20,10 @@ image = "0.24"
 name = "punctum"
 path = "src/lib.rs"
 
-
 [[bin]]
-name = "punctum_viewer"
+name = "viewer"
 path = "src/bin/viewer.rs"
 
-
 [[bin]]
-name = "punctum_headless"
+name = "headless"
 path = "src/bin/headless.rs"

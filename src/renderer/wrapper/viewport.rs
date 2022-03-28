@@ -18,7 +18,7 @@ impl Viewport {
         VulkanViewport {
             origin: [0.0, size[1] as f32],
             dimensions: [size[0] as f32, -(size[1] as f32)],
-            depth_range: 0.0..1.0,
+            depth_range: 0. ..1.0,
         }
     }
 

@@ -40,14 +40,14 @@ impl Swapchain {
                 image_extent: surface.window().inner_size().into(),
 
                 image_usage: ImageUsage::color_attachment(),
-
+                // present_mode: PresentMode::Immediate,
                 ..Default::default()
             },
         )
         .unwrap();
         Swapchain {
             sc,
-            buffers: Swapchain::create_framebuffers(&images, render_pass),
+            buffers: Swapchain::create_framebuffers(&images, render_pass.clone()),
             render_pass: render_pass,
         }
     }
@@ -61,7 +61,7 @@ impl Swapchain {
             })
             .unwrap();
         self.sc = new_swapchain;
-        self.buffers = Swapchain::create_framebuffers(&new_images, self.render_pass);
+        self.buffers = Swapchain::create_framebuffers(&new_images, self.render_pass.clone());
     }
 
     fn create_framebuffers(
@@ -70,7 +70,7 @@ impl Swapchain {
     ) -> Vec<Framebuffer<SwapchainImage<Window>>> {
         images
             .iter()
-            .map(|image| Framebuffer::new(image.clone(), render_pass))
+            .map(|image| Framebuffer::new(image.clone(), render_pass.clone()))
             .collect::<Vec<_>>()
     }
 
