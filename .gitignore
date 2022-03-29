@@ -1,3 +1,7 @@
+
+# python
+**/*.pyc
+
 /target
 renders/
 render.png
