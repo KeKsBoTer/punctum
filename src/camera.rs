@@ -1,6 +1,6 @@
 use cgmath::{
-    num_traits::Float, vec3, Angle, Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad,
-    SquareMatrix, UlpsEq, Vector3, Zero,
+    vec3, Angle, Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad, SquareMatrix, UlpsEq,
+    Vector3, Zero,
 };
 use ply_rs::ply;
 use std::time::Duration;

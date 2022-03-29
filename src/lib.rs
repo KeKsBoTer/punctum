@@ -14,7 +14,7 @@ use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily},
-        Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
+        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
     instance::{Instance, InstanceCreateInfo},
     render_pass::{RenderPass, Subpass},
@@ -95,78 +95,101 @@ impl Default for RenderSettings {
     }
 }
 
-pub fn render_point_cloud(
-    pc: Arc<PointCloud>,
+pub struct OfflineRenderer {
+    renderer: PointCloudRenderer,
+    pc: PointCloudGPU,
+    frame: Frame,
+    queue: Arc<Queue>,
     img_size: u32,
-    camera: Camera,
-    render_settings: RenderSettings,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let required_extensions = vulkano_win::required_extensions();
-    let instance = Instance::new(InstanceCreateInfo {
-        enabled_extensions: required_extensions,
-        ..Default::default()
-    })
-    .unwrap();
 
-    let device_extensions = DeviceExtensions::none();
+    buffer: Arc<CpuAccessibleBuffer<[u8]>>,
+}
 
-    let (physical_device, queue_family) =
-        select_physical_device(&instance, &device_extensions, None);
-
-    let (device, mut queues) = Device::new(
-        // Which physical device to connect to.
-        physical_device,
-        DeviceCreateInfo {
-            enabled_extensions: physical_device
-                .required_extensions()
-                .union(&device_extensions),
-
-            queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
-
+impl OfflineRenderer {
+    pub fn new(pc: Arc<PointCloud>, img_size: u32, render_settings: RenderSettings) -> Self {
+        let required_extensions = vulkano_win::required_extensions();
+        let instance = Instance::new(InstanceCreateInfo {
+            enabled_extensions: required_extensions,
             ..Default::default()
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
-    let queue = queues.next().unwrap();
+        let device_extensions = DeviceExtensions::none();
 
-    let image_format = vulkano::format::Format::R8G8B8A8_UNORM;
+        let (physical_device, queue_family) =
+            select_physical_device(&instance, &device_extensions, None);
 
-    let render_pass = get_render_pass(device.clone(), image_format);
+        let (device, mut queues) = Device::new(
+            // Which physical device to connect to.
+            physical_device,
+            DeviceCreateInfo {
+                enabled_extensions: physical_device
+                    .required_extensions()
+                    .union(&device_extensions),
 
-    let viewport = Viewport::new([img_size, img_size]);
+                queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
 
-    let mut frame = Frame::new(
-        device.clone(),
-        render_pass.clone(),
-        image_format,
-        [img_size, img_size],
-    );
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
-    let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
+        let queue = queues.next().unwrap();
 
-    let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass, viewport);
+        let image_format = vulkano::format::Format::R8G8B8A8_UNORM;
 
-    let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
+        let render_pass = get_render_pass(device.clone(), image_format);
 
-    let pixel_format_size = image_format.block_size().unwrap() as u32;
+        let viewport = Viewport::new([img_size, img_size]);
 
-    let target_buffer = CpuAccessibleBuffer::from_iter(
-        device.clone(),
-        BufferUsage::transfer_destination(),
-        false,
-        (0..img_size * img_size * pixel_format_size).map(|_| 0u8),
-    )
-    .expect("failed to create buffer");
+        let mut frame = Frame::new(
+            device.clone(),
+            render_pass.clone(),
+            image_format,
+            [img_size, img_size],
+        );
 
-    renderer.set_point_size(render_settings.point_size);
-    frame.set_background(render_settings.background_color);
+        let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    renderer.set_camera(&camera);
-    let cb = renderer.render_point_cloud(queue.clone(), &pc_gpu);
-    frame.render(queue, cb, target_buffer.clone());
+        let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass, viewport);
 
-    let buffer_content = target_buffer.read().unwrap();
+        let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
 
-    ImageBuffer::<Rgba<u8>, _>::from_raw(img_size, img_size, buffer_content.to_vec()).unwrap()
+        let pixel_format_size = image_format.block_size().unwrap() as u32;
+
+        let target_buffer = CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage::transfer_destination(),
+            false,
+            (0..img_size * img_size * pixel_format_size).map(|_| 0u8),
+        )
+        .expect("failed to create buffer");
+
+        renderer.set_point_size(render_settings.point_size);
+        frame.set_background(render_settings.background_color);
+
+        OfflineRenderer {
+            renderer,
+            frame,
+            img_size,
+            queue: queue,
+            buffer: target_buffer,
+            pc: pc_gpu,
+        }
+    }
+
+    pub fn render(&mut self, camera: Camera) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+        self.renderer.set_camera(&camera);
+        let cb = self
+            .renderer
+            .render_point_cloud(self.queue.clone(), &self.pc);
+
+        self.frame
+            .render(self.queue.clone(), cb, self.buffer.clone());
+
+        let buffer_content = self.buffer.read().unwrap();
+
+        ImageBuffer::<Rgba<u8>, _>::from_raw(self.img_size, self.img_size, buffer_content.to_vec())
+            .unwrap()
+    }
 }
