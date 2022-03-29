@@ -117,6 +117,21 @@ def get_spherical_harmonics_element(l, m, theta, phi):
     Y *= N
     return Y
 
+def get_spherical_harmonics_2(l, theta, phi):
+    """ Tesseral harmonic with Condon-Shortley phase.
+    The Tesseral spherical harmonics are also known as the real spherical
+    harmonics.
+    Args:
+        l: int for degree
+        theta: collatitude or polar angle
+        phi: longitude or azimuth
+    Returns:
+        tensor of shape [*theta.shape, l+1]
+    """
+    return torch.stack([ get_spherical_harmonics_element(l, m, theta, phi) \
+                         for m in range(0, l+1) ],
+                        dim = -1)
+
 def get_spherical_harmonics(l, theta, phi):
     """ Tesseral harmonic with Condon-Shortley phase.
     The Tesseral spherical harmonics are also known as the real spherical
