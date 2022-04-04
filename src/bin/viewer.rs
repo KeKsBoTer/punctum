@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use cgmath::Point3;
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
 use vulkano::instance::{Instance, InstanceCreateInfo};
@@ -14,7 +15,7 @@ use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton,
 use winit::event_loop::ControlFlow;
 
 use punctum::{
-    get_render_pass, select_physical_device, CameraController, PointCloud, PointCloudGPU,
+    get_render_pass, select_physical_device, Camera, CameraController, PointCloud, PointCloudGPU,
     PointCloudRenderer, SurfaceFrame, Viewport,
 };
 
@@ -83,9 +84,8 @@ fn main() {
     pc_raw.scale_to_unit_sphere();
     let pc = PointCloudGPU::from_point_cloud(device, Arc::new(pc_raw));
 
-    let cameras = punctum::Camera::load_from_ply("sphere.ply");
+    let camera = Camera::on_unit_sphere(Point3::new(0., 0., -1.));
 
-    let camera = cameras.get(1).unwrap().clone();
     // let mut camera = Camera::look_at_perspective(*pc.cpu().bounding_box());
     let mut camera_controller = CameraController::new(0.1, 0.1);
 

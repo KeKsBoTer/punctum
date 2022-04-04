@@ -1,8 +1,11 @@
-use image::{ImageBuffer, Rgba};
-use rayon::prelude::*;
-use std::{env, sync::Arc};
+use image::Rgba;
+use ply_rs::{
+    ply::{Addable, Encoding, Ply},
+    writer::Writer,
+};
+use std::{env, fs::File, sync::Arc};
 
-use punctum::{OfflineRenderer, PointCloud, RenderSettings};
+use punctum::{Camera, OfflineRenderer, PerceivedColor, PointCloud, RenderSettings};
 fn main() {
     let args = env::args();
     if args.len() != 3 {
@@ -10,9 +13,24 @@ fn main() {
     }
     let arguments = args.collect::<Vec<String>>();
     let ply_file = arguments.get(1).unwrap();
-    let output_folder = arguments.get(2).unwrap();
+    let output_file = arguments.get(2).unwrap();
 
-    let cameras = punctum::Camera::load_from_ply("sphere.ply");
+    let mut f = std::fs::File::open("sphere.ply").unwrap();
+
+    // create a parser
+    let p = ply_rs::parser::Parser::<PerceivedColor>::new();
+
+    // use the parser: read the entire file
+    let in_ply = p.read_ply(&mut f).unwrap();
+
+    let cameras = in_ply
+        .payload
+        .get("vertex")
+        .unwrap()
+        .clone()
+        .iter()
+        .map(|c| Camera::on_unit_sphere(c.pos))
+        .collect::<Vec<Camera>>();
 
     let mut pc = PointCloud::from_ply_file(ply_file);
     pc.scale_to_unit_sphere();
@@ -34,9 +52,31 @@ fn main() {
     for r in renders.iter() {
         println!("color: {:?}", r);
     }
-    // renders.par_iter().enumerate().for_each(|(i, img)| {
-    //     img.save(format!("{:}/render_{:}.png", output_folder, i))
-    //         .unwrap()
-    // });
+
+    let mut ply = {
+        let mut ply = Ply::<PerceivedColor>::new();
+        ply.header.encoding = Encoding::Ascii;
+
+        ply.header.elements.add(PerceivedColor::element_def());
+
+        let cam_colors: Vec<PerceivedColor> = renders
+            .iter()
+            .zip(cameras)
+            .map(|(color, cam)| PerceivedColor {
+                pos: *cam.position(),
+                color: *color,
+            })
+            .collect();
+
+        ply.payload.insert("vertex".to_string(), cam_colors);
+
+        ply.make_consistent().unwrap();
+        ply
+    };
+
+    let w = Writer::new();
+    let mut file = File::create(output_file).unwrap();
+    w.write_ply(&mut file, &mut ply).unwrap();
+
     println!("done!");
 }

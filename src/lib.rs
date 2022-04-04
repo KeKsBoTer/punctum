@@ -6,20 +6,20 @@ mod vertex;
 use std::sync::Arc;
 
 pub use camera::{Camera, CameraController};
+use cgmath::{vec4, EuclideanSpace, Point3, Vector4};
 use image::Rgba;
+use ply_rs::ply::{self, Addable, ElementDef, PropertyDef, PropertyType, ScalarType};
 pub use pointcloud::{PointCloud, PointCloudGPU};
+use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use renderer::Frame;
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
-    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily},
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
     instance::{Instance, InstanceCreateInfo},
-    pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
     render_pass::{RenderPass, Subpass},
     swapchain::Surface,
 };
@@ -103,17 +103,9 @@ pub struct OfflineRenderer {
     pc: PointCloudGPU,
     frame: Frame,
     queue: Arc<Queue>,
+    img_size: u32,
 
-    compute_pipeline: Arc<ComputePipeline>,
-    compute_ds: Arc<PersistentDescriptorSet>,
-
-    buffer: Arc<CpuAccessibleBuffer<[u32; 4]>>,
-}
-mod cs {
-    vulkano_shaders::shader! {
-        ty: "compute",
-        path: "src/renderer/shaders/avg_color.comp"
-    }
+    buffer: Arc<CpuAccessibleBuffer<[[u8; 4]]>>,
 }
 
 impl OfflineRenderer {
@@ -125,10 +117,7 @@ impl OfflineRenderer {
         })
         .unwrap();
 
-        let device_extensions = DeviceExtensions {
-            ext_shader_atomic_float: true,
-            ..DeviceExtensions::none()
-        };
+        let device_extensions = DeviceExtensions::none();
 
         let (physical_device, queue_family) =
             select_physical_device(&instance, &device_extensions, None);
@@ -171,90 +160,142 @@ impl OfflineRenderer {
 
         let pixel_format_size = image_format.block_size().unwrap() as u32;
 
-        let target_buffer = CpuAccessibleBuffer::from_data(
+        let target_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
-            BufferUsage::storage_buffer(),
+            BufferUsage::transfer_destination(),
             false,
-            [0u32; 4],
+            (0..img_size * img_size).map(|_| [0u8; 4]),
         )
         .expect("failed to create buffer");
 
         renderer.set_point_size(render_settings.point_size);
         frame.set_background(render_settings.background_color);
 
-        let shader = cs::load(device.clone()).expect("failed to create shader module");
-
-        let compute_pipeline = ComputePipeline::new(
-            device.clone(),
-            shader.entry_point("main").unwrap(),
-            &(),
-            None,
-            |_| {},
-        )
-        .unwrap();
-
-        let layout = compute_pipeline.layout().set_layouts().get(0).unwrap();
-        let set = PersistentDescriptorSet::new(
-            layout.clone(),
-            [
-                WriteDescriptorSet::image_view(0, frame.buffer.image_view().clone()),
-                WriteDescriptorSet::buffer(1, target_buffer.clone()),
-            ],
-        )
-        .unwrap();
-
         OfflineRenderer {
             renderer,
             frame,
+            img_size,
             queue: queue,
             buffer: target_buffer,
             pc: pc_gpu,
-            compute_pipeline,
-            compute_ds: set,
         }
     }
 
     pub fn render(&mut self, camera: Camera) -> Rgba<u8> {
-        {
-            let mut buf = self.buffer.write().unwrap();
-            buf.fill(0)
-        }
-
         self.renderer.set_camera(&camera);
         let cb = self
             .renderer
             .render_point_cloud(self.queue.clone(), &self.pc);
 
-        let mut builder = AutoCommandBufferBuilder::primary(
-            self.queue.device().clone(),
-            self.queue.family(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-        .unwrap();
-
-        builder
-            .bind_pipeline_compute(self.compute_pipeline.clone())
-            .bind_descriptor_sets(
-                PipelineBindPoint::Compute,
-                self.compute_pipeline.layout().clone(),
-                0,
-                self.compute_ds.clone(),
-            )
-            .dispatch([256 / 32, 256 / 32, 1])
-            .unwrap();
-
-        let reduce_cb = Arc::new(builder.build().unwrap());
-
-        self.frame.render(self.queue.clone(), cb, reduce_cb);
+        self.frame
+            .render(self.queue.clone(), cb, self.buffer.clone());
 
         let buffer_content = self.buffer.read().unwrap();
-        println!("buffer: {:?}", buffer_content);
 
-        Rgba([
-            (buffer_content[0] / 16777216) as u8,
-            (buffer_content[1] / 16777216) as u8,
-            (buffer_content[2] / 16777216) as u8,
-            (buffer_content[3] / 16777216) as u8,
-        ])
+        calc_average_color(&buffer_content)
+    }
+}
+
+fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
+    let start = vec4(0., 0., 0., 0.);
+    let mean = data
+        .par_chunks_exact(1024)
+        .fold(
+            || start,
+            |acc, chunk| {
+                acc + chunk.iter().fold(start, |acc, item| {
+                    acc + Vector4::from(item.map(|v| v as f32)) / (255. * 255.) * (item[3] as f32)
+                })
+            },
+        )
+        .reduce(|| start, |acc, item| acc + item);
+    Rgba(mean.map(|v| (v * 255. / mean[3]).round() as u8).into())
+}
+
+#[derive(Clone, Copy)]
+pub struct PerceivedColor {
+    pub pos: Point3<f32>,
+    pub color: Rgba<u8>,
+}
+
+impl PerceivedColor {
+    pub fn element_def() -> ElementDef {
+        let mut point_element = ElementDef::new("vertex".to_string());
+        let p = PropertyDef::new("x".to_string(), PropertyType::Scalar(ScalarType::Float));
+        point_element.properties.add(p);
+        let p = PropertyDef::new("y".to_string(), PropertyType::Scalar(ScalarType::Float));
+        point_element.properties.add(p);
+        let p = PropertyDef::new("z".to_string(), PropertyType::Scalar(ScalarType::Float));
+        point_element.properties.add(p);
+        let p = PropertyDef::new("red".to_string(), PropertyType::Scalar(ScalarType::UChar));
+        point_element.properties.add(p);
+        let p = PropertyDef::new("green".to_string(), PropertyType::Scalar(ScalarType::UChar));
+        point_element.properties.add(p);
+        let p = PropertyDef::new("blue".to_string(), PropertyType::Scalar(ScalarType::UChar));
+        point_element.properties.add(p);
+        let p = PropertyDef::new("alpha".to_string(), PropertyType::Scalar(ScalarType::UChar));
+        point_element.properties.add(p);
+        return point_element;
+    }
+}
+impl ply::PropertyAccess for PerceivedColor {
+    fn new() -> Self {
+        PerceivedColor {
+            pos: Point3::origin(),
+            color: Rgba([0; 4]),
+        }
+    }
+
+    fn set_property(&mut self, key: String, property: ply::Property) {
+        match (key.as_ref(), property) {
+            ("x", ply::Property::Float(v)) => self.pos[0] = v,
+            ("y", ply::Property::Float(v)) => self.pos[1] = v,
+            ("z", ply::Property::Float(v)) => self.pos[2] = v,
+            ("red", ply::Property::UChar(v)) => self.color[0] = v,
+            ("green", ply::Property::UChar(v)) => self.color[1] = v,
+            ("blue", ply::Property::UChar(v)) => self.color[2] = v,
+            ("alpha", ply::Property::UChar(v)) => self.color[3] = v,
+            ("nx", ply::Property::Float(_)) => {}
+            ("ny", ply::Property::Float(_)) => {}
+            ("nz", ply::Property::Float(_)) => {}
+            ("vertex_indices", _) => {}
+            (k, _) => panic!("Vertex: Unexpected key/value combination: key: {}", k),
+        }
+    }
+    fn get_uchar(&self, _property_name: &String) -> Option<u8> {
+        match _property_name.as_str() {
+            "red" => Some(self.color[0]),
+            "green" => Some(self.color[1]),
+            "blue" => Some(self.color[2]),
+            "alpha" => Some(self.color[3]),
+            _ => None,
+        }
+    }
+    fn get_float(&self, _property_name: &String) -> Option<f32> {
+        match _property_name.as_str() {
+            "x" => Some(self.pos.x),
+            "y" => Some(self.pos.y),
+            "z" => Some(self.pos.z),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Face {
+    pub vertex_index: Vec<i32>,
+}
+// same thing for Face
+impl ply::PropertyAccess for Face {
+    fn new() -> Self {
+        Face {
+            vertex_index: Vec::new(),
+        }
+    }
+    fn set_property(&mut self, key: String, property: ply::Property) {
+        match (key.as_ref(), property) {
+            ("vertex_index", ply::Property::ListInt(vec)) => self.vertex_index = vec,
+            (k, _) => panic!("Face: Unexpected key/value combination: key: {}", k),
+        }
     }
 }
