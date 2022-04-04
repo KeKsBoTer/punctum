@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use vulkano::{
-    buffer::CpuAccessibleBuffer,
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer, SubpassContents,
+        AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
+        SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
     image::{ImageDimensions, StorageImage},
@@ -54,7 +54,7 @@ impl Frame {
         &mut self,
         queue: Arc<Queue>,
         cb: Arc<SecondaryAutoCommandBuffer>,
-        target_buffer: Arc<CpuAccessibleBuffer<[u8]>>,
+        cb_after: Arc<PrimaryAutoCommandBuffer>,
     ) {
         let fb = &self.buffer;
 
@@ -77,13 +77,15 @@ impl Frame {
 
         builder.execute_commands(cb).unwrap();
         builder.end_render_pass().unwrap();
-        builder
-            .copy_image_to_buffer(fb.image().clone(), target_buffer.clone())
-            .unwrap();
+        // builder
+        //     .copy_image_to_buffer(fb.image().clone(), target_buffer.clone())
+        //     .unwrap();
         let command_buffer = builder.build().unwrap();
 
         let future = sync::now(device.clone())
             .then_execute(queue.clone(), command_buffer)
+            .unwrap()
+            .then_execute(queue, cb_after)
             .unwrap()
             .then_signal_fence_and_flush()
             .unwrap();

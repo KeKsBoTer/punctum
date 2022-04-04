@@ -6,17 +6,20 @@ mod vertex;
 use std::sync::Arc;
 
 pub use camera::{Camera, CameraController};
-use image::{ImageBuffer, Rgba};
+use image::Rgba;
 pub use pointcloud::{PointCloud, PointCloudGPU};
 use renderer::Frame;
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
+    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily},
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
     instance::{Instance, InstanceCreateInfo},
+    pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
     render_pass::{RenderPass, Subpass},
     swapchain::Surface,
 };
@@ -100,9 +103,17 @@ pub struct OfflineRenderer {
     pc: PointCloudGPU,
     frame: Frame,
     queue: Arc<Queue>,
-    img_size: u32,
 
-    buffer: Arc<CpuAccessibleBuffer<[u8]>>,
+    compute_pipeline: Arc<ComputePipeline>,
+    compute_ds: Arc<PersistentDescriptorSet>,
+
+    buffer: Arc<CpuAccessibleBuffer<[u32; 4]>>,
+}
+mod cs {
+    vulkano_shaders::shader! {
+        ty: "compute",
+        path: "src/renderer/shaders/avg_color.comp"
+    }
 }
 
 impl OfflineRenderer {
@@ -114,7 +125,10 @@ impl OfflineRenderer {
         })
         .unwrap();
 
-        let device_extensions = DeviceExtensions::none();
+        let device_extensions = DeviceExtensions {
+            ext_shader_atomic_float: true,
+            ..DeviceExtensions::none()
+        };
 
         let (physical_device, queue_family) =
             select_physical_device(&instance, &device_extensions, None);
@@ -157,39 +171,90 @@ impl OfflineRenderer {
 
         let pixel_format_size = image_format.block_size().unwrap() as u32;
 
-        let target_buffer = CpuAccessibleBuffer::from_iter(
+        let target_buffer = CpuAccessibleBuffer::from_data(
             device.clone(),
-            BufferUsage::transfer_destination(),
+            BufferUsage::storage_buffer(),
             false,
-            (0..img_size * img_size * pixel_format_size).map(|_| 0u8),
+            [0u32; 4],
         )
         .expect("failed to create buffer");
 
         renderer.set_point_size(render_settings.point_size);
         frame.set_background(render_settings.background_color);
 
+        let shader = cs::load(device.clone()).expect("failed to create shader module");
+
+        let compute_pipeline = ComputePipeline::new(
+            device.clone(),
+            shader.entry_point("main").unwrap(),
+            &(),
+            None,
+            |_| {},
+        )
+        .unwrap();
+
+        let layout = compute_pipeline.layout().set_layouts().get(0).unwrap();
+        let set = PersistentDescriptorSet::new(
+            layout.clone(),
+            [
+                WriteDescriptorSet::image_view(0, frame.buffer.image_view().clone()),
+                WriteDescriptorSet::buffer(1, target_buffer.clone()),
+            ],
+        )
+        .unwrap();
+
         OfflineRenderer {
             renderer,
             frame,
-            img_size,
             queue: queue,
             buffer: target_buffer,
             pc: pc_gpu,
+            compute_pipeline,
+            compute_ds: set,
         }
     }
 
-    pub fn render(&mut self, camera: Camera) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    pub fn render(&mut self, camera: Camera) -> Rgba<u8> {
+        {
+            let mut buf = self.buffer.write().unwrap();
+            buf.fill(0)
+        }
+
         self.renderer.set_camera(&camera);
         let cb = self
             .renderer
             .render_point_cloud(self.queue.clone(), &self.pc);
 
-        self.frame
-            .render(self.queue.clone(), cb, self.buffer.clone());
+        let mut builder = AutoCommandBufferBuilder::primary(
+            self.queue.device().clone(),
+            self.queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        builder
+            .bind_pipeline_compute(self.compute_pipeline.clone())
+            .bind_descriptor_sets(
+                PipelineBindPoint::Compute,
+                self.compute_pipeline.layout().clone(),
+                0,
+                self.compute_ds.clone(),
+            )
+            .dispatch([256 / 32, 256 / 32, 1])
+            .unwrap();
+
+        let reduce_cb = Arc::new(builder.build().unwrap());
+
+        self.frame.render(self.queue.clone(), cb, reduce_cb);
 
         let buffer_content = self.buffer.read().unwrap();
+        println!("buffer: {:?}", buffer_content);
 
-        ImageBuffer::<Rgba<u8>, _>::from_raw(self.img_size, self.img_size, buffer_content.to_vec())
-            .unwrap()
+        Rgba([
+            (buffer_content[0] / 16777216) as u8,
+            (buffer_content[1] / 16777216) as u8,
+            (buffer_content[2] / 16777216) as u8,
+            (buffer_content[3] / 16777216) as u8,
+        ])
     }
 }

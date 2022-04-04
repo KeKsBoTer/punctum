@@ -320,6 +320,7 @@ impl ply::PropertyAccess for Camera {
             ("nx", ply::Property::Float(_)) => {}
             ("ny", ply::Property::Float(_)) => {}
             ("nz", ply::Property::Float(_)) => {}
+            ("vertex_indices", _) => {}
             (k, _) => panic!("Vertex: Unexpected key/value combination: key: {}", k),
         }
     }

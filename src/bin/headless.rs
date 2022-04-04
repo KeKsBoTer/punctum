@@ -16,7 +16,6 @@ fn main() {
 
     let mut pc = PointCloud::from_ply_file(ply_file);
     pc.scale_to_unit_sphere();
-    println!("pc box: {:?}", pc.bounding_box());
 
     let pc_arc = Arc::new(pc);
 
@@ -29,13 +28,15 @@ fn main() {
         },
     );
 
-    let renders: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> =
-        cameras.iter().map(|c| renderer.render(c.clone())).collect();
+    let renders: Vec<Rgba<u8>> = cameras.iter().map(|c| renderer.render(c.clone())).collect();
 
     println!("done rendering ... saving ....");
-    renders.par_iter().enumerate().for_each(|(i, img)| {
-        img.save(format!("{:}/render_{:}.png", output_folder, i))
-            .unwrap()
-    });
+    for r in renders.iter() {
+        println!("color: {:?}", r);
+    }
+    // renders.par_iter().enumerate().for_each(|(i, img)| {
+    //     img.save(format!("{:}/render_{:}.png", output_folder, i))
+    //         .unwrap()
+    // });
     println!("done!");
 }

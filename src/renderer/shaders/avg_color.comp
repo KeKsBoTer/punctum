@@ -1,0 +1,22 @@
+#version 450
+
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform readonly image2D image;
+layout(set = 0, binding = 1) buffer Target{
+    uvec4 outColor;
+};
+
+void main() {
+    uvec2 idx = gl_GlobalInvocationID.xy;
+    uvec2 size = imageSize(image); 
+    if(idx.x>size.x || idx.y> size.y){
+        return;
+    }
+    uvec4 color = uvec4(imageLoad(image,ivec2(idx)));
+    atomicAdd(outColor.r,color.r);
+    atomicAdd(outColor.g,color.g);
+    atomicAdd(outColor.b,color.b);
+    atomicAdd(outColor.a,color.a);
+}

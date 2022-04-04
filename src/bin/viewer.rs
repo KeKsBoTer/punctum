@@ -81,12 +81,11 @@ fn main() {
 
     let mut pc_raw = PointCloud::from_ply_file("bunny.ply");
     pc_raw.scale_to_unit_sphere();
-    println!("box: {:?}", pc_raw.bounding_box());
     let pc = PointCloudGPU::from_point_cloud(device, Arc::new(pc_raw));
 
     let cameras = punctum::Camera::load_from_ply("sphere.ply");
 
-    let mut camera = cameras.get(1).unwrap().clone();
+    let camera = cameras.get(1).unwrap().clone();
     // let mut camera = Camera::look_at_perspective(*pc.cpu().bounding_box());
     let mut camera_controller = CameraController::new(0.1, 0.1);
 
