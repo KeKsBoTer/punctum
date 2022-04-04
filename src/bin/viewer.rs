@@ -158,8 +158,10 @@ fn main() {
             frame.recreate_if_necessary();
 
             let time_since_last_frame = last_update_inst.elapsed();
-            // println!("FPS: {:}", 1. / time_since_last_frame.as_secs_f32());
-
+            let fps = 1. / time_since_last_frame.as_secs_f32();
+            if fps < 55. {
+                println!("FPS: {:}", fps);
+            }
             // camera_controller.update_camera(&mut camera, time_since_last_frame);
 
             last_update_inst = Instant::now();

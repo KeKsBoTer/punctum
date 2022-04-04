@@ -103,7 +103,6 @@ pub struct OfflineRenderer {
     pc: PointCloudGPU,
     frame: Frame,
     queue: Arc<Queue>,
-    img_size: u32,
 
     buffer: Arc<CpuAccessibleBuffer<[[u8; 4]]>>,
 }
@@ -158,7 +157,7 @@ impl OfflineRenderer {
 
         let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
 
-        let pixel_format_size = image_format.block_size().unwrap() as u32;
+        // let pixel_format_size = image_format.components()
 
         let target_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
@@ -174,7 +173,6 @@ impl OfflineRenderer {
         OfflineRenderer {
             renderer,
             frame,
-            img_size,
             queue: queue,
             buffer: target_buffer,
             pc: pc_gpu,
@@ -277,25 +275,6 @@ impl ply::PropertyAccess for PerceivedColor {
             "y" => Some(self.pos.y),
             "z" => Some(self.pos.z),
             _ => None,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Face {
-    pub vertex_index: Vec<i32>,
-}
-// same thing for Face
-impl ply::PropertyAccess for Face {
-    fn new() -> Self {
-        Face {
-            vertex_index: Vec::new(),
-        }
-    }
-    fn set_property(&mut self, key: String, property: ply::Property) {
-        match (key.as_ref(), property) {
-            ("vertex_index", ply::Property::ListInt(vec)) => self.vertex_index = vec,
-            (k, _) => panic!("Face: Unexpected key/value combination: key: {}", k),
         }
     }
 }

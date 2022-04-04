@@ -3,8 +3,7 @@ use std::sync::Arc;
 use vulkano::{
     buffer::CpuAccessibleBuffer,
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
-        SecondaryAutoCommandBuffer, SubpassContents,
+        AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
     image::{ImageDimensions, StorageImage},

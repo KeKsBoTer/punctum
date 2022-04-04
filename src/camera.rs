@@ -1,9 +1,7 @@
 use cgmath::{
-    vec3, Angle, Deg, EuclideanSpace, InnerSpace, Matrix4, Point1, Point3, Rad, SquareMatrix,
-    UlpsEq, Vector3, Zero,
+    vec3, Angle, Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad, SquareMatrix, UlpsEq,
+    Vector3, Zero,
 };
-use image::Rgba;
-use ply_rs::ply;
 use std::time::Duration;
 use winit::{dpi::PhysicalPosition, event::*};
 
