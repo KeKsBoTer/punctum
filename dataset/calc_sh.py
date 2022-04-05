@@ -22,16 +22,14 @@ def calc_point_weights(coords_sperical,n=100):
     return counts/counts.sum()
 
 
-def calc_coeficients(l_max,coords,target,target_weights):
+def calc_coeficients(l_max,coords,target):
     device = coords.device
-
-    theta_sin = coords[:,:1].sin()
 
     coefs = torch.zeros((l_max+1,2*l_max+1,3),device=device)
 
     for l in range(l_max+1):
         y_lm = get_spherical_harmonics(l,coords[:,0],coords[:,1])
-        a_lm = (y_lm*theta_sin*target_weights).T@target
+        a_lm = y_lm.T@target
         coefs[l,l_max-l:l_max+l+1]=a_lm
 
     return coefs
@@ -56,12 +54,17 @@ if __name__ == "__main__":
                         help='ply file where results will be written to')
     parser.add_argument('--l_max', type=int, default=10,
                         help='maximum order of spherical harmonics coefficients to calculate')
+    parser.add_argument('--cuda', default=False, action='store_true',
+                        help='use CUDA (might be slower)')
+
 
     args = parser.parse_args()
 
+    device = "cuda" if args.cuda else "cpu"
+
     with measure_time() as t:
-        torch.zeros(1,device="cuda:0")
-        print(f"cuda startup took \t{t():.4f} secs")
+        torch.zeros(1,device=device)
+        print(f"pytorch startup took \t{t():.4f} secs")
 
     with measure_time() as t:
         plydata = PlyData.read(args.in_file)
@@ -72,14 +75,15 @@ if __name__ == "__main__":
             
         l_max = args.l_max
 
-        cameras = unpack_data(vertex_data,["x","y","z"]).cuda()
-        perceived_colors = unpack_data(vertex_data,["red","green","blue"]).float().cuda()/255.
+        cameras = unpack_data(vertex_data,["x","y","z"]).to(device)
+        perceived_colors = unpack_data(vertex_data,["red","green","blue"]).float().to(device)/255.
+        print(perceived_colors)
         print(f"reading in took \t{t():.4f} secs")
 
     with measure_time() as t:
         cameras_spherical = to_spherical(cameras)
-        sample_area = 2*PI**2* calc_point_weights(cameras_spherical).unsqueeze(-1)
-        coefs = calc_coeficients(10,cameras_spherical,perceived_colors,sample_area)
+        # sample_area = 2*PI**2* calc_point_weights(cameras_spherical).unsqueeze(-1)
+        coefs = calc_coeficients(10,cameras_spherical,perceived_colors)
         print(f"coef. calc. took \t{t():.4f} secs")
 
     with measure_time() as t:

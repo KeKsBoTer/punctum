@@ -41,7 +41,7 @@ fn main() {
         pc_arc,
         256,
         RenderSettings {
-            point_size: 10.0,
+            point_size: 20.0,
             ..RenderSettings::default()
         },
     );
