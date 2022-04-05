@@ -49,9 +49,6 @@ fn main() {
     let renders: Vec<Rgba<u8>> = cameras.iter().map(|c| renderer.render(c.clone())).collect();
 
     println!("done rendering ... saving ....");
-    for r in renders.iter() {
-        println!("color: {:?}", r);
-    }
 
     let mut ply = {
         let mut ply = Ply::<PerceivedColor>::new();
@@ -69,8 +66,6 @@ fn main() {
             .collect();
 
         ply.payload.insert("vertex".to_string(), cam_colors);
-
-        ply.make_consistent().unwrap();
         ply
     };
 

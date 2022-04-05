@@ -146,6 +146,8 @@ impl PointCloudRenderer {
         )
         .unwrap();
 
+        let pc_buffer = point_cloud.gpu_buffer();
+
         builder
             .bind_pipeline_graphics(self.pipeline.clone())
             .bind_descriptor_sets(
@@ -154,8 +156,8 @@ impl PointCloudRenderer {
                 0,
                 set.clone(),
             )
-            .bind_vertex_buffers(0, point_cloud.gpu_buffer.clone())
-            .draw(point_cloud.gpu_buffer.len() as u32, 1, 0, 0)
+            .bind_vertex_buffers(0, pc_buffer.clone())
+            .draw(pc_buffer.len() as u32, 1, 0, 0)
             .unwrap();
 
         Arc::new(builder.build().unwrap())

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use cgmath::Point3;
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
 use vulkano::instance::{Instance, InstanceCreateInfo};
@@ -84,7 +83,7 @@ fn main() {
     pc_raw.scale_to_unit_sphere();
     let pc = PointCloudGPU::from_point_cloud(device, Arc::new(pc_raw));
 
-    let camera = Camera::on_unit_sphere(Point3::new(0., 0., -1.));
+    let mut camera = Camera::look_at_perspective(pc.cpu().bounding_box().clone());
 
     // let mut camera = Camera::look_at_perspective(*pc.cpu().bounding_box());
     let mut camera_controller = CameraController::new(0.1, 0.1);
@@ -162,7 +161,7 @@ fn main() {
             if fps < 55. {
                 println!("FPS: {:}", fps);
             }
-            // camera_controller.update_camera(&mut camera, time_since_last_frame);
+            camera_controller.update_camera(&mut camera, time_since_last_frame);
 
             last_update_inst = Instant::now();
             surface.window().request_redraw();

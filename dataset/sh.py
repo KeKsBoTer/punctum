@@ -146,3 +146,26 @@ def get_spherical_harmonics(l, theta, phi):
     return torch.stack([ get_spherical_harmonics_element(l, m, theta, phi) \
                          for m in range(-l, l+1) ],
                         dim = -1)
+
+def to_spherical(coords):
+    """ Cartesian to spherical coordinate conversion.
+    Args:
+        cords: [N,3] cartesian coordinates
+    """
+    assert (coords.norm(p=2,dim=1)-1 < 1e-8).all(), "must be of length 1"
+
+    theta = coords[:,2].acos()
+    phi = torch.atan2(coords[:,1],coords[:,0]) + pi
+    return torch.stack([theta,phi]).T
+
+
+def evalute_sh(coefs,x,y):
+    device = coefs.device
+    l_max = coefs.shape[0]-1
+    Y = torch.zeros((*x.shape,3),device=device)
+    for l in range(l_max+1):
+        y_lm = get_spherical_harmonics(l,x,y)
+        Y += (y_lm@coefs[l][l_max-l:l_max+l+1])
+
+    return Y
+    

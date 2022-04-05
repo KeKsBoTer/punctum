@@ -101,16 +101,7 @@ import numpy as np
 plydata = PlyData.read('../sphere.ply')
 positions = np.stack([plydata["vertex"].data["x"],plydata["vertex"].data["y"],plydata["vertex"].data["z"]]).T
 cameras = torch.from_numpy(positions)
-
-
 # -
-
-def to_spherical(coords):
-    assert (coords.norm(p=2,dim=1)-1 < 1e-8).all(), "must be of length 1"
-
-    theta = coords[:,2].acos()
-    phi = torch.atan2(coords[:,1],coords[:,0]) + PI
-    return torch.stack([theta,phi]).T
 
 
 

@@ -97,8 +97,8 @@ impl PointCloud {
 }
 
 pub struct PointCloudGPU {
-    pub cpu: Arc<PointCloud>,
-    pub gpu_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
+    cpu: Arc<PointCloud>,
+    gpu_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
 }
 
 impl PointCloudGPU {
@@ -119,6 +119,9 @@ impl PointCloudGPU {
 
     pub fn cpu(&self) -> &Arc<PointCloud> {
         &self.cpu
+    }
+    pub fn gpu_buffer(&self) -> &Arc<CpuAccessibleBuffer<[Vertex]>> {
+        &self.gpu_buffer
     }
 }
 
