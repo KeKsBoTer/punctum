@@ -1,6 +1,7 @@
 
 # python
 **/*.pyc
+**/*.ipynb
 
 /target
 renders/
