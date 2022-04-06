@@ -1,4 +1,4 @@
-# COPIED from https://github.com/lucidrains/se3-transformer-pytorch/blob/main/se3_transformer_pytorch/spherical_harmonics.py
+# adapted from https://github.com/lucidrains/se3-transformer-pytorch/blob/main/se3_transformer_pytorch/spherical_harmonics.py
 
 from math import pi, sqrt
 from functools import reduce
@@ -33,31 +33,31 @@ def clear_spherical_harmonics_cache():
     CACHE.clear()
 
 
-def lpmv_cache_key_fn(l, m, x):
-    return (l, m,x)
+def lpmv_cache_key_fn(l:int, m:int,x:torch.Tensor)->torch.Tensor:
+    return (l, m)
 
 
 # spherical harmonics
 
 
 @lru_cache(maxsize=1000)
-def semifactorial(x):
+def semifactorial(x:int) ->int:
     return reduce(mul, range(x, 1, -2), 1.0)
 
 
 @lru_cache(maxsize=1000)
-def pochhammer(x, k):
+def pochhammer(x:int, k:int)->int:
     return reduce(mul, range(x + 1, x + k), float(x))
 
 
-def negative_lpmv(l, m, y):
+def negative_lpmv(l:int, m:int, y:torch.Tensor)->torch.Tensor:
     if m < 0:
         y *= (-1) ** m / pochhammer(l + m + 1, -2 * m)
     return y
 
 
 @cache(cache=CACHE, key_fn=lpmv_cache_key_fn)
-def lpmv(l, m, x):
+def lpmv(l:int, m:int, x:torch.Tensor)->torch.Tensor:
     """Associated Legendre function including Condon-Shortley phase.
     Args:
         m: int order
@@ -82,22 +82,19 @@ def lpmv(l, m, x):
         y *= torch.pow(1 - x * x, m_abs / 2)
         return negative_lpmv(l, m, y)
 
-    # Recursively precompute lower degree harmonics
-    lpmv(l - 1, m, x)
-
     # Compute P_{l}^m from recursion in P_{l-1}^m and P_{l-2}^m
     # Inplace speedup
     y = ((2 * l - 1) / (l - m_abs)) * x * lpmv(l - 1, m_abs, x)
 
     if l - m_abs > 1:
-        y -= ((l + m_abs - 1) / (l - m_abs)) * CACHE[(l - 2, m_abs,x)]
+        y -= ((l + m_abs - 1) / (l - m_abs)) * CACHE[(l - 2, m_abs)]
 
     if m < 0:
         y = negative_lpmv(l, m, y)
     return y
 
 
-def get_spherical_harmonics_element(l, m, theta, phi):
+def get_spherical_harmonics_element(l:int, m:int, theta:torch.Tensor, phi:torch.Tensor) -> torch.Tensor:
     """Tesseral spherical harmonic with Condon-Shortley phase.
     The Tesseral spherical harmonics are also known as the real spherical
     harmonics.
@@ -129,24 +126,8 @@ def get_spherical_harmonics_element(l, m, theta, phi):
     return Y
 
 
-def get_spherical_harmonics_2(l, theta, phi):
-    """Tesseral harmonic with Condon-Shortley phase.
-    The Tesseral spherical harmonics are also known as the real spherical
-    harmonics.
-    Args:
-        l: int for degree
-        theta: collatitude or polar angle
-        phi: longitude or azimuth
-    Returns:
-        tensor of shape [*theta.shape, l+1]
-    """
-    return torch.stack(
-        [get_spherical_harmonics_element(l, m, theta, phi) for m in range(0, l + 1)],
-        dim=-1,
-    )
 
-
-def get_spherical_harmonics(l, theta, phi):
+def get_spherical_harmonics(l:int, theta:torch.Tensor, phi:torch.Tensor) -> torch.Tensor:
     """Tesseral harmonic with Condon-Shortley phase.
     The Tesseral spherical harmonics are also known as the real spherical
     harmonics.
@@ -163,7 +144,7 @@ def get_spherical_harmonics(l, theta, phi):
     )
 
 
-def to_spherical(coords):
+def to_spherical(coords:torch.Tensor)->torch.Tensor:
     """Cartesian to spherical coordinate conversion.
     Args:
         cords: [N,3] cartesian coordinates
@@ -176,10 +157,10 @@ def to_spherical(coords):
 
 
 
-def lm2flat_index(l, m):
+def lm2flat_index(l:int, m:int) -> int:
     return l * (l + 1) - m
 
-def evalute_sh(coefs, x, y):
+def evalute_sh(coefs:int, x:torch.Tensor, y:torch.Tensor) -> torch.Tensor:
     device = coefs.device
     l_max = coefs.shape[0] - 1
     Y = torch.zeros((*x.shape, 3), device=device)
@@ -190,7 +171,7 @@ def evalute_sh(coefs, x, y):
     return Y
 
 
-def calc_sh(l_max,coords):
+def calc_sh(l_max:int,coords:torch.Tensor) -> torch.Tensor:
     assert (l_max+1)**2 < coords.shape[0], "to few samples"
     values = torch.zeros((coords.shape[0],(l_max+1)**2),device=coords.device)
 
@@ -199,7 +180,20 @@ def calc_sh(l_max,coords):
         values[:,lm2flat_index(l,l):lm2flat_index(l,-l)+1] = sh
     return values
     
-def calc_coeficients(l_max,coords,target):
+def calc_coeficients(l_max:int,coords:torch.Tensor,target:torch.Tensor) -> torch.Tensor:
+    """ Spherical Harmonics ceofficients calculation.
+    Computes the ceofficients by formulating them as a least squares problem.
+    See https://math.stackexchange.com/questions/54880/calculate-nearest-spherical-harmonic-for-a-3d-distribution-over-a-grid
+    Args:
+        l_max (int): maximum degree to compute
+        coords ([N,2]): sperical coordinates 
+        target ([N,D]): values for coords
+    Returns:
+        [(l_max+1)**2,D] ceofficients
+    Throws:
+        Assertion if (l_max+1)**2 >= N
+
+    """
     sh = calc_sh(l_max,coords)
     A = sh.T@sh 
     B = (sh.T@target)
