@@ -335,7 +335,10 @@ for l in range(l_max+1):
         ax.set_title(f"(l,m)=({l},{m})")
         ax.set_yticks([])
         ax.set_xticks([])
-        
+# -
+
+from sh_py.coeficient_builder import SphericalHarmonicsCoeficientBuilder,SphericalHarmonicsEvaluator
+
 
 # +
 def lm2flat_index(l, m):
@@ -350,8 +353,8 @@ def calc_coeficients(l_max,coords,target):
     coefs = torch.zeros((lm2flat_index(l_max,-l_max)+1,3))
     for l in range(l_max+1):
         y_lm = get_spherical_harmonics(l,coords[:,0],coords[:,1])
-        a_lm = y_lm.T@target
-        coefs[lm2flat_index(l,l):lm2flat_index(l,-l-1)]=a_lm
+        a_lm = ((y_lm.T).double())@(target.double())
+        coefs[lm2flat_index(l,l):lm2flat_index(l,-l-1)]=a_lm.float()
 
     return coefs/(4*PI)
 
@@ -370,25 +373,24 @@ x = torch.arange(0,PI,PI/resolution)
 y = torch.arange(0,2*PI,2*PI/resolution)
 x_grid,y_grid = torch.meshgrid(x,y, indexing='ij')
 
-ls = [0,1,2,3,5,10,20]
+ls = [0,1,2,3,5,10,11]
 
 fig,axes = plt.subplots(1,len(ls)+1,figsize=(1*20,(len(ls)+1)*20))
 
 target = avg_colors.cpu()
 values = []
 for i,l in enumerate(ls):
-    #coefs = calc_coeficients(l,cameras_spherical,target)
+    coefs = calc_coeficients(l,cameras_spherical,target)
     
-    builder = SphericalHarmonicsCoeficientBuilder(l,(3,))
-    for (pos,color) in zip(cameras,avg_colors):
-        builder.add_samples(pos,color)
-    coefs = builder.compute_coeficients().T
+    #builder = SphericalHarmonicsCoeficientBuilder(l,(3,),solve_ls=False)
+    #for (pos,color) in zip(cameras,avg_colors):
+    #    builder.add_samples(pos,color)
+    #coefs = builder.compute_coeficients().T
     Y = evalute_sh(coefs,x_grid,y_grid)
     ax = axes[i+1]
     ax.imshow(Y.clip(0,1))
     ax.set_axis_off()
     ax.set_title(f"l={l}")
-    print()
 
 axes[0].imshow(render_discrete)
 axes[0].set_axis_off()
@@ -400,12 +402,8 @@ l_max = 12
 values_simon = []
 target = avg_colors.cpu()
 for l in range(l_max):
-    #coefs_l = calc_coeficients(l,cameras_spherical,target)
-    
-    builder = SphericalHarmonicsCoeficientBuilder(l,(3,))
-    for (pos,color) in zip(cameras,avg_colors):
-        builder.add_samples(pos,color)
-    coefs_l = builder.compute_coeficients().T
+    coefs_l = calc_coeficients(l,cameras_spherical,target)
+   
     Y = evalute_sh(coefs_l,cameras_spherical[:,0],cameras_spherical[:,1])
     values_simon.append((Y-target).norm(2,dim=1).mean())
 
@@ -424,6 +422,19 @@ for l in range(l_max):
     values_christian.append((Y-target).norm(2,dim=1).mean())
 
 plt.plot(values_christian,label="christian")
+
+values_christian = []
+for l in range(l_max):
+    builder = SphericalHarmonicsCoeficientBuilder(l,(3,),solve_ls=False)
+    for (pos,color) in zip(cameras,avg_colors):
+        builder.add_samples(pos,color)
+    coefs_py = builder.compute_coeficients()
+    
+    evaluator = SphericalHarmonicsEvaluator(l)
+    Y =evaluator(cameras)@coefs_py.T
+    values_christian.append((Y-target).norm(2,dim=1).mean())
+
+plt.plot(values_christian,label="christian (solve_ls=False)")
 
 plt.xticks(range(0,l_max,2))
 plt.xlabel("l")
@@ -483,7 +494,6 @@ ply_file = PlyData(
 ply_file.write("vis.ply")
 
 # +
-from sh_py.coeficient_builder import SphericalHarmonicsCoeficientBuilder,SphericalHarmonicsEvaluator
 
 l_max = 11
 

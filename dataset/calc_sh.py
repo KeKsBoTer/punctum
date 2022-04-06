@@ -1,38 +1,8 @@
 import torch 
-from matplotlib import pyplot as plt
-from math import pi as PI
 from plyfile import PlyData, PlyElement
 import numpy as np
 
-from sh import to_spherical,get_spherical_harmonics
-
-
-def calc_point_weights(coords_sperical,n=100):
-    device = coords_sperical.device
-    x = torch.arange(0,PI,PI/n,device=device)
-    y = torch.arange(0,2*PI,2*PI/n,device=device)
-    spherical_grid = torch.dstack(torch.meshgrid(x,y, indexing='ij')).flatten(0,1)
-
-    distances = torch.cdist(coords_sperical,spherical_grid,p=2)
-
-    nearest = distances.argmin(dim=0).reshape((n,n))
-
-    _,counts = nearest.unique(sorted=True,return_counts=True)
-
-    return counts/counts.sum()
-
-
-def calc_coeficients(l_max,coords,target):
-    device = coords.device
-
-    coefs = torch.zeros((l_max+1,2*l_max+1,3),device=device)
-
-    for l in range(l_max+1):
-        y_lm = get_spherical_harmonics(l,coords[:,0],coords[:,1])
-        a_lm = y_lm.T@target
-        coefs[l,l_max-l:l_max+l+1]=a_lm
-
-    return coefs
+from sh import to_spherical,calc_coeficients,lm2flat_index
 
 
 
@@ -77,19 +47,17 @@ if __name__ == "__main__":
 
         cameras = unpack_data(vertex_data,["x","y","z"]).to(device)
         perceived_colors = unpack_data(vertex_data,["red","green","blue"]).float().to(device)/255.
-        print(perceived_colors)
         print(f"reading in took \t{t():.4f} secs")
 
     with measure_time() as t:
         cameras_spherical = to_spherical(cameras)
-        # sample_area = 2*PI**2* calc_point_weights(cameras_spherical).unsqueeze(-1)
-        coefs = calc_coeficients(10,cameras_spherical,perceived_colors)
+        coefs = calc_coeficients(l_max,cameras_spherical,perceived_colors)
         print(f"coef. calc. took \t{t():.4f} secs")
 
     with measure_time() as t:
         coef_data = []
-        for l,c in enumerate(coefs.cpu()):
-            for m,sh in enumerate(c[l_max-l:l_max+l+1]):
+        for l in range(l_max+1):
+            for m,sh in enumerate(coefs.cpu()[lm2flat_index(l,l):lm2flat_index(l,-l)+1]):
                 coef_data.append((l,-l+m,list(sh.numpy())))
                 
         ply_sh_data =np.array(coef_data,dtype=[("l","u1"),("m","i1"),('coefficients', 'f4',(3,))])
