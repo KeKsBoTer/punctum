@@ -1,7 +1,9 @@
 
 # python
 **/*.pyc
-**/*.ipynb
+#**/*.ipynb
+
+**/.ipynb_checkpoints
 
 /target
 renders/

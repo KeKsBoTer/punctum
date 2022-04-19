@@ -1,22 +1,29 @@
 # adapted from https://github.com/lucidrains/se3-transformer-pytorch/blob/main/se3_transformer_pytorch/spherical_harmonics.py
 
+from functools import lru_cache, reduce, wraps
 from math import pi, sqrt
-from functools import reduce
 from operator import mul
+from typing import Dict, Callable, Tuple
+
 import torch
 
-from functools import lru_cache, wraps
 
+def cache(cache_store: Dict, key_fn: Callable):
+    """Used to cache Lagrange polynomials
 
-def cache(cache, key_fn):
+    Args:
+        cache_store (_type_): cache dict
+        key_fn (_type_): _description_
+    """
+
     def cache_inner(fn):
         @wraps(fn)
         def inner(*args, **kwargs):
             key_name = key_fn(*args, **kwargs)
-            if key_name in cache:
-                return cache[key_name]
+            if key_name in cache_store:
+                return cache_store[key_name]
             res = fn(*args, **kwargs)
-            cache[key_name] = res
+            cache_store[key_name] = res
             return res
 
         return inner
@@ -30,10 +37,12 @@ CACHE = {}
 
 
 def clear_spherical_harmonics_cache():
+    """clears global cache """
     CACHE.clear()
 
 
-def lpmv_cache_key_fn(l:int, m:int,x:torch.Tensor)->torch.Tensor:
+def lpmv_cache_key_fn(l: int, m: int, _x: torch.Tensor) -> Tuple[int, int]:
+    """cache key for lagrange polynomials"""
     return (l, m)
 
 
@@ -41,30 +50,32 @@ def lpmv_cache_key_fn(l:int, m:int,x:torch.Tensor)->torch.Tensor:
 
 
 @lru_cache(maxsize=1000)
-def semifactorial(x:int) ->int:
+def semifactorial(x: int) -> int:
     return reduce(mul, range(x, 1, -2), 1.0)
 
 
 @lru_cache(maxsize=1000)
-def pochhammer(x:int, k:int)->int:
+def pochhammer(x: int, k: int) -> int:
     return reduce(mul, range(x + 1, x + k), float(x))
 
 
-def negative_lpmv(l:int, m:int, y:torch.Tensor)->torch.Tensor:
+def negative_lpmv(l: int, m: int, y: torch.Tensor) -> torch.Tensor:
     if m < 0:
         y *= (-1) ** m / pochhammer(l + m + 1, -2 * m)
     return y
 
 
-@cache(cache=CACHE, key_fn=lpmv_cache_key_fn)
-def lpmv(l:int, m:int, x:torch.Tensor)->torch.Tensor:
+@cache(cache_store=CACHE, key_fn=lpmv_cache_key_fn)
+def lpmv(l: int, m: int, x: torch.Tensor) -> torch.Tensor:
     """Associated Legendre function including Condon-Shortley phase.
+    
     Args:
-        m: int order
-        l: int degree
-        x: float argument tensor
+        l (int): order
+        m (int): degree
+        x (torch.Tensor): float argument tensor
+
     Returns:
-        tensor of x-shape
+        torch.Tensor: sh values
     """
     # Check memoized versions
     m_abs = abs(m)
@@ -94,7 +105,9 @@ def lpmv(l:int, m:int, x:torch.Tensor)->torch.Tensor:
     return y
 
 
-def get_spherical_harmonics_element(l:int, m:int, theta:torch.Tensor, phi:torch.Tensor) -> torch.Tensor:
+def get_spherical_harmonics_element(
+    l: int, m: int, theta: torch.Tensor, phi: torch.Tensor
+) -> torch.Tensor:
     """Tesseral spherical harmonic with Condon-Shortley phase.
     The Tesseral spherical harmonics are also known as the real spherical
     harmonics.
@@ -126,8 +139,9 @@ def get_spherical_harmonics_element(l:int, m:int, theta:torch.Tensor, phi:torch.
     return Y
 
 
-
-def get_spherical_harmonics(l:int, theta:torch.Tensor, phi:torch.Tensor) -> torch.Tensor:
+def get_spherical_harmonics(
+    l: int, theta: torch.Tensor, phi: torch.Tensor
+) -> torch.Tensor:
     """Tesseral harmonic with Condon-Shortley phase.
     The Tesseral spherical harmonics are also known as the real spherical
     harmonics.
@@ -144,7 +158,7 @@ def get_spherical_harmonics(l:int, theta:torch.Tensor, phi:torch.Tensor) -> torc
     )
 
 
-def to_spherical(coords:torch.Tensor)->torch.Tensor:
+def to_spherical(coords: torch.Tensor) -> torch.Tensor:
     """Cartesian to spherical coordinate conversion.
     Args:
         cords: [N,3] cartesian coordinates
@@ -156,31 +170,34 @@ def to_spherical(coords:torch.Tensor)->torch.Tensor:
     return torch.stack([theta, phi]).T
 
 
-
-def lm2flat_index(l:int, m:int) -> int:
+def lm2flat_index(l: int, m: int) -> int:
     return l * (l + 1) - m
 
-def evalute_sh(coefs:int, x:torch.Tensor, y:torch.Tensor) -> torch.Tensor:
+
+def evalute_sh(coefs: int, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     device = coefs.device
     l_max = coefs.shape[0] - 1
     Y = torch.zeros((*x.shape, 3), device=device)
     for l in range(l_max + 1):
         y_lm = get_spherical_harmonics(l, x, y)
-        Y += y_lm @ coefs[lm2flat_index(l,l):lm2flat_index(l,-l)+1]
+        Y += y_lm @ coefs[lm2flat_index(l, l) : lm2flat_index(l, -l) + 1]
 
     return Y
 
 
-def calc_sh(l_max:int,coords:torch.Tensor) -> torch.Tensor:
-    assert (l_max+1)**2 < coords.shape[0], "to few samples"
-    values = torch.zeros((coords.shape[0],(l_max+1)**2),device=coords.device)
+def calc_sh(l_max: int, coords: torch.Tensor) -> torch.Tensor:
+    assert (l_max + 1) ** 2 < coords.shape[0], "to few samples"
+    values = torch.zeros((coords.shape[0], (l_max + 1) ** 2), device=coords.device)
 
-    for l in range(l_max+1):
-        sh = get_spherical_harmonics(l,coords[:,0],coords[:,1])
-        values[:,lm2flat_index(l,l):lm2flat_index(l,-l)+1] = sh
+    for l in range(l_max + 1):
+        sh = get_spherical_harmonics(l, coords[:, 0], coords[:, 1])
+        values[:, lm2flat_index(l, l) : lm2flat_index(l, -l) + 1] = sh
     return values
-    
-def calc_coeficients(l_max:int,coords:torch.Tensor,target:torch.Tensor) -> torch.Tensor:
+
+
+def calc_coeficients(
+    l_max: int, coords: torch.Tensor, target: torch.Tensor
+) -> torch.Tensor:
     """ Spherical Harmonics ceofficients calculation.
     Computes the ceofficients by formulating them as a least squares problem.
     See https://math.stackexchange.com/questions/54880/calculate-nearest-spherical-harmonic-for-a-3d-distribution-over-a-grid
@@ -194,7 +211,8 @@ def calc_coeficients(l_max:int,coords:torch.Tensor,target:torch.Tensor) -> torch
         Assertion if (l_max+1)**2 >= N
 
     """
-    sh = calc_sh(l_max,coords)
-    A = sh.T@sh 
-    B = (sh.T@target)
-    return torch.linalg.lstsq(A,B).solution
+    sh = calc_sh(l_max, coords)
+    A = sh.T @ sh
+    B = sh.T @ target
+    return torch.linalg.lstsq(A, B).solution
+
