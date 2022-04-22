@@ -6,10 +6,9 @@ mod vertex;
 use std::sync::Arc;
 
 pub use camera::{Camera, CameraController};
-use cgmath::{vec4, EuclideanSpace, Point3, Vector4};
+use cgmath::{vec4, Vector4};
 use image::Rgba;
-use ply_rs::ply::{self, Addable, ElementDef, PropertyDef, PropertyType, ScalarType};
-pub use pointcloud::{PointCloud, PointCloudGPU};
+pub use pointcloud::{BoundingBox, PointCloud, PointCloudGPU};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use renderer::Frame;
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
@@ -209,74 +208,4 @@ fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
         )
         .reduce(|| start, |acc, item| acc + item);
     Rgba(mean.map(|v| (v * 255. / mean[3]).round() as u8).into())
-}
-
-#[derive(Clone, Copy)]
-pub struct PerceivedColor {
-    pub pos: Point3<f32>,
-    pub color: Rgba<u8>,
-}
-
-impl PerceivedColor {
-    pub fn element_def(name: String) -> ElementDef {
-        let mut point_element = ElementDef::new(name);
-        let p = PropertyDef::new("x".to_string(), PropertyType::Scalar(ScalarType::Float));
-        point_element.properties.add(p);
-        let p = PropertyDef::new("y".to_string(), PropertyType::Scalar(ScalarType::Float));
-        point_element.properties.add(p);
-        let p = PropertyDef::new("z".to_string(), PropertyType::Scalar(ScalarType::Float));
-        point_element.properties.add(p);
-        let p = PropertyDef::new("red".to_string(), PropertyType::Scalar(ScalarType::UChar));
-        point_element.properties.add(p);
-        let p = PropertyDef::new("green".to_string(), PropertyType::Scalar(ScalarType::UChar));
-        point_element.properties.add(p);
-        let p = PropertyDef::new("blue".to_string(), PropertyType::Scalar(ScalarType::UChar));
-        point_element.properties.add(p);
-        let p = PropertyDef::new("alpha".to_string(), PropertyType::Scalar(ScalarType::UChar));
-        point_element.properties.add(p);
-        return point_element;
-    }
-}
-
-impl ply::PropertyAccess for PerceivedColor {
-    fn new() -> Self {
-        PerceivedColor {
-            pos: Point3::origin(),
-            color: Rgba([0; 4]),
-        }
-    }
-
-    fn set_property(&mut self, key: String, property: ply::Property) {
-        match (key.as_ref(), property) {
-            ("x", ply::Property::Float(v)) => self.pos[0] = v,
-            ("y", ply::Property::Float(v)) => self.pos[1] = v,
-            ("z", ply::Property::Float(v)) => self.pos[2] = v,
-            ("red", ply::Property::UChar(v)) => self.color[0] = v,
-            ("green", ply::Property::UChar(v)) => self.color[1] = v,
-            ("blue", ply::Property::UChar(v)) => self.color[2] = v,
-            ("alpha", ply::Property::UChar(v)) => self.color[3] = v,
-            ("nx", ply::Property::Float(_)) => {}
-            ("ny", ply::Property::Float(_)) => {}
-            ("nz", ply::Property::Float(_)) => {}
-            ("vertex_indices", _) => {}
-            (k, _) => panic!("Vertex: Unexpected key/value combination: key: {}", k),
-        }
-    }
-    fn get_uchar(&self, _property_name: &String) -> Option<u8> {
-        match _property_name.as_str() {
-            "red" => Some(self.color[0]),
-            "green" => Some(self.color[1]),
-            "blue" => Some(self.color[2]),
-            "alpha" => Some(self.color[3]),
-            _ => None,
-        }
-    }
-    fn get_float(&self, _property_name: &String) -> Option<f32> {
-        match _property_name.as_str() {
-            "x" => Some(self.pos.x),
-            "y" => Some(self.pos.y),
-            "z" => Some(self.pos.z),
-            _ => None,
-        }
-    }
 }

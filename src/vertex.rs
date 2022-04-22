@@ -28,6 +28,7 @@ impl ply::PropertyAccess for Vertex {
             ("green", ply::Property::UChar(v)) => self.color[1] = (v as f32) / 255.,
             ("blue", ply::Property::UChar(v)) => self.color[2] = (v as f32) / 255.,
             ("alpha", ply::Property::UChar(v)) => self.color[3] = (v as f32) / 255.,
+            ("vertex_indices", _) => {} // ignore
             (k, _) => panic!("Vertex: Unexpected key/value combination: key: {}", k),
         }
     }
@@ -37,6 +38,7 @@ impl ply::PropertyAccess for Vertex {
             "red" => Some((self.color[0] * 255.) as u8),
             "green" => Some((self.color[1] * 255.) as u8),
             "blue" => Some((self.color[2] * 255.) as u8),
+            "alpha" => Some((self.color[3] * 255.) as u8),
             _ => None,
         }
     }
@@ -64,6 +66,8 @@ impl Vertex {
         let p = PropertyDef::new("green".to_string(), PropertyType::Scalar(ScalarType::UChar));
         point_element.properties.add(p);
         let p = PropertyDef::new("blue".to_string(), PropertyType::Scalar(ScalarType::UChar));
+        point_element.properties.add(p);
+        let p = PropertyDef::new("alpha".to_string(), PropertyType::Scalar(ScalarType::UChar));
         point_element.properties.add(p);
         return point_element;
     }

@@ -5,7 +5,7 @@ use ply_rs::{
 };
 use std::{env, fs::File, sync::Arc};
 
-use punctum::{Camera, OfflineRenderer, PerceivedColor, PointCloud, RenderSettings};
+use punctum::{Camera, OfflineRenderer, PointCloud, RenderSettings, Vertex};
 fn main() {
     let args = env::args();
     if args.len() != 3 {
@@ -18,7 +18,7 @@ fn main() {
     let mut f = std::fs::File::open("sphere.ply").unwrap();
 
     // create a parser
-    let p = ply_rs::parser::Parser::<PerceivedColor>::new();
+    let p = ply_rs::parser::Parser::<Vertex>::new();
 
     // use the parser: read the entire file
     let in_ply = p.read_ply(&mut f).unwrap();
@@ -29,7 +29,7 @@ fn main() {
         .unwrap()
         .clone()
         .iter()
-        .map(|c| Camera::on_unit_sphere(c.pos))
+        .map(|c| Camera::on_unit_sphere(c.position.into()))
         .collect::<Vec<Camera>>();
 
     let mut pc = PointCloud::from_ply_file(ply_file);
@@ -51,38 +51,32 @@ fn main() {
     println!("done rendering ... saving ....");
 
     let mut ply = {
-        let mut ply = Ply::<PerceivedColor>::new();
+        let mut ply = Ply::<Vertex>::new();
         ply.header.encoding = Encoding::Ascii;
 
         ply.header
             .elements
-            .add(PerceivedColor::element_def("vertex".to_string()));
+            .add(Vertex::element_def("vertex".to_string()));
         ply.header
             .elements
-            .add(PerceivedColor::element_def("camera".to_string()));
+            .add(Vertex::element_def("camera".to_string()));
 
-        let cam_colors: Vec<PerceivedColor> = renders
+        let cam_colors: Vec<Vertex> = renders
             .iter()
             .zip(cameras)
-            .map(|(color, cam)| PerceivedColor {
-                pos: *cam.position(),
-                color: *color,
+            .map(|(color, cam)| Vertex {
+                position: [cam.position().x, cam.position().y, cam.position().z],
+                normal: [0.; 3],
+                color: [
+                    color.0[0] as f32 / 255.,
+                    color.0[1] as f32 / 255.,
+                    color.0[2] as f32 / 255.,
+                    color.0[3] as f32 / 255.,
+                ],
             })
             .collect();
 
-        let vertices = pc_arc
-            .points()
-            .iter()
-            .map(|p| PerceivedColor {
-                pos: p.position.into(),
-                color: Rgba([
-                    (p.color[0] * 255.) as u8,
-                    (p.color[1] * 255.) as u8,
-                    (p.color[2] * 255.) as u8,
-                    255,
-                ]),
-            })
-            .collect();
+        let vertices = pc_arc.points().clone();
 
         ply.payload.insert("camera".to_string(), cam_colors);
         ply.payload.insert("vertex".to_string(), vertices);
