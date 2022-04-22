@@ -103,6 +103,7 @@ class FeatureNet(nn.Module):
         trans = self.tnet(x, batch)
         x, mask = to_dense_batch(x.T, batch)
         # TODO converting to dense and then back is inefficient
+        # maybe scatter matrix according to batch id
         x = torch.bmm(x, trans)
         x = x[mask]
         x = torch.cat([x, color], dim=-1).transpose(1, 0).unsqueeze(0)

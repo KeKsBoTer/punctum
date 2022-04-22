@@ -13,6 +13,7 @@ pub use pointcloud::{PointCloud, PointCloudGPU};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use renderer::Frame;
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
+pub use vertex::Vertex;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::{
@@ -217,8 +218,8 @@ pub struct PerceivedColor {
 }
 
 impl PerceivedColor {
-    pub fn element_def() -> ElementDef {
-        let mut point_element = ElementDef::new("vertex".to_string());
+    pub fn element_def(name: String) -> ElementDef {
+        let mut point_element = ElementDef::new(name);
         let p = PropertyDef::new("x".to_string(), PropertyType::Scalar(ScalarType::Float));
         point_element.properties.add(p);
         let p = PropertyDef::new("y".to_string(), PropertyType::Scalar(ScalarType::Float));
@@ -236,6 +237,7 @@ impl PerceivedColor {
         return point_element;
     }
 }
+
 impl ply::PropertyAccess for PerceivedColor {
     fn new() -> Self {
         PerceivedColor {

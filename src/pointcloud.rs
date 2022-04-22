@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use bytemuck::Zeroable;
 use cgmath::{Bounded, EuclideanSpace, MetricSpace, Point3, Vector3};
-use ply_rs::ply;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::Device,
@@ -13,28 +11,6 @@ use crate::vertex::Vertex;
 pub struct PointCloud {
     data: Vec<Vertex>,
     bbox: BoundingBox,
-}
-
-impl ply::PropertyAccess for Vertex {
-    fn new() -> Self {
-        Vertex::zeroed()
-    }
-
-    fn set_property(&mut self, key: String, property: ply::Property) {
-        match (key.as_ref(), property) {
-            ("x", ply::Property::Float(v)) => self.position[0] = v,
-            ("y", ply::Property::Float(v)) => self.position[1] = v,
-            ("z", ply::Property::Float(v)) => self.position[2] = v,
-            ("nx", ply::Property::Float(v)) => self.normal[0] = v,
-            ("ny", ply::Property::Float(v)) => self.normal[1] = v,
-            ("nz", ply::Property::Float(v)) => self.normal[2] = v,
-            ("red", ply::Property::UChar(v)) => self.color[0] = (v as f32) / 255.,
-            ("green", ply::Property::UChar(v)) => self.color[1] = (v as f32) / 255.,
-            ("blue", ply::Property::UChar(v)) => self.color[2] = (v as f32) / 255.,
-            ("alpha", ply::Property::UChar(_)) => {} // ignore alpha
-            (k, _) => panic!("Vertex: Unexpected key/value combination: key: {}", k),
-        }
-    }
 }
 
 impl PointCloud {
@@ -93,6 +69,10 @@ impl PointCloud {
 
     pub fn bounding_box(&self) -> &BoundingBox {
         &self.bbox
+    }
+
+    pub fn points(&self) -> &Vec<Vertex> {
+        &self.data
     }
 }
 

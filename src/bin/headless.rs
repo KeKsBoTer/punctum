@@ -38,7 +38,7 @@ fn main() {
     let pc_arc = Arc::new(pc);
 
     let mut renderer = OfflineRenderer::new(
-        pc_arc,
+        pc_arc.clone(),
         256,
         RenderSettings {
             point_size: 20.0,
@@ -54,7 +54,12 @@ fn main() {
         let mut ply = Ply::<PerceivedColor>::new();
         ply.header.encoding = Encoding::Ascii;
 
-        ply.header.elements.add(PerceivedColor::element_def());
+        ply.header
+            .elements
+            .add(PerceivedColor::element_def("vertex".to_string()));
+        ply.header
+            .elements
+            .add(PerceivedColor::element_def("camera".to_string()));
 
         let cam_colors: Vec<PerceivedColor> = renders
             .iter()
@@ -65,7 +70,22 @@ fn main() {
             })
             .collect();
 
-        ply.payload.insert("vertex".to_string(), cam_colors);
+        let vertices = pc_arc
+            .points()
+            .iter()
+            .map(|p| PerceivedColor {
+                pos: p.position.into(),
+                color: Rgba([
+                    (p.color[0] * 255.) as u8,
+                    (p.color[1] * 255.) as u8,
+                    (p.color[2] * 255.) as u8,
+                    255,
+                ]),
+            })
+            .collect();
+
+        ply.payload.insert("camera".to_string(), cam_colors);
+        ply.payload.insert("vertex".to_string(), vertices);
         ply
     };
 

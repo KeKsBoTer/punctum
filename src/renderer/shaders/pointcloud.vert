@@ -2,7 +2,7 @@
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
-layout(location = 2) in vec3 color;
+layout(location = 2) in vec4 color;
 
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 world;
@@ -18,7 +18,7 @@ out gl_PerVertex
 	float gl_PointSize;
 };
 
-layout(location = 0) out vec3 vertex_color;
+layout(location = 0) out vec4 vertex_color;
 
 void main() {
     mat4 worldview = uniforms.view * uniforms.world;
