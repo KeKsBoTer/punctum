@@ -1,137 +1,113 @@
-use cgmath::Point3;
+use cgmath::{vec3, EuclideanSpace, Point3};
 use las::{Read, Reader};
-use punctum::{BoundingBox, Vertex};
+use punctum::Vertex;
 
 const NODE_MAX: usize = 256;
 
 #[derive(Debug)]
 enum Node {
-    Leaf(Octant<Vec<Vertex>>),
-    Itermediate(Octant<[Box<Node>; 8]>),
+    Group(Box<[Node; 8]>),
+    Filled(Vec<Vertex>),
+    Empty,
 }
 
 impl Node {
-    fn bbox(&self) -> &BoundingBox {
+    fn insert(&mut self, point: Vertex, center: Point3<f32>, size: f32) -> Option<Node> {
         match self {
-            Node::Leaf(octant) => &octant.bbox,
-            Node::Itermediate(octant) => &octant.bbox,
-        }
-    }
+            Node::Group(group) => {
+                let (octant_i, new_size, new_center) = Node::child_octant(&point, center, size);
 
-    fn insert(&mut self, point: Vertex) -> Option<Octant<[Box<Node>; 8]>> {
-        match self {
-            Node::Leaf(octant) => {
-                if octant.data.len() < NODE_MAX {
-                    octant.data.push(point);
-                    return None;
+                if let Some(new_octant) = group[octant_i].insert(point, new_center, new_size) {
+                    group[octant_i] = new_octant;
+                }
+                None
+            }
+            Node::Filled(data) => {
+                if data.len() >= NODE_MAX {
+                    let mut new_node = Node::Group(Node::split(data, center, size));
+                    if new_node.insert(point, center, size).is_some() {
+                        panic!("unreachable");
+                    }
+                    Some(new_node)
                 } else {
-                    println!("split occured");
-                    return Some(octant.split());
+                    data.push(point);
+                    None
                 }
             }
-            Node::Itermediate(octant) => {
-                let target_i = octant
-                    .data
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, node)| {
-                        if node.bbox().contains(point.position.into()) {
-                            Some(i)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap();
-                if let Some(new_octant) = octant.data[target_i].insert(point) {
-                    octant.data[target_i] = Box::new(Node::Itermediate(new_octant));
-                }
-                return None;
+            Node::Empty => {
+                let mut new_vec = Vec::with_capacity(NODE_MAX);
+                new_vec.push(point);
+                Some(Node::Filled(new_vec))
             }
         }
     }
-}
 
-#[derive(Debug)]
-struct Octant<T> {
-    data: T,
-    bbox: BoundingBox,
-}
-
-fn nth_bbox(bbox: &BoundingBox, n: u8) -> BoundingBox {
-    let center = bbox.center();
-    match n {
-        0 => BoundingBox::new(center, Point3::new(bbox.min.x, bbox.max.y, bbox.min.z)),
-        1 => BoundingBox::new(center, Point3::new(bbox.max.x, bbox.max.y, bbox.min.z)),
-
-        2 => BoundingBox::new(center, Point3::new(bbox.min.x, bbox.min.y, bbox.min.z)),
-        3 => BoundingBox::new(center, Point3::new(bbox.max.x, bbox.min.y, bbox.min.z)),
-
-        4 => BoundingBox::new(center, Point3::new(bbox.min.x, bbox.max.y, bbox.max.z)),
-        5 => BoundingBox::new(center, Point3::new(bbox.max.x, bbox.max.y, bbox.max.z)),
-
-        6 => BoundingBox::new(center, Point3::new(bbox.min.x, bbox.min.y, bbox.max.z)),
-        7 => BoundingBox::new(center, Point3::new(bbox.max.x, bbox.min.y, bbox.max.z)),
-        _ => panic!("0 <= n < 8"),
-    }
-}
-
-impl Octant<Vec<Vertex>> {
-    fn split(&self) -> Octant<[Box<Node>; 8]> {
-        let data: [Box<Node>; 8] = [0, 1, 2, 3, 4, 5, 6, 7].map(|i| {
-            Box::new(Node::Leaf(Octant {
-                data: Vec::new(),
-                bbox: nth_bbox(&self.bbox, i),
-            }))
-        });
-        Octant {
-            data: data,
-            bbox: self.bbox,
+    fn traverse<F: FnMut(&Node)>(&self, f: &mut F) {
+        f(self);
+        if let Node::Group(group) = self {
+            for node in group.iter() {
+                node.traverse(f);
+            }
         }
+    }
+
+    fn split(vertices: &Vec<Vertex>, center: Point3<f32>, size: f32) -> Box<[Node; 8]> {
+        let mut new_data = Box::new([
+            Node::Empty,
+            Node::Empty,
+            Node::Empty,
+            Node::Empty,
+            Node::Empty,
+            Node::Empty,
+            Node::Empty,
+            Node::Empty,
+        ]);
+        for v in vertices {
+            let (octant_i, new_size, new_center) = Node::child_octant(v, center, size);
+            if let Some(new_octant) = new_data[octant_i].insert(*v, new_center, new_size) {
+                new_data[octant_i] = new_octant;
+            }
+        }
+        return new_data;
+    }
+
+    fn child_octant(point: &Vertex, center: Point3<f32>, size: f32) -> (usize, f32, Point3<f32>) {
+        let z = (point.position[2] > center.z) as usize; // 1 if true
+        let y = (point.position[1] > center.y) as usize;
+        let x = (point.position[0] > center.z) as usize;
+        let octant_i = 4 * z + 2 * y + x;
+
+        let new_size = size / 2.;
+        let new_center =
+            center + new_size * 3_f32.sqrt() * vec3(x as f32 - 0.5, y as f32 - 0.5, z as f32 - 0.5);
+        return (octant_i, new_size, new_center);
     }
 }
 
 #[derive(Debug)]
 struct Octree {
     root: Node,
+    center: Point3<f32>,
+    size: f32,
 }
 
 impl Octree {
-    fn new(bbox: BoundingBox) -> Self {
-        Self {
-            root: Node::Leaf(Octant {
-                data: Vec::new(),
-                bbox: bbox,
-            }),
+    fn new(center: Point3<f32>, size: f32) -> Self {
+        Octree {
+            root: Node::Empty,
+            center,
+            size,
         }
     }
 
     fn insert(&mut self, point: Vertex) {
-        let node = &mut self.root;
-        match node {
-            Node::Leaf(octant) => {
-                if octant.data.len() < NODE_MAX {
-                    octant.data.push(point);
-                } else {
-                    println!("split occured");
-                    self.root = Node::Itermediate(octant.split());
-                }
-            }
-            Node::Itermediate(octant) => {
-                let center = octant.bbox.center();
-                let target = octant
-                    .data
-                    .iter_mut()
-                    .find(|node| node.bbox().contains(point.position.into()))
-                    .unwrap();
-            }
+        if let Some(new_root) = self.root.insert(point, self.center, self.size) {
+            self.root = new_root;
         }
     }
 
-    fn bbox(&self) -> &BoundingBox {
-        match &self.root {
-            Node::Leaf(octant) => &octant.bbox,
-            Node::Itermediate(octant) => &octant.bbox,
-        }
+    fn traverse<F: FnMut(&Node)>(&self, mut f: F) {
+        self.root.traverse(&mut f)
     }
 }
 
@@ -143,25 +119,30 @@ fn main() {
     println!("num points: {}", number_of_points);
 
     let bounds = reader.header().bounds();
+    let min_point = Point3::new(
+        bounds.min.x as f32,
+        bounds.min.y as f32,
+        bounds.min.z as f32,
+    );
+    let max_point = Point3::new(
+        bounds.max.x as f32,
+        bounds.max.y as f32,
+        bounds.max.z as f32,
+    );
+    let size = max_point - min_point;
+    let max_size = [size.x, size.y, size.z]
+        .into_iter()
+        .reduce(|a, b| a.max(b))
+        .unwrap();
 
-    let mut octree = Octree {
-        root: Node::Leaf(Octant {
-            data: Vec::new(),
-            bbox: BoundingBox {
-                min: Point3::new(
-                    bounds.min.x as f32,
-                    bounds.min.y as f32,
-                    bounds.min.z as f32,
-                ),
-                max: Point3::new(
-                    bounds.max.x as f32,
-                    bounds.max.y as f32,
-                    bounds.max.z as f32,
-                ),
-            },
-        }),
-    };
-    for p in reader.points() {
+    let mut octree = Octree::new(min_point.midpoint(max_point), max_size);
+    let mut num_inserted = 0;
+    for (i, p) in reader.points().enumerate() {
+        let r: u32 = rand::random();
+        if r % 128 != 0 {
+            continue;
+        }
+
         let point = p.unwrap();
         let color = point.color.unwrap();
         let point = Vertex {
@@ -175,6 +156,16 @@ fn main() {
             ],
         };
         octree.insert(point);
+        num_inserted += 1;
+        if i % 10000 == 0 {
+            println!("progress: {}%", 100. * (i as f32 / number_of_points as f32));
+        }
     }
-    // println!("done: {:?}", octree);
+
+    println!("done: {:?}", num_inserted);
+    let mut index = 0;
+    octree.traverse(|node| {
+        println!("{}", index);
+        index += 1;
+    })
 }
