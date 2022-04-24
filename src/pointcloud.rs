@@ -126,4 +126,13 @@ impl BoundingBox {
     pub fn size(&self) -> Vector3<f32> {
         self.max.to_vec() - self.min.to_vec()
     }
+
+    pub fn contains(&self, p: Point3<f32>) -> bool {
+        self.min.x <= p.x
+            && self.min.y <= p.y
+            && self.min.z <= p.z
+            && self.max.x >= p.x
+            && self.max.y >= p.y
+            && self.max.z >= p.z
+    }
 }

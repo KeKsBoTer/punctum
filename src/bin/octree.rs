@@ -4,12 +4,51 @@ use punctum::{BoundingBox, Vertex};
 
 const NODE_MAX: usize = 256;
 
-type OctantChildren = [[[Box<Node>; 2]; 2]; 2];
-
 #[derive(Debug)]
 enum Node {
     Leaf(Octant<Vec<Vertex>>),
-    Itermediate(Octant<OctantChildren>),
+    Itermediate(Octant<[Box<Node>; 8]>),
+}
+
+impl Node {
+    fn bbox(&self) -> &BoundingBox {
+        match self {
+            Node::Leaf(octant) => &octant.bbox,
+            Node::Itermediate(octant) => &octant.bbox,
+        }
+    }
+
+    fn insert(&mut self, point: Vertex) -> Option<Octant<[Box<Node>; 8]>> {
+        match self {
+            Node::Leaf(octant) => {
+                if octant.data.len() < NODE_MAX {
+                    octant.data.push(point);
+                    return None;
+                } else {
+                    println!("split occured");
+                    return Some(octant.split());
+                }
+            }
+            Node::Itermediate(octant) => {
+                let target_i = octant
+                    .data
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, node)| {
+                        if node.bbox().contains(point.position.into()) {
+                            Some(i)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                if let Some(new_octant) = octant.data[target_i].insert(point) {
+                    octant.data[target_i] = Box::new(Node::Itermediate(new_octant));
+                }
+                return None;
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -37,53 +76,13 @@ fn nth_bbox(bbox: &BoundingBox, n: u8) -> BoundingBox {
 }
 
 impl Octant<Vec<Vertex>> {
-    fn split(&self) -> Octant<OctantChildren> {
-        let data = [
-            [
-                [
-                    Box::new(Node::Leaf(Octant {
-                        data: Vec::new(),
-                        bbox: nth_bbox(&self.bbox, 0),
-                    })),
-                    Box::new(Node::Leaf(Octant {
-                        data: Vec::new(),
-                        bbox: nth_bbox(&self.bbox, 1),
-                    })),
-                ],
-                [
-                    Box::new(Node::Leaf(Octant {
-                        data: Vec::new(),
-                        bbox: nth_bbox(&self.bbox, 2),
-                    })),
-                    Box::new(Node::Leaf(Octant {
-                        data: Vec::new(),
-                        bbox: nth_bbox(&self.bbox, 3),
-                    })),
-                ],
-            ],
-            [
-                [
-                    Box::new(Node::Leaf(Octant {
-                        data: Vec::new(),
-                        bbox: nth_bbox(&self.bbox, 4),
-                    })),
-                    Box::new(Node::Leaf(Octant {
-                        data: Vec::new(),
-                        bbox: nth_bbox(&self.bbox, 5),
-                    })),
-                ],
-                [
-                    Box::new(Node::Leaf(Octant {
-                        data: Vec::new(),
-                        bbox: nth_bbox(&self.bbox, 6),
-                    })),
-                    Box::new(Node::Leaf(Octant {
-                        data: Vec::new(),
-                        bbox: nth_bbox(&self.bbox, 7),
-                    })),
-                ],
-            ],
-        ];
+    fn split(&self) -> Octant<[Box<Node>; 8]> {
+        let data: [Box<Node>; 8] = [0, 1, 2, 3, 4, 5, 6, 7].map(|i| {
+            Box::new(Node::Leaf(Octant {
+                data: Vec::new(),
+                bbox: nth_bbox(&self.bbox, i),
+            }))
+        });
         Octant {
             data: data,
             bbox: self.bbox,
@@ -113,12 +112,17 @@ impl Octree {
                 if octant.data.len() < NODE_MAX {
                     octant.data.push(point);
                 } else {
+                    println!("split occured");
                     self.root = Node::Itermediate(octant.split());
                 }
             }
             Node::Itermediate(octant) => {
-                let center = self.bbox().center();
-                todo!("implement me")
+                let center = octant.bbox.center();
+                let target = octant
+                    .data
+                    .iter_mut()
+                    .find(|node| node.bbox().contains(point.position.into()))
+                    .unwrap();
             }
         }
     }
