@@ -1,8 +1,15 @@
-use las::{Read, Reader};
-use nalgebra::{center, vector, Point3, Vector4};
-use punctum::PointPosition;
+use serde::{Deserialize, Serialize};
+use std::fs::File;
 
-#[derive(Debug)]
+use las::{Read, Reader};
+use nalgebra::{center, vector, Point3, Vector3, Vector4};
+use ply_rs::{
+    ply::{Addable, Encoding, Ply},
+    writer::Writer,
+};
+use punctum::{PointCloud, PointPosition};
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 enum Node {
     Group(Box<[Node; 8]>),
     Filled(Vec<Vertex>),
@@ -40,11 +47,17 @@ impl Node {
         }
     }
 
-    fn traverse<F: FnMut(&Node)>(&self, f: &mut F) {
-        f(self);
+    fn traverse<F: FnMut(&Node, Point3<f64>, f64)>(
+        &self,
+        f: &mut F,
+        center: Point3<f64>,
+        size: f64,
+    ) {
+        f(self, center, size);
         if let Node::Group(group) = self {
-            for node in group.iter() {
-                node.traverse(f);
+            for (i, node) in group.iter().enumerate() {
+                let (center_new, size_new) = Node::octant_box(i, center, size);
+                node.traverse(f, center_new, size_new);
             }
         }
     }
@@ -91,9 +104,20 @@ impl Node {
             + new_size * 3_f64.sqrt() * vector!(x as f64 - 0.5, y as f64 - 0.5, z as f64 - 0.5);
         return (octant_i, new_size, new_center);
     }
+
+    fn octant_box(i: usize, center: Point3<f64>, size: f64) -> (Point3<f64>, f64) {
+        let z = i / 4;
+        let y = (i - 4 * z) / 2;
+        let x = i % 2;
+        let new_size = size / 2.;
+        let new_center = center
+            + new_size * 3_f64.sqrt() * vector!(x as f64 - 0.5, y as f64 - 0.5, z as f64 - 0.5);
+        return (new_center, new_size);
+    }
 }
 
-#[derive(Debug)]
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Octree {
     root: Node,
     center: Point3<f64>,
@@ -135,12 +159,12 @@ impl Octree {
         }
     }
 
-    fn traverse<F: FnMut(&Node)>(&self, mut f: F) {
-        self.root.traverse(&mut f)
+    fn traverse<F: FnMut(&Node, Point3<f64>, f64)>(&self, mut f: F) {
+        self.root.traverse(&mut f, self.center, self.size)
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Copy, Debug)]
 struct Vertex {
     position: Point3<f64>,
     color: Vector4<u8>,
@@ -195,9 +219,36 @@ fn main() {
 
     println!("done: {:?}", num_inserted);
 
-    octree.traverse(|node| {
+    let w = Writer::<punctum::Vertex>::new();
+
+    let mut counter = 0;
+    octree.traverse(move |node, center, size| {
         if let Node::Filled(data) = node {
-            // let pc = PointCloud::from_vec(data);
+            let data_32 = data
+                .iter()
+                .map(|v| punctum::Vertex {
+                    position: ((v.position - center.coords) / size).cast(),
+                    normal: Vector3::zeros(),
+                    color: v.color.cast() / 255.,
+                })
+                .collect();
+
+            let mut pc = PointCloud::from_vec(&data_32);
+            pc.scale_to_unit_sphere();
+            counter += 1;
+
+            let mut file =
+                File::create(format!("dataset/neuschwanstein/octant_{}.ply", counter)).unwrap();
+
+            let mut ply = Ply::<punctum::Vertex>::new();
+            let mut elm_def = punctum::Vertex::element_def("vertex".to_string());
+            elm_def.count = data_32.len();
+            ply.header.encoding = Encoding::BinaryLittleEndian;
+            ply.header.elements.add(elm_def.clone());
+
+            w.write_header(&mut file, &ply.header).unwrap();
+            w.write_payload_of_element(&mut file, &data_32, &elm_def, &ply.header)
+                .unwrap();
         }
     });
 }

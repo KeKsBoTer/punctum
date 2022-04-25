@@ -139,23 +139,6 @@ where
             && self.max.z >= p.z
     }
 
-    pub fn max_size(&self) -> T {
-        let size = self.size();
-        if size.x > size.y {
-            if size.x > size.z {
-                size.x
-            } else {
-                size.z
-            }
-        } else {
-            if size.y > size.z {
-                size.y
-            } else {
-                size.z
-            }
-        }
-    }
-
     fn elm_min(p1: &Point3<T>, p2: &Point3<T>) -> Point3<T> {
         Point3::new(p1.x.min(p2.x), p1.y.min(p2.y), p1.z.min(p2.z))
     }
