@@ -12,17 +12,10 @@ enum Node {
 }
 
 impl Node {
-    fn insert(
-        group: &mut Box<[Node; 8]>,
-        point: Vertex,
-        center: Point3<f64>,
-        size: f64,
-        max_node_size: usize,
-    ) {
-        let (octant_i, new_size, new_center) = Node::child_octant(&point, center, size);
-        let mut center = new_center;
-        let mut size = new_size;
-        let mut node = &mut group[octant_i];
+    fn insert(&mut self, point: Vertex, center: Point3<f64>, size: f64, max_node_size: usize) {
+        let mut node = self;
+        let mut center = center;
+        let mut size = size;
         loop {
             match node {
                 Node::Group(group) => {
@@ -122,20 +115,16 @@ impl Octree {
 
     fn insert(&mut self, point: Vertex) {
         match &mut self.root {
-            Node::Group(group) => {
-                Node::insert(group, point, self.center, self.size, self.max_node_size);
+            Node::Group(_) => {
+                self.root
+                    .insert(point, self.center, self.size, self.max_node_size);
             }
             Node::Filled(data) => {
                 if data.len() >= self.max_node_size {
-                    let mut group = Node::split(&data, self.center, self.size, self.max_node_size);
-                    Node::insert(
-                        &mut group,
-                        point,
-                        self.center,
-                        self.size,
-                        self.max_node_size,
-                    );
+                    let group = Node::split(&data, self.center, self.size, self.max_node_size);
                     self.root = Node::Group(group);
+                    self.root
+                        .insert(point, self.center, self.size, self.max_node_size);
                 } else {
                     data.push(point);
                 }
