@@ -1,9 +1,8 @@
 use cgmath::{vec3, EuclideanSpace, Point3};
 use las::{Read, Reader};
-use punctum::Vertex;
 use rand::{prelude::StdRng, Rng, SeedableRng};
-
-const NODE_MAX: usize = 512;
+use std::sync::mpsc::channel;
+use std::thread;
 
 #[derive(Debug)]
 enum Node {
@@ -18,13 +17,12 @@ impl Node {
         point: Vertex,
         center: Point3<f64>,
         size: f64,
-        gi: usize,
+        max_node_size: usize,
     ) {
         let (octant_i, new_size, new_center) = Node::child_octant(&point, center, size);
         let mut center = new_center;
         let mut size = new_size;
         let mut node = &mut group[octant_i];
-        let mut depth = 0;
         loop {
             match node {
                 Node::Group(group) => {
@@ -34,24 +32,20 @@ impl Node {
                     node = &mut group[octant_i];
                 }
                 Node::Filled(data) => {
-                    if data.len() == NODE_MAX {
-                        *node = Node::Group(Node::split(data, center, size));
-                        if depth > 100 {
-                            panic!("depth: {} ({})", depth, gi);
-                        }
+                    if data.len() == max_node_size {
+                        *node = Node::Group(Node::split(data, center, size, max_node_size));
                     } else {
                         data.push(point);
                         return;
                     }
                 }
                 Node::Empty => {
-                    let mut new_vec = Vec::with_capacity(NODE_MAX);
+                    let mut new_vec = Vec::with_capacity(max_node_size);
                     new_vec.push(point);
                     *node = Node::Filled(new_vec);
                     return;
                 }
             }
-            depth += 1;
         }
     }
 
@@ -64,7 +58,12 @@ impl Node {
         }
     }
 
-    fn split(vertices: &Vec<Vertex>, center: Point3<f64>, size: f64) -> Box<[Node; 8]> {
+    fn split(
+        vertices: &Vec<Vertex>,
+        center: Point3<f64>,
+        size: f64,
+        max_node_size: usize,
+    ) -> Box<[Node; 8]> {
         let mut new_data = Box::new([
             Node::Empty,
             Node::Empty,
@@ -81,7 +80,7 @@ impl Node {
                 Node::Group(_) => panic!("unreachable"),
                 Node::Filled(data) => data.push(*v),
                 Node::Empty => {
-                    let mut new_vec = Vec::with_capacity(NODE_MAX);
+                    let mut new_vec = Vec::with_capacity(max_node_size);
                     new_vec.push(*v);
                     new_data[octant_i] = Node::Filled(new_vec);
                 }
@@ -108,33 +107,41 @@ struct Octree {
     root: Node,
     center: Point3<f64>,
     size: f64,
+    max_node_size: usize,
 }
 
 impl Octree {
     fn new(center: Point3<f64>, size: f64) -> Self {
         Octree {
             root: Node::Empty,
+            max_node_size: 256,
             center,
             size,
         }
     }
 
-    fn insert(&mut self, point: Vertex, gi: usize) {
+    fn insert(&mut self, point: Vertex) {
         match &mut self.root {
             Node::Group(group) => {
-                Node::insert(group, point, self.center, self.size, gi);
+                Node::insert(group, point, self.center, self.size, self.max_node_size);
             }
             Node::Filled(data) => {
-                if data.len() >= NODE_MAX {
-                    let mut group = Node::split(&data, self.center, self.size);
-                    Node::insert(&mut group, point, self.center, self.size, gi);
+                if data.len() >= self.max_node_size {
+                    let mut group = Node::split(&data, self.center, self.size, self.max_node_size);
+                    Node::insert(
+                        &mut group,
+                        point,
+                        self.center,
+                        self.size,
+                        self.max_node_size,
+                    );
                     self.root = Node::Group(group);
                 } else {
                     data.push(point);
                 }
             }
             Node::Empty => {
-                let mut new_vec = Vec::with_capacity(NODE_MAX);
+                let mut new_vec = Vec::with_capacity(self.max_node_size);
                 new_vec.push(point);
                 self.root = Node::Filled(new_vec);
             }
@@ -146,6 +153,13 @@ impl Octree {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct Vertex {
+    pub position: [f64; 3],
+    pub normal: [f32; 3],
+    pub color: [f32; 4],
+}
+
 fn main() {
     let mut reader =
         Reader::from_path("/home/niedermayr/Downloads/3DRM_neuschwanstein_original.las").unwrap();
@@ -154,16 +168,8 @@ fn main() {
     println!("num points: {}", number_of_points);
 
     let bounds = reader.header().bounds();
-    let min_point = Point3::new(
-        bounds.min.x as f64,
-        bounds.min.y as f64,
-        bounds.min.z as f64,
-    );
-    let max_point = Point3::new(
-        bounds.max.x as f64,
-        bounds.max.y as f64,
-        bounds.max.z as f64,
-    );
+    let min_point = Point3::new(bounds.min.x, bounds.min.y, bounds.min.z);
+    let max_point = Point3::new(bounds.max.x, bounds.max.y, bounds.max.z);
     let size = max_point - min_point;
     let max_size = [size.x, size.y, size.z]
         .into_iter()
@@ -181,10 +187,10 @@ fn main() {
         let point = p.unwrap();
         let color = point.color.unwrap();
         let point = Vertex {
-            position: [point.x as f32, point.y as f32, point.z as f32],
+            position: [point.x, point.y, point.z],
             normal: [0.; 3],
             color: [
-                (color.red as f32) / 65536.,
+                (color.red as f32) / 65536., // = 2**16
                 (color.green as f32) / 65536.,
                 (color.blue as f32) / 65536.,
                 1.,
@@ -193,7 +199,7 @@ fn main() {
         if i == 176283437 {
             println!("now!");
         }
-        octree.insert(point, i);
+        octree.insert(point);
         num_inserted += 1;
         if i % 100000 == 0 {
             println!("progress: {}%", 100. * (i as f64 / number_of_points as f64));
