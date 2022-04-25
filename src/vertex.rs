@@ -1,14 +1,17 @@
 use bytemuck::{Pod, Zeroable};
-use nalgebra::{Point3, Scalar};
+use nalgebra::{Point3, Scalar, Vector3, Vector4};
 use ply_rs::ply::{self, Addable, ElementDef, PropertyDef, PropertyType, ScalarType};
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Vertex {
-    pub position: [f32; 3],
-    pub normal: [f32; 3],
-    pub color: [f32; 4],
+    pub position: Point3<f32>,
+    pub normal: Vector3<f32>,
+    pub color: Vector4<f32>,
 }
+
+unsafe impl Zeroable for Vertex {}
+unsafe impl Pod for Vertex {}
 
 pub trait PointPosition<T>
 where
@@ -20,7 +23,7 @@ where
 impl PointPosition<f32> for Vertex {
     #[inline]
     fn position(&self) -> &Point3<f32> {
-        unsafe { std::mem::transmute::<&[f32; 3], &Point3<f32>>(&self.position) }
+        &self.position
     }
 }
 

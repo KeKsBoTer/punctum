@@ -49,7 +49,7 @@ impl PointCloud {
         let center = self
             .data
             .iter()
-            .fold(Point3::origin(), |acc, v| acc + Vector3::from(v.position))
+            .fold(Point3::origin(), |acc, v| acc + v.position.coords)
             / self.data.len() as f32;
         let max_size = self
             .data
@@ -59,9 +59,7 @@ impl PointCloud {
             .unwrap()
             .sqrt();
         self.data.iter_mut().for_each(|p| {
-            p.position[0] = (p.position[0] - center.x) / max_size;
-            p.position[1] = (p.position[1] - center.y) / max_size;
-            p.position[2] = (p.position[2] - center.z) / max_size;
+            p.position = (p.position - center.coords) / max_size;
         });
         self.bbox = BoundingBox::from_points(&self.data);
     }

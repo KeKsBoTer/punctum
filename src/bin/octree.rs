@@ -1,6 +1,6 @@
 use las::{Read, Reader};
-use nalgebra::{center, vector, Point3};
-use punctum::{BoundingBox, PointCloud, PointPosition};
+use nalgebra::{center, vector, Point3, Vector4};
+use punctum::PointPosition;
 
 #[derive(Debug)]
 enum Node {
@@ -143,7 +143,7 @@ impl Octree {
 #[derive(Clone, Copy, Debug)]
 struct Vertex {
     position: Point3<f64>,
-    color: [u8; 4],
+    color: Vector4<u8>,
 }
 
 impl PointPosition<f64> for Vertex {
@@ -176,12 +176,12 @@ fn main() {
         let color = point.color.unwrap();
         let point = Vertex {
             position: Point3::new(point.x, point.y, point.z),
-            color: [
+            color: Vector4::new(
                 (color.red / 256) as u8,
                 (color.green / 256) as u8,
                 (color.blue / 256) as u8,
                 255,
-            ],
+            ),
         };
         if i == 176283437 {
             println!("now!");

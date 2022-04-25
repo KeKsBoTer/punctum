@@ -1,4 +1,5 @@
 use image::Rgba;
+use nalgebra::{Vector3, Vector4};
 use ply_rs::{
     ply::{Addable, Encoding, Ply},
     writer::Writer,
@@ -65,14 +66,14 @@ fn main() {
             .iter()
             .zip(cameras)
             .map(|(color, cam)| Vertex {
-                position: [cam.position().x, cam.position().y, cam.position().z],
-                normal: [0.; 3],
-                color: [
+                position: *cam.position(),
+                normal: Vector3::zeros(),
+                color: Vector4::new(
                     color.0[0] as f32 / 255.,
                     color.0[1] as f32 / 255.,
                     color.0[2] as f32 / 255.,
                     color.0[3] as f32 / 255.,
-                ],
+                ),
             })
             .collect();
 

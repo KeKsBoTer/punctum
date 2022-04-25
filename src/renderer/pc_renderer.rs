@@ -29,14 +29,17 @@ mod vs {
         path: "src/renderer/shaders/pointcloud.vert",
     }
 
-    #[derive(Clone, Copy, Zeroable, Pod)]
+    #[derive(Clone, Copy)]
     #[repr(C)]
     pub struct UniformData {
-        pub world: [[f32; 4]; 4],
-        pub view: [[f32; 4]; 4],
-        pub proj: [[f32; 4]; 4],
+        pub world: Matrix4<f32>,
+        pub view: Matrix4<f32>,
+        pub proj: Matrix4<f32>,
         pub point_size: f32,
     }
+
+    unsafe impl Zeroable for UniformData {}
+    unsafe impl Pod for UniformData {}
 
     impl Default for UniformData {
         fn default() -> Self {
