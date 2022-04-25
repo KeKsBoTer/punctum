@@ -1,5 +1,5 @@
 use crate::{camera::Camera, pointcloud::PointCloudGPU, vertex::Vertex, Viewport};
-use cgmath::{Matrix4, SquareMatrix};
+use nalgebra::Matrix4;
 use std::sync::Arc;
 use vulkano::{
     buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool, TypedBufferAccess},
@@ -22,7 +22,7 @@ use vulkano::{
 
 mod vs {
     use bytemuck::{Pod, Zeroable};
-    use cgmath::{Matrix4, SquareMatrix};
+    use nalgebra::Matrix4;
 
     vulkano_shaders::shader! {
         ty: "vertex",

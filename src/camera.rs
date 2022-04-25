@@ -1,15 +1,13 @@
-use cgmath::{
-    vec3, Angle, Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad, SquareMatrix, UlpsEq,
-    Vector3, Zero,
-};
-use std::time::Duration;
+use approx::assert_ulps_eq;
+use nalgebra::{vector, Matrix4, Point3, Vector3};
+use std::{f32::consts::PI, time::Duration};
 use winit::{dpi::PhysicalPosition, event::*};
 
 use crate::pointcloud::BoundingBox;
 
 #[derive(Debug, Clone, Copy)]
 enum Projection {
-    Perspective { fovy: Rad<f32>, aspect_ratio: f32 },
+    Perspective { fovy: f32, aspect_ratio: f32 },
     Orthographic { width: f32, height: f32 },
 }
 
@@ -17,23 +15,16 @@ impl Projection {
     fn projection_matrix(&self, camera: &Camera) -> Matrix4<f32> {
         match self {
             Projection::Perspective { fovy, aspect_ratio } => {
-                cgmath::perspective(*fovy, *aspect_ratio, camera.znear, camera.zfar)
+                Matrix4::new_perspective(*aspect_ratio, *fovy, camera.znear, camera.zfar)
             }
-            Projection::Orthographic { width, height } => {
-                let mut proj = cgmath::ortho(
-                    -width / 2.,
-                    width / 2.,
-                    -height / 2.,
-                    height / 2.,
-                    camera.znear,
-                    camera.zfar,
-                );
-                // Opengl y u do this to me?
-                // correct OpenGls f**** up coord system
-                proj.z.z *= -1.0;
-                proj.w.z *= -1.0;
-                return proj;
-            }
+            Projection::Orthographic { width, height } => Matrix4::new_orthographic(
+                -width / 2.,
+                width / 2.,
+                -height / 2.,
+                height / 2.,
+                camera.znear,
+                camera.zfar,
+            ),
         }
     }
 }
@@ -41,7 +32,7 @@ impl Projection {
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
     pos: Point3<f32>,
-    rot: Vector3<Rad<f32>>,
+    rot: Vector3<f32>,
 
     znear: f32,
     zfar: f32,
@@ -55,7 +46,7 @@ pub struct Camera {
 impl Camera {
     fn update_view_matrix(&mut self) {
         let rot = self.rot_mat();
-        let trans = Matrix4::from_translation(vec3(-self.pos.x, -self.pos.y, self.pos.z));
+        let trans = Matrix4::new_translation(&vector!(-self.pos.x, -self.pos.y, self.pos.z));
 
         self.view = trans * rot;
     }
@@ -75,34 +66,24 @@ impl Camera {
         &self.pos
     }
 
-    // pub fn resize(&mut self, size: [f32; 2]) {
-    //     self.projection = Projection::Orthographic {
-    //         width: size[0],
-    //         height: size[1],
-    //     };
-    //     self.update_proj_matrix();
-    // }
-
     fn rot_mat(&self) -> Matrix4<f32> {
-        Matrix4::from_angle_z(self.rot.z)
-            * Matrix4::from_angle_y(self.rot.y)
-            * Matrix4::from_angle_x(self.rot.x)
+        Matrix4::from_euler_angles(self.rot.z, self.rot.y, self.rot.z)
     }
 
     // creates a camera that looks at the bounding box (move in z)
     // ensures that the y of the bounding box fits to screen
-    pub fn look_at_perspective(bbox: BoundingBox) -> Self {
+    pub fn look_at_perspective(bbox: BoundingBox<f32>) -> Self {
         let center = bbox.center();
         let size = bbox.size();
 
-        let fovy: Rad<f32> = Deg(90.0).into();
+        let fovy: f32 = PI / 2.;
 
         let distance = 0.5 * size.y / (fovy / 2.0).tan();
-        let pos = center - vec3(0., 0., 0.5 * size.z + distance);
+        let pos = center - vector!(0., 0., 0.5 * size.z + distance);
 
         let mut c = Camera {
             pos: pos,
-            rot: vec3(Rad::zero(), Rad::zero(), Rad::zero()),
+            rot: vector!(0., 0., 0.),
 
             view: Matrix4::identity(),
             proj: Matrix4::identity(),
@@ -117,17 +98,17 @@ impl Camera {
         c.update_proj_matrix();
         return c;
     }
-    pub fn look_at_ortho_bbox(bbox: BoundingBox) -> Self {
+    pub fn look_at_ortho_bbox(bbox: BoundingBox<f32>) -> Self {
         let size = bbox.size();
         let center = bbox.center();
         let mut c = Camera {
             pos: Point3::new(center.x, center.y, center.z - size.z),
-            rot: vec3(Rad::zero(), Rad::zero(), Rad::zero()),
+            rot: vector!(0., 0., 0.),
 
             view: Matrix4::identity(),
             proj: Matrix4::identity(),
-            znear: 0.01,
-            zfar: 1.0,
+            znear: -10.,
+            zfar: 10.,
             projection: Projection::Orthographic {
                 width: size.x,
                 height: size.y,
@@ -139,12 +120,12 @@ impl Camera {
     }
 
     pub fn on_unit_sphere(pos: Point3<f32>) -> Self {
-        let d: f32 = pos.to_vec().magnitude();
-        assert!(d.ulps_eq(&1.0, 1e-8, 6), "distance {}", d);
+        let d: f32 = pos.coords.norm();
+        assert_ulps_eq!(d, 1., epsilon = 1e-8);
 
         let mut c = Camera {
             pos: pos,
-            rot: vec3(Rad::zero(), Rad::zero(), Rad::zero()),
+            rot: vector!(0., 0., 0.),
 
             view: Matrix4::identity(),
             proj: Matrix4::identity(),
@@ -155,13 +136,10 @@ impl Camera {
                 height: 2.,
             },
         };
+
         // add epsilon z value to avoid NaN in view matrix
-        c.view = Matrix4::look_at_lh(
-            c.pos + vec3(0., 0., 1e-8),
-            Point3::origin(),
-            vec3(0., 1., 0.),
-        );
-        // c.update_view_matrix();
+        let eye = c.pos + Vector3::new(0., 0., 1e-8);
+        c.view = Matrix4::look_at_rh(&eye, &Point3::origin(), &Vector3::y());
         c.update_proj_matrix();
         return c;
     }
@@ -250,7 +228,7 @@ impl CameraController {
     pub fn update_camera(&mut self, camera: &mut Camera, dt: Duration) {
         let dt = dt.as_secs_f32();
 
-        let cam_front = vec3(
+        let cam_front = Vector3::new(
             -camera.rot.x.cos() * camera.rot.y.sin(),
             camera.rot.x.sin(),
             camera.rot.x.cos() * camera.rot.y.cos(),
@@ -259,7 +237,7 @@ impl CameraController {
 
         let move_speed = dt * self.speed;
 
-        let cam_left = cam_front.cross(vec3(0., 1., 0.)).normalize();
+        let cam_left = cam_front.cross(&Vector3::new(0., 1., 0.)).normalize();
 
         camera.pos += cam_front * self.amount_forward * move_speed;
         camera.pos -= cam_front * self.amount_backward * move_speed;
@@ -271,8 +249,8 @@ impl CameraController {
 
         let look_speed = dt * self.sensitivity;
 
-        camera.rot.x += Rad(self.rotate_vertical * look_speed).normalize();
-        camera.rot.y += Rad(self.rotate_horizontal * look_speed).normalize();
+        camera.rot.x += self.rotate_vertical * look_speed;
+        camera.rot.y += self.rotate_horizontal * look_speed;
 
         // done processing, reset to 0
         self.rotate_horizontal = 0.;

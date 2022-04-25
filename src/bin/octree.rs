@@ -1,8 +1,6 @@
-use cgmath::{vec3, EuclideanSpace, Point3};
 use las::{Read, Reader};
-use rand::{prelude::StdRng, Rng, SeedableRng};
-use std::sync::mpsc::channel;
-use std::thread;
+use nalgebra::{center, vector, Point3};
+use punctum::{BoundingBox, PointCloud, PointPosition};
 
 #[derive(Debug)]
 enum Node {
@@ -89,8 +87,8 @@ impl Node {
         let octant_i = 4 * z + 2 * y + x;
 
         let new_size = size / 2.;
-        let new_center =
-            center + new_size * 3_f64.sqrt() * vec3(x as f64 - 0.5, y as f64 - 0.5, z as f64 - 0.5);
+        let new_center = center
+            + new_size * 3_f64.sqrt() * vector!(x as f64 - 0.5, y as f64 - 0.5, z as f64 - 0.5);
         return (octant_i, new_size, new_center);
     }
 }
@@ -107,7 +105,7 @@ impl Octree {
     fn new(center: Point3<f64>, size: f64) -> Self {
         Octree {
             root: Node::Empty,
-            max_node_size: 256,
+            max_node_size: 1024,
             center,
             size,
         }
@@ -144,9 +142,15 @@ impl Octree {
 
 #[derive(Clone, Copy, Debug)]
 struct Vertex {
-    pub position: [f64; 3],
-    pub normal: [f32; 3],
-    pub color: [f32; 4],
+    position: Point3<f64>,
+    color: [u8; 4],
+}
+
+impl PointPosition<f64> for Vertex {
+    #[inline]
+    fn position(&self) -> &Point3<f64> {
+        &self.position
+    }
 }
 
 fn main() {
@@ -165,24 +169,18 @@ fn main() {
         .reduce(|a, b| a.max(b))
         .unwrap();
 
-    let mut octree = Octree::new(min_point.midpoint(max_point), max_size);
+    let mut octree = Octree::new(center(&min_point, &max_point), max_size);
     let mut num_inserted = 0;
-    let mut rand_gen = StdRng::seed_from_u64(42);
     for (i, p) in reader.points().enumerate() {
-        let r: u64 = rand_gen.sample(rand::distributions::Standard);
-        if r % 2 != 0 {
-            continue;
-        }
         let point = p.unwrap();
         let color = point.color.unwrap();
         let point = Vertex {
-            position: [point.x, point.y, point.z],
-            normal: [0.; 3],
+            position: Point3::new(point.x, point.y, point.z),
             color: [
-                (color.red as f32) / 65536., // = 2**16
-                (color.green as f32) / 65536.,
-                (color.blue as f32) / 65536.,
-                1.,
+                (color.red / 256) as u8,
+                (color.green / 256) as u8,
+                (color.blue / 256) as u8,
+                255,
             ],
         };
         if i == 176283437 {
@@ -197,11 +195,9 @@ fn main() {
 
     println!("done: {:?}", num_inserted);
 
-    // check if all points were inserted into the octree
-    let mut check = 0;
-    octree.traverse(|node| match node {
-        Node::Filled(data) => check += data.len(),
-        _ => {}
+    octree.traverse(|node| {
+        if let Node::Filled(data) = node {
+            // let pc = PointCloud::from_vec(data);
+        }
     });
-    assert!(check == num_inserted, "not all points present in octree");
 }

@@ -6,13 +6,13 @@ mod vertex;
 use std::sync::Arc;
 
 pub use camera::{Camera, CameraController};
-use cgmath::{vec4, Vector4};
 use image::Rgba;
+use nalgebra::{vector, Vector4};
 pub use pointcloud::{BoundingBox, PointCloud, PointCloudGPU};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use renderer::Frame;
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
-pub use vertex::Vertex;
+pub use vertex::{PointPosition, Vertex};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::{
@@ -195,7 +195,7 @@ impl OfflineRenderer {
 }
 
 fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
-    let start = vec4(0., 0., 0., 0.);
+    let start = vector!(0., 0., 0., 0.);
     let mean = data
         .par_chunks_exact(1024)
         .fold(

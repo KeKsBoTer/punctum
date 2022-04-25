@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use nalgebra::Point3;
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
 use vulkano::instance::{Instance, InstanceCreateInfo};
@@ -83,7 +84,8 @@ fn main() {
     pc_raw.scale_to_unit_sphere();
     let pc = PointCloudGPU::from_point_cloud(device, Arc::new(pc_raw));
 
-    let mut camera = Camera::look_at_perspective(pc.cpu().bounding_box().clone());
+    // let mut camera = Camera::look_at_perspective(pc.cpu().bounding_box().clone());
+    let mut camera = Camera::on_unit_sphere(Point3::new(0., -1., 0.));
 
     // let mut camera = Camera::look_at_perspective(*pc.cpu().bounding_box());
     let mut camera_controller = CameraController::new(0.1, 0.1);

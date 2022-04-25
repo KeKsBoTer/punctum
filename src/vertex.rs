@@ -1,4 +1,5 @@
 use bytemuck::{Pod, Zeroable};
+use nalgebra::{Point3, Scalar};
 use ply_rs::ply::{self, Addable, ElementDef, PropertyDef, PropertyType, ScalarType};
 
 #[repr(C)]
@@ -7,6 +8,20 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub color: [f32; 4],
+}
+
+pub trait PointPosition<T>
+where
+    T: Scalar,
+{
+    fn position(&self) -> &Point3<T>;
+}
+
+impl PointPosition<f32> for Vertex {
+    #[inline]
+    fn position(&self) -> &Point3<f32> {
+        unsafe { std::mem::transmute::<&[f32; 3], &Point3<f32>>(&self.position) }
+    }
 }
 
 vulkano::impl_vertex!(Vertex, position, normal, color);
