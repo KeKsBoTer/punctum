@@ -1,24 +1,24 @@
 use std::sync::Arc;
 
-use nalgebra::{center, distance_squared, Point3, RealField, Scalar, Vector3};
+use nalgebra::{center, distance_squared, Point3, RealField, Vector3};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::Device,
 };
 
-use crate::vertex::{PointPosition, Vertex};
+use crate::vertex::{BaseFloat, PointPosition, Vertex};
 
-pub struct PointCloud {
-    data: Vec<Vertex>,
-    bbox: BoundingBox<f32>,
+pub struct PointCloud<F: BaseFloat> {
+    data: Vec<Vertex<F>>,
+    bbox: BoundingBox<F>,
 }
 
-impl PointCloud {
+impl<F: BaseFloat> PointCloud<F> {
     pub fn from_ply_file(filename: &str) -> Self {
         let mut f = std::fs::File::open(filename).unwrap();
 
         // create a parser
-        let p = ply_rs::parser::Parser::<Vertex>::new();
+        let p = ply_rs::parser::Parser::<Vertex<F>>::new();
 
         // use the parser: read the entire file
         let ply = p.read_ply(&mut f);
@@ -36,7 +36,7 @@ impl PointCloud {
         }
     }
 
-    pub fn from_vec(points: &Vec<Vertex>) -> Self {
+    pub fn from_vec(points: &Vec<Vertex<F>>) -> Self {
         let bbox = BoundingBox::from_points(points);
         PointCloud {
             data: points.clone(),
@@ -49,37 +49,38 @@ impl PointCloud {
         let center = self
             .data
             .iter()
-            .fold(Point3::origin(), |acc, v| acc + v.position.coords)
-            / self.data.len() as f32;
+            .fold(Point3::origin(), |acc, v| acc + &v.position.coords)
+            / F::from_usize(self.data.len()).unwrap();
         let max_size = self
             .data
             .iter()
-            .map(|p| distance_squared(&Point3::from(p.position), &center))
-            .reduce(|acum, item| acum.max(item))
+            .map(|p| distance_squared(&p.position, &center))
+            .reduce(|acum, item| F::max(acum, item))
             .unwrap()
             .sqrt();
+
         self.data.iter_mut().for_each(|p| {
-            p.position = (p.position - center.coords) / max_size;
+            p.position = (&p.position - &center.coords) / max_size.clone();
         });
         self.bbox = BoundingBox::from_points(&self.data);
     }
 
-    pub fn bounding_box(&self) -> &BoundingBox<f32> {
+    pub fn bounding_box(&self) -> &BoundingBox<F> {
         &self.bbox
     }
 
-    pub fn points(&self) -> &Vec<Vertex> {
+    pub fn points(&self) -> &Vec<Vertex<F>> {
         &self.data
     }
 }
 
 pub struct PointCloudGPU {
-    cpu: Arc<PointCloud>,
-    gpu_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
+    cpu: Arc<PointCloud<f32>>,
+    gpu_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32>]>>,
 }
 
 impl PointCloudGPU {
-    pub fn from_point_cloud(device: Arc<Device>, pc: Arc<PointCloud>) -> PointCloudGPU {
+    pub fn from_point_cloud(device: Arc<Device>, pc: Arc<PointCloud<f32>>) -> PointCloudGPU {
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
             device,
             BufferUsage::vertex_buffer(),
@@ -94,43 +95,37 @@ impl PointCloudGPU {
         }
     }
 
-    pub fn cpu(&self) -> &Arc<PointCloud> {
+    pub fn cpu(&self) -> &Arc<PointCloud<f32>> {
         &self.cpu
     }
-    pub fn gpu_buffer(&self) -> &Arc<CpuAccessibleBuffer<[Vertex]>> {
+    pub fn gpu_buffer(&self) -> &Arc<CpuAccessibleBuffer<[Vertex<f32>]>> {
         &self.gpu_buffer
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct BoundingBox<T>
-where
-    T: Scalar + nalgebra::ComplexField + std::cmp::PartialOrd + RealField + Copy,
-{
-    pub min: Point3<T>,
-    pub max: Point3<T>,
+pub struct BoundingBox<F: BaseFloat> {
+    pub min: Point3<F>,
+    pub max: Point3<F>,
 }
 
-impl<T> BoundingBox<T>
-where
-    T: Scalar + nalgebra::ComplexField + std::cmp::PartialOrd + RealField + Copy,
-{
-    pub fn new(p1: Point3<T>, p2: Point3<T>) -> Self {
+impl<F: BaseFloat> BoundingBox<F> {
+    pub fn new(p1: Point3<F>, p2: Point3<F>) -> Self {
         BoundingBox {
             min: BoundingBox::elm_min(&p1, &p2),
             max: BoundingBox::elm_max(&p1, &p2),
         }
     }
 
-    pub fn center(&self) -> Point3<T> {
-        center(&self.min, &self.max)
+    pub fn center(&self) -> Point3<F> {
+        center(&self.max, &self.min)
     }
 
-    pub fn size(&self) -> Vector3<T> {
-        self.max - self.min
+    pub fn size(&self) -> Vector3<F> {
+        &self.max - &self.min
     }
 
-    pub fn contains(&self, p: Point3<T>) -> bool {
+    pub fn contains(&self, p: Point3<F>) -> bool {
         self.min.x <= p.x
             && self.min.y <= p.y
             && self.min.z <= p.z
@@ -139,21 +134,29 @@ where
             && self.max.z >= p.z
     }
 
-    fn elm_min(p1: &Point3<T>, p2: &Point3<T>) -> Point3<T> {
-        Point3::new(p1.x.min(p2.x), p1.y.min(p2.y), p1.z.min(p2.z))
+    fn elm_min(p1: &Point3<F>, p2: &Point3<F>) -> Point3<F> {
+        Point3::new(
+            RealField::min(p1.x, p2.x),
+            RealField::min(p1.y, p2.y),
+            RealField::min(p1.z, p2.z),
+        )
     }
 
-    fn elm_max(p1: &Point3<T>, p2: &Point3<T>) -> Point3<T> {
-        Point3::new(p1.x.max(p2.x), p1.y.max(p2.y), p1.z.max(p2.z))
+    fn elm_max(p1: &Point3<F>, p2: &Point3<F>) -> Point3<F> {
+        Point3::new(
+            RealField::max(p1.x, p2.x),
+            RealField::max(p1.y, p2.y),
+            RealField::max(p1.z, p2.z),
+        )
     }
 
-    pub fn from_points(points: &Vec<impl PointPosition<T>>) -> Self {
-        let max_f = T::max_value().unwrap();
-        let min_f = T::min_value().unwrap();
-        let mut min_corner: Point3<T> = Point3::new(max_f, max_f, max_f);
+    pub fn from_points(points: &Vec<impl PointPosition<F>>) -> Self {
+        let max_f = F::max_value().unwrap();
+        let min_f = F::min_value().unwrap();
+        let mut min_corner: Point3<F> = Point3::new(max_f, max_f, max_f);
         let mut max_corner = Point3::new(min_f, min_f, min_f);
         for v in points.iter() {
-            let p: &Point3<T> = v.position().into();
+            let p: &Point3<F> = v.position().into();
             min_corner = BoundingBox::elm_min(&p, &min_corner);
             max_corner = BoundingBox::elm_max(&p, &max_corner);
         }

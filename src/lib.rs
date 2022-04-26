@@ -1,18 +1,8 @@
-mod camera;
-mod pointcloud;
-mod renderer;
-mod vertex;
-
 use std::sync::Arc;
 
-pub use camera::{Camera, CameraController};
 use image::Rgba;
 use nalgebra::{vector, Vector4};
-pub use pointcloud::{BoundingBox, PointCloud, PointCloudGPU};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
-use renderer::Frame;
-pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
-pub use vertex::{PointPosition, Vertex};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::{
@@ -24,6 +14,20 @@ use vulkano::{
     swapchain::Surface,
 };
 use winit::window::Window;
+
+mod camera;
+mod octree;
+mod pointcloud;
+mod renderer;
+mod vertex;
+
+pub use camera::{Camera, CameraController};
+pub use octree::Octree;
+pub use pointcloud::{BoundingBox, PointCloud, PointCloudGPU};
+pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
+pub use vertex::{PointPosition, Vertex};
+
+use renderer::Frame;
 
 pub fn select_physical_device<'a>(
     instance: &'a Arc<Instance>,
@@ -108,7 +112,7 @@ pub struct OfflineRenderer {
 }
 
 impl OfflineRenderer {
-    pub fn new(pc: Arc<PointCloud>, img_size: u32, render_settings: RenderSettings) -> Self {
+    pub fn new(pc: Arc<PointCloud<f32>>, img_size: u32, render_settings: RenderSettings) -> Self {
         let required_extensions = vulkano_win::required_extensions();
         let instance = Instance::new(InstanceCreateInfo {
             enabled_extensions: required_extensions,

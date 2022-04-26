@@ -19,7 +19,7 @@ fn main() {
     let mut f = std::fs::File::open("sphere.ply").unwrap();
 
     // create a parser
-    let p = ply_rs::parser::Parser::<Vertex>::new();
+    let p = ply_rs::parser::Parser::<Vertex<f32>>::new();
 
     // use the parser: read the entire file
     let in_ply = p.read_ply(&mut f).unwrap();
@@ -52,17 +52,17 @@ fn main() {
     println!("done rendering ... saving ....");
 
     let mut ply = {
-        let mut ply = Ply::<Vertex>::new();
+        let mut ply = Ply::<Vertex<f32>>::new();
         ply.header.encoding = Encoding::Ascii;
 
         ply.header
             .elements
-            .add(Vertex::element_def("vertex".to_string()));
+            .add(Vertex::<f32>::element_def("vertex".to_string()));
         ply.header
             .elements
-            .add(Vertex::element_def("camera".to_string()));
+            .add(Vertex::<f32>::element_def("camera".to_string()));
 
-        let cam_colors: Vec<Vertex> = renders
+        let cam_colors: Vec<Vertex<f32>> = renders
             .iter()
             .zip(cameras)
             .map(|(color, cam)| Vertex {

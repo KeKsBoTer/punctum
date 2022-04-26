@@ -1,26 +1,18 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    fs::File,
-    io::{Read, Write},
-};
 
-use las::{Read as LasRead, Reader};
-use nalgebra::{center, vector, Point3, Vector3, Vector4};
-use ply_rs::{
-    ply::{Addable, Encoding, Ply},
-    writer::Writer,
-};
-use punctum::{PointCloud, PointPosition};
+use nalgebra::{vector, Point3};
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-enum Node {
+use crate::Vertex;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum Node {
     Group(Box<[Node; 8]>),
-    Filled(Vec<Vertex>),
+    Filled(Vec<Vertex<f64>>),
     Empty,
 }
 
 impl Node {
-    fn insert(&mut self, point: Vertex, center: Point3<f64>, size: f64, max_node_size: usize) {
+    fn insert(&mut self, point: Vertex<f64>, center: Point3<f64>, size: f64, max_node_size: usize) {
         let mut node = self;
         let mut center = center;
         let mut size = size;
@@ -87,7 +79,7 @@ impl Node {
     }
 
     fn split(
-        vertices: &Vec<Vertex>,
+        vertices: &Vec<Vertex<f64>>,
         center: Point3<f64>,
         size: f64,
         max_node_size: usize,
@@ -117,7 +109,11 @@ impl Node {
         return new_data;
     }
 
-    fn child_octant(point: &Vertex, center: Point3<f64>, size: f64) -> (usize, f64, Point3<f64>) {
+    fn child_octant(
+        point: &Vertex<f64>,
+        center: Point3<f64>,
+        size: f64,
+    ) -> (usize, f64, Point3<f64>) {
         let z = (point.position[2] as f64 > center.z) as usize; // 1 if true
         let y = (point.position[1] as f64 > center.y) as usize;
         let x = (point.position[0] as f64 > center.z) as usize;
@@ -140,8 +136,8 @@ impl Node {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-struct Octree {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Octree {
     root: Node,
     center: Point3<f64>,
     size: f64,
@@ -151,7 +147,7 @@ struct Octree {
 }
 
 impl Octree {
-    fn new(center: Point3<f64>, size: f64) -> Self {
+    pub fn new(center: Point3<f64>, size: f64) -> Self {
         Octree {
             root: Node::Empty,
             max_node_size: 1024,
@@ -161,7 +157,7 @@ impl Octree {
         }
     }
 
-    fn insert(&mut self, point: Vertex) {
+    pub fn insert(&mut self, point: Vertex<f64>) {
         match &mut self.root {
             Node::Group(_) => {
                 self.root
@@ -185,114 +181,11 @@ impl Octree {
         }
     }
 
-    fn traverse<F: FnMut(&Node, Point3<f64>, f64)>(&self, mut f: F) {
+    pub fn traverse<F: FnMut(&Node, Point3<f64>, f64)>(&self, mut f: F) {
         self.root.traverse(&mut f, self.center, self.size)
     }
 
-    fn depth(&self) -> usize {
+    pub fn depth(&self) -> usize {
         self.root.depth()
     }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Clone, Copy, Debug)]
-struct Vertex {
-    position: Point3<f64>,
-    color: Vector4<u8>,
-}
-
-impl PointPosition<f64> for Vertex {
-    #[inline]
-    fn position(&self) -> &Point3<f64> {
-        &self.position
-    }
-}
-
-fn main() {
-    let mut reader =
-        Reader::from_path("/home/niedermayr/Downloads/3DRM_neuschwanstein_original.las").unwrap();
-
-    let number_of_points = reader.header().number_of_points();
-    println!("num points: {}", number_of_points);
-
-    let bounds = reader.header().bounds();
-    let min_point = Point3::new(bounds.min.x, bounds.min.y, bounds.min.z);
-    let max_point = Point3::new(bounds.max.x, bounds.max.y, bounds.max.z);
-    let size = max_point - min_point;
-    let max_size = [size.x, size.y, size.z]
-        .into_iter()
-        .reduce(|a, b| a.max(b))
-        .unwrap();
-
-    let mut octree = Octree::new(center(&min_point, &max_point), max_size);
-    let mut num_inserted = 0;
-    for (i, p) in reader.points().enumerate() {
-        let point = p.unwrap();
-        let color = point.color.unwrap();
-        let point = Vertex {
-            position: Point3::new(point.x, point.y, point.z),
-            color: Vector4::new(
-                (color.red / 256) as u8,
-                (color.green / 256) as u8,
-                (color.blue / 256) as u8,
-                255,
-            ),
-        };
-        octree.insert(point);
-        num_inserted += 1;
-        if i % 100000 == 0 {
-            println!("progress: {}%", 100. * (i as f64 / number_of_points as f64));
-        }
-        if num_inserted > 100000 {
-            break;
-        }
-    }
-
-    let encoded: Vec<u8> = bincode::serialize(&octree).unwrap();
-    let mut out_file = File::create("octree.bin").unwrap();
-    out_file.write_all(&encoded).unwrap();
-
-    println!("done: {:?}", num_inserted);
-
-    let mut in_file = File::open("octree.bin").unwrap();
-
-    let mut buffer = Vec::with_capacity(in_file.metadata().unwrap().len() as usize);
-    in_file.read_to_end(&mut buffer).unwrap();
-    let decoded: Octree = bincode::deserialize(&buffer).unwrap();
-
-    println!("decoded octree file!");
-
-    println!("depth: {}", decoded.depth());
-
-    let w = Writer::<punctum::Vertex<f32>>::new();
-
-    let mut counter = 0;
-    octree.traverse(move |node, center, size| {
-        if let Node::Filled(data) = node {
-            let data_32 = data
-                .iter()
-                .map(|v| punctum::Vertex {
-                    position: ((v.position - center.coords) / size).cast(),
-                    normal: Vector3::zeros(),
-                    color: v.color.cast() / 255.,
-                })
-                .collect();
-
-            let mut pc = PointCloud::from_vec(&data_32);
-            pc.scale_to_unit_sphere();
-            counter += 1;
-
-            let mut file =
-                File::create(format!("dataset/neuschwanstein/octant_{}.ply", counter)).unwrap();
-
-            let mut ply = Ply::<punctum::Vertex<f32>>::new();
-            let mut elm_def = punctum::Vertex::<f32>::element_def("vertex".to_string());
-            elm_def.count = data_32.len();
-            ply.header.encoding = Encoding::BinaryLittleEndian;
-            ply.header.elements.add(elm_def.clone());
-
-            w.write_header(&mut file, &ply.header).unwrap();
-            w.write_payload_of_element(&mut file, &data_32, &elm_def, &ply.header)
-                .unwrap();
-        }
-    });
 }

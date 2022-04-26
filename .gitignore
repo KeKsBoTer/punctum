@@ -1,9 +1,15 @@
+#vscode
+.vscode
+
 
 # python
 **/*.pyc
 #**/*.ipynb
 
 **/.ipynb_checkpoints
+**/__pycache__
+
+**/*.bin
 
 /target
 renders/
@@ -11,4 +17,4 @@ render.png
 
 test.*
 
-dataset/neuschwanstein
+datasets/*
