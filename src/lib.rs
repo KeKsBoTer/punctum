@@ -22,7 +22,7 @@ mod renderer;
 mod vertex;
 
 pub use camera::{Camera, CameraController};
-pub use octree::Octree;
+pub use octree::{Node, Octree};
 pub use pointcloud::{BoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
 pub use vertex::{PointPosition, Vertex};

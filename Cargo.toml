@@ -21,7 +21,7 @@ rand = "0.8.5"
 approx = "0.5.1"
 bincode = "1.3.3"
 serde = { version = "1.0.136", features = ["derive"]}
-num-traits = "0.2"
+pbr = { version = "1.0.4"}
 
 [lib]
 name = "punctum"
@@ -34,3 +34,6 @@ path = "src/bin/viewer.rs"
 [[bin]]
 name = "headless"
 path = "src/bin/headless.rs"
+[[bin]]
+name = "octree_builder"
+path = "src/bin/build_octree.rs"

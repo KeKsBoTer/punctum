@@ -1,18 +1,18 @@
 use serde::{Deserialize, Serialize};
 
-use nalgebra::{vector, Point3};
+use nalgebra::{convert, Point3, Vector3};
 
-use crate::Vertex;
+use crate::{vertex::BaseFloat, Vertex};
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum Node {
-    Group(Box<[Node; 8]>),
-    Filled(Vec<Vertex<f64>>),
+pub enum Node<F: BaseFloat> {
+    Group(Box<[Node<F>; 8]>),
+    Filled(Vec<Vertex<F>>),
     Empty,
 }
 
-impl Node {
-    fn insert(&mut self, point: Vertex<f64>, center: Point3<f64>, size: f64, max_node_size: usize) {
+impl<F: BaseFloat> Node<F> {
+    fn insert(&mut self, point: Vertex<F>, center: Point3<F>, size: F, max_node_size: usize) {
         let mut node = self;
         let mut center = center;
         let mut size = size;
@@ -42,12 +42,7 @@ impl Node {
         }
     }
 
-    fn traverse<F: FnMut(&Node, Point3<f64>, f64)>(
-        &self,
-        f: &mut F,
-        center: Point3<f64>,
-        size: f64,
-    ) {
+    fn traverse<A: FnMut(&Node<F>, Point3<F>, F)>(&self, f: &mut A, center: Point3<F>, size: F) {
         f(self, center, size);
         if let Node::Group(group) = self {
             for (i, node) in group.iter().enumerate() {
@@ -79,11 +74,11 @@ impl Node {
     }
 
     fn split(
-        vertices: &Vec<Vertex<f64>>,
-        center: Point3<f64>,
-        size: f64,
+        vertices: &Vec<Vertex<F>>,
+        center: Point3<F>,
+        size: F,
         max_node_size: usize,
-    ) -> Box<[Node; 8]> {
+    ) -> Box<[Node<F>; 8]> {
         let mut new_data = Box::new([
             Node::Empty,
             Node::Empty,
@@ -109,55 +104,64 @@ impl Node {
         return new_data;
     }
 
-    fn child_octant(
-        point: &Vertex<f64>,
-        center: Point3<f64>,
-        size: f64,
-    ) -> (usize, f64, Point3<f64>) {
-        let z = (point.position[2] as f64 > center.z) as usize; // 1 if true
-        let y = (point.position[1] as f64 > center.y) as usize;
-        let x = (point.position[0] as f64 > center.z) as usize;
+    fn child_octant(point: &Vertex<F>, center: Point3<F>, size: F) -> (usize, F, Point3<F>) {
+        let z = (point.position[2] > center.z) as usize; // 1 if true
+        let y = (point.position[1] > center.y) as usize;
+        let x = (point.position[0] > center.z) as usize;
         let octant_i = 4 * z + 2 * y + x;
 
-        let new_size = size / 2.;
-        let new_center = center
-            + new_size * 3_f64.sqrt() * vector!(x as f64 - 0.5, y as f64 - 0.5, z as f64 - 0.5);
+        let new_size = size / convert(2.);
+        let offset = Vector3::new(
+            convert::<_, F>(x as f64 - 0.5),
+            convert::<_, F>(y as f64 - 0.5),
+            convert::<_, F>(z as f64 - 0.5),
+        );
+        let sqrt3: F = convert::<_, F>(3.).sqrt();
+        let new_center: Point3<F> = center + offset * new_size * sqrt3;
         return (octant_i, new_size, new_center);
     }
 
-    fn octant_box(i: usize, center: Point3<f64>, size: f64) -> (Point3<f64>, f64) {
+    fn octant_box(i: usize, center: Point3<F>, size: F) -> (Point3<F>, F) {
         let z = i / 4;
         let y = (i - 4 * z) / 2;
         let x = i % 2;
-        let new_size = size / 2.;
-        let new_center = center
-            + new_size * 3_f64.sqrt() * vector!(x as f64 - 0.5, y as f64 - 0.5, z as f64 - 0.5);
+
+        let new_size = size / convert(2.);
+        let offset = Vector3::new(
+            convert::<_, F>(x as f64 - 0.5),
+            convert::<_, F>(y as f64 - 0.5),
+            convert::<_, F>(z as f64 - 0.5),
+        );
+        let sqrt3: F = convert::<_, F>(3.).sqrt();
+        let new_center: Point3<F> = center + offset * new_size * sqrt3;
         return (new_center, new_size);
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Octree {
-    root: Node,
-    center: Point3<f64>,
-    size: f64,
+pub struct Octree<F: BaseFloat> {
+    root: Node<F>,
+    center: Point3<F>,
+    size: F,
     max_node_size: usize,
 
     depth: usize,
+    num_points: u64,
 }
 
-impl Octree {
-    pub fn new(center: Point3<f64>, size: f64) -> Self {
+impl<F: BaseFloat> Octree<F> {
+    pub fn new(center: Point3<F>, size: F) -> Self {
         Octree {
             root: Node::Empty,
             max_node_size: 1024,
             center,
             size,
             depth: 0,
+            num_points: 0,
         }
     }
 
-    pub fn insert(&mut self, point: Vertex<f64>) {
+    pub fn insert(&mut self, point: Vertex<F>) {
         match &mut self.root {
             Node::Group(_) => {
                 self.root
@@ -179,13 +183,23 @@ impl Octree {
                 self.root = Node::Filled(new_vec);
             }
         }
+        self.num_points += 1;
     }
 
-    pub fn traverse<F: FnMut(&Node, Point3<f64>, f64)>(&self, mut f: F) {
+    pub fn traverse<A: FnMut(&Node<F>, Point3<F>, F)>(&self, mut f: A) {
         self.root.traverse(&mut f, self.center, self.size)
     }
 
     pub fn depth(&self) -> usize {
         self.root.depth()
+    }
+
+    pub fn num_points(&self) -> u64 {
+        self.num_points
+    }
+    pub fn num_octants(&self) -> u64 {
+        let mut num_octants = 0;
+        self.traverse(|_, _, _| num_octants += 1);
+        return num_octants;
     }
 }

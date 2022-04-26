@@ -67,7 +67,7 @@ fn main() {
             .zip(cameras)
             .map(|(color, cam)| Vertex {
                 position: *cam.position(),
-                normal: Vector3::zeros(),
+                // normal: Vector3::zeros(),
                 color: Vector4::new(
                     color.0[0] as f32 / 255.,
                     color.0[1] as f32 / 255.,

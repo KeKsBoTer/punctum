@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use nalgebra::{Point3, RealField, Scalar, Vector3, Vector4};
+use nalgebra::{Point3, RealField, Scalar, Vector4};
 use ply_rs::ply::{self, Addable, ElementDef, PropertyDef, PropertyType, ScalarType};
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,8 @@ impl<T: Scalar + RealField + Copy> BaseFloat for T {}
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Vertex<F: BaseFloat> {
     pub position: Point3<F>,
-    pub normal: Vector3<f32>,
+    // pub normal: Vector3<f32>,
+    #[serde(skip_serializing)]
     pub color: Vector4<f32>,
 }
 
@@ -31,13 +32,13 @@ impl<F: BaseFloat> PointPosition<F> for Vertex<F> {
     }
 }
 
-vulkano::impl_vertex!(Vertex<f32>, position, normal, color);
+vulkano::impl_vertex!(Vertex<f32>, position, color);
 
 impl<F: BaseFloat> ply::PropertyAccess for Vertex<F> {
     fn new() -> Self {
         Vertex {
             position: Point3::<F>::origin(),
-            normal: Vector3::zeros(),
+            // normal: Vector3::zeros(),
             color: Vector4::zeros(),
         }
     }
@@ -47,9 +48,9 @@ impl<F: BaseFloat> ply::PropertyAccess for Vertex<F> {
             ("x", ply::Property::Float(v)) => self.position[0] = F::from_f32(v).unwrap(),
             ("y", ply::Property::Float(v)) => self.position[1] = F::from_f32(v).unwrap(),
             ("z", ply::Property::Float(v)) => self.position[2] = F::from_f32(v).unwrap(),
-            ("nx", ply::Property::Float(v)) => self.normal[0] = v,
-            ("ny", ply::Property::Float(v)) => self.normal[1] = v,
-            ("nz", ply::Property::Float(v)) => self.normal[2] = v,
+            // ("nx", ply::Property::Float(v)) => self.normal[0] = v,
+            // ("ny", ply::Property::Float(v)) => self.normal[1] = v,
+            // ("nz", ply::Property::Float(v)) => self.normal[2] = v,
             ("red", ply::Property::UChar(v)) => self.color[0] = (v as f32) / 255.,
             ("green", ply::Property::UChar(v)) => self.color[1] = (v as f32) / 255.,
             ("blue", ply::Property::UChar(v)) => self.color[2] = (v as f32) / 255.,
