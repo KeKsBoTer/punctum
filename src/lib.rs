@@ -25,7 +25,7 @@ pub use camera::{Camera, CameraController};
 pub use octree::{Node, Octree};
 pub use pointcloud::{BoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
-pub use vertex::{PointPosition, Vertex};
+pub use vertex::Vertex;
 
 use renderer::Frame;
 
@@ -112,7 +112,11 @@ pub struct OfflineRenderer {
 }
 
 impl OfflineRenderer {
-    pub fn new(pc: Arc<PointCloud<f32>>, img_size: u32, render_settings: RenderSettings) -> Self {
+    pub fn new(
+        pc: Arc<PointCloud<f32, f32>>,
+        img_size: u32,
+        render_settings: RenderSettings,
+    ) -> Self {
         let required_extensions = vulkano_win::required_extensions();
         let instance = Instance::new(InstanceCreateInfo {
             enabled_extensions: required_extensions,

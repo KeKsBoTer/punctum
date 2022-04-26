@@ -2,17 +2,20 @@ use serde::{Deserialize, Serialize};
 
 use nalgebra::{convert, Point3, Vector3};
 
-use crate::{vertex::BaseFloat, Vertex};
+use crate::{
+    vertex::{BaseColor, BaseFloat},
+    Vertex,
+};
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum Node<F: BaseFloat> {
-    Group(Box<[Node<F>; 8]>),
-    Filled(Vec<Vertex<F>>),
+pub enum Node<F: BaseFloat, C: BaseColor> {
+    Group(Box<[Node<F, C>; 8]>),
+    Filled(Vec<Vertex<F, C>>),
     Empty,
 }
 
-impl<F: BaseFloat> Node<F> {
-    fn insert(&mut self, point: Vertex<F>, center: Point3<F>, size: F, max_node_size: usize) {
+impl<F: BaseFloat, C: BaseColor> Node<F, C> {
+    fn insert(&mut self, point: Vertex<F, C>, center: Point3<F>, size: F, max_node_size: usize) {
         let mut node = self;
         let mut center = center;
         let mut size = size;
@@ -42,11 +45,11 @@ impl<F: BaseFloat> Node<F> {
         }
     }
 
-    fn traverse<A: FnMut(&Node<F>, Point3<F>, F)>(&self, f: &mut A, center: Point3<F>, size: F) {
+    fn traverse<A: FnMut(&Node<F, C>, Point3<F>, F)>(&self, f: &mut A, center: Point3<F>, size: F) {
         f(self, center, size);
         if let Node::Group(group) = self {
             for (i, node) in group.iter().enumerate() {
-                let (center_new, size_new) = Node::octant_box(i, center, size);
+                let (center_new, size_new) = Self::octant_box(i, center, size);
                 node.traverse(f, center_new, size_new);
             }
         }
@@ -74,11 +77,11 @@ impl<F: BaseFloat> Node<F> {
     }
 
     fn split(
-        vertices: &Vec<Vertex<F>>,
+        vertices: &Vec<Vertex<F, C>>,
         center: Point3<F>,
         size: F,
         max_node_size: usize,
-    ) -> Box<[Node<F>; 8]> {
+    ) -> Box<[Node<F, C>; 8]> {
         let mut new_data = Box::new([
             Node::Empty,
             Node::Empty,
@@ -104,7 +107,7 @@ impl<F: BaseFloat> Node<F> {
         return new_data;
     }
 
-    fn child_octant(point: &Vertex<F>, center: Point3<F>, size: F) -> (usize, F, Point3<F>) {
+    fn child_octant(point: &Vertex<F, C>, center: Point3<F>, size: F) -> (usize, F, Point3<F>) {
         let z = (point.position[2] > center.z) as usize; // 1 if true
         let y = (point.position[1] > center.y) as usize;
         let x = (point.position[0] > center.z) as usize;
@@ -139,8 +142,8 @@ impl<F: BaseFloat> Node<F> {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Octree<F: BaseFloat> {
-    root: Node<F>,
+pub struct Octree<F: BaseFloat, C: BaseColor> {
+    root: Node<F, C>,
     center: Point3<F>,
     size: F,
     max_node_size: usize,
@@ -149,7 +152,7 @@ pub struct Octree<F: BaseFloat> {
     num_points: u64,
 }
 
-impl<F: BaseFloat> Octree<F> {
+impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
     pub fn new(center: Point3<F>, size: F) -> Self {
         Octree {
             root: Node::Empty,
@@ -161,7 +164,7 @@ impl<F: BaseFloat> Octree<F> {
         }
     }
 
-    pub fn insert(&mut self, point: Vertex<F>) {
+    pub fn insert(&mut self, point: Vertex<F, C>) {
         match &mut self.root {
             Node::Group(_) => {
                 self.root
@@ -186,7 +189,7 @@ impl<F: BaseFloat> Octree<F> {
         self.num_points += 1;
     }
 
-    pub fn traverse<A: FnMut(&Node<F>, Point3<F>, F)>(&self, mut f: A) {
+    pub fn traverse<A: FnMut(&Node<F, C>, Point3<F>, F)>(&self, mut f: A) {
         self.root.traverse(&mut f, self.center, self.size)
     }
 

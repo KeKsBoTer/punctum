@@ -6,19 +6,19 @@ use vulkano::{
     device::Device,
 };
 
-use crate::vertex::{BaseFloat, PointPosition, Vertex};
+use crate::vertex::{BaseColor, BaseFloat, Vertex};
 
-pub struct PointCloud<F: BaseFloat> {
-    data: Vec<Vertex<F>>,
+pub struct PointCloud<F: BaseFloat, C: BaseColor> {
+    data: Vec<Vertex<F, C>>,
     bbox: BoundingBox<F>,
 }
 
-impl<F: BaseFloat> PointCloud<F> {
+impl PointCloud<f32, f32> {
     pub fn from_ply_file(filename: &str) -> Self {
         let mut f = std::fs::File::open(filename).unwrap();
 
         // create a parser
-        let p = ply_rs::parser::Parser::<Vertex<F>>::new();
+        let p = ply_rs::parser::Parser::<Vertex<f32, f32>>::new();
 
         // use the parser: read the entire file
         let ply = p.read_ply(&mut f);
@@ -35,8 +35,10 @@ impl<F: BaseFloat> PointCloud<F> {
             bbox: bbox,
         }
     }
+}
 
-    pub fn from_vec(points: &Vec<Vertex<F>>) -> Self {
+impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
+    pub fn from_vec(points: &Vec<Vertex<F, C>>) -> Self {
         let bbox = BoundingBox::from_points(points);
         PointCloud {
             data: points.clone(),
@@ -69,18 +71,18 @@ impl<F: BaseFloat> PointCloud<F> {
         &self.bbox
     }
 
-    pub fn points(&self) -> &Vec<Vertex<F>> {
+    pub fn points(&self) -> &Vec<Vertex<F, C>> {
         &self.data
     }
 }
 
 pub struct PointCloudGPU {
-    cpu: Arc<PointCloud<f32>>,
-    gpu_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32>]>>,
+    cpu: Arc<PointCloud<f32, f32>>,
+    gpu_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>>,
 }
 
 impl PointCloudGPU {
-    pub fn from_point_cloud(device: Arc<Device>, pc: Arc<PointCloud<f32>>) -> PointCloudGPU {
+    pub fn from_point_cloud(device: Arc<Device>, pc: Arc<PointCloud<f32, f32>>) -> PointCloudGPU {
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
             device,
             BufferUsage::vertex_buffer(),
@@ -95,10 +97,10 @@ impl PointCloudGPU {
         }
     }
 
-    pub fn cpu(&self) -> &Arc<PointCloud<f32>> {
+    pub fn cpu(&self) -> &Arc<PointCloud<f32, f32>> {
         &self.cpu
     }
-    pub fn gpu_buffer(&self) -> &Arc<CpuAccessibleBuffer<[Vertex<f32>]>> {
+    pub fn gpu_buffer(&self) -> &Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>> {
         &self.gpu_buffer
     }
 }
@@ -150,13 +152,13 @@ impl<F: BaseFloat> BoundingBox<F> {
         )
     }
 
-    pub fn from_points(points: &Vec<impl PointPosition<F>>) -> Self {
+    pub fn from_points<C: BaseColor>(points: &Vec<Vertex<F, C>>) -> Self {
         let max_f = F::max_value().unwrap();
         let min_f = F::min_value().unwrap();
         let mut min_corner: Point3<F> = Point3::new(max_f, max_f, max_f);
         let mut max_corner = Point3::new(min_f, min_f, min_f);
         for v in points.iter() {
-            let p: &Point3<F> = v.position().into();
+            let p: &Point3<F> = &v.position;
             min_corner = BoundingBox::elm_min(&p, &min_corner);
             max_corner = BoundingBox::elm_max(&p, &max_corner);
         }

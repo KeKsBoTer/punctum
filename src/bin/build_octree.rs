@@ -15,7 +15,7 @@ use ply_rs::{
 use punctum::{Node, Octree, PointCloud, Vertex};
 use std::io::prelude::*;
 
-fn build_octree(las_file: &String) -> Octree<f64> {
+fn build_octree(las_file: &String) -> Octree<f64, u8> {
     let mut reader = Reader::from_path(las_file).unwrap();
 
     let number_of_points = reader.header().number_of_points();
@@ -39,10 +39,10 @@ fn build_octree(las_file: &String) -> Octree<f64> {
             position: Point3::new(point.x, point.y, point.z),
             // normal: Vector3::zeros(),
             color: Vector4::new(
-                color.red as f32 / 65536., // 65536 = 2**16
-                color.green as f32 / 65536.,
-                color.blue as f32 / 65536.,
-                1.,
+                (color.red / 256) as u8, // 65536 = 2**16
+                (color.green / 256) as u8,
+                (color.blue / 256) as u8,
+                255,
             ),
         };
         octree.insert(point);

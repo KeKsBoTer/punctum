@@ -102,7 +102,7 @@ impl PointCloudRenderer {
         device: Arc<Device>,
     ) -> Arc<GraphicsPipeline> {
         GraphicsPipeline::start()
-            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex<f32>>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex<f32, f32>>())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState {
                 topology: PartialStateMode::Fixed(PrimitiveTopology::PointList),
