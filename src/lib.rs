@@ -19,12 +19,14 @@ mod camera;
 mod octree;
 mod pointcloud;
 mod renderer;
+mod tee;
 mod vertex;
 
 pub use camera::{Camera, CameraController};
 pub use octree::{Node, Octree};
 pub use pointcloud::{BoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
+pub use tee::{TeeReader, TeeWriter};
 pub use vertex::Vertex;
 
 use renderer::Frame;

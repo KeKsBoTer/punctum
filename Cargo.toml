@@ -23,6 +23,7 @@ bincode = "1.3.3"
 serde = { version = "1.0.136", features = ["derive"]}
 pbr = { version = "1.0.4"}
 num-traits = "0.2.14"
+structopt = "0.3"
 
 [lib]
 name = "punctum"
@@ -35,6 +36,11 @@ path = "src/bin/viewer.rs"
 [[bin]]
 name = "headless"
 path = "src/bin/headless.rs"
+
 [[bin]]
 name = "octree_builder"
 path = "src/bin/build_octree.rs"
+
+[[bin]]
+name = "dataset_builder"
+path = "src/bin/gen_dataset.rs"

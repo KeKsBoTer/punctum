@@ -1,3 +1,4 @@
+use rayon::iter::IntoParallelIterator;
 use serde::{Deserialize, Serialize};
 
 use nalgebra::{convert, Point3, Vector3};
@@ -45,13 +46,21 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         }
     }
 
-    fn traverse<A: FnMut(&Node<F, C>, Point3<F>, F)>(&self, f: &mut A, center: Point3<F>, size: F) {
-        f(self, center, size);
-        if let Node::Group(group) = self {
-            for (i, node) in group.iter().enumerate() {
-                let (center_new, size_new) = Self::octant_box(i, center, size);
-                node.traverse(f, center_new, size_new);
+    fn traverse<'a, A: FnMut(&'a Vec<Vertex<F, C>>, Point3<F>, F)>(
+        &'a self,
+        f: &mut A,
+        center: Point3<F>,
+        size: F,
+    ) {
+        match self {
+            Node::Group(group) => {
+                for (i, node) in group.iter().enumerate() {
+                    let (center_new, size_new) = Self::octant_box(i, center, size);
+                    node.traverse(f, center_new, size_new);
+                }
             }
+            Node::Filled(data) => f(data, center, size),
+            Node::Empty => {}
         }
     }
 
@@ -143,7 +152,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Octree<F: BaseFloat, C: BaseColor> {
-    root: Node<F, C>,
+    pub root: Node<F, C>,
     center: Point3<F>,
     size: F,
     max_node_size: usize,
@@ -153,10 +162,10 @@ pub struct Octree<F: BaseFloat, C: BaseColor> {
 }
 
 impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
-    pub fn new(center: Point3<F>, size: F) -> Self {
+    pub fn new(center: Point3<F>, size: F, max_node_size: usize) -> Self {
         Octree {
             root: Node::Empty,
-            max_node_size: 1024,
+            max_node_size,
             center,
             size,
             depth: 0,
@@ -189,7 +198,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         self.num_points += 1;
     }
 
-    pub fn traverse<A: FnMut(&Node<F, C>, Point3<F>, F)>(&self, mut f: A) {
+    pub fn traverse<'a, A: FnMut(&'a Vec<Vertex<F, C>>, Point3<F>, F)>(&'a self, mut f: A) {
         self.root.traverse(&mut f, self.center, self.size)
     }
 
@@ -204,5 +213,23 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         let mut num_octants = 0;
         self.traverse(|_, _, _| num_octants += 1);
         return num_octants;
+    }
+}
+
+pub struct OctreeIter<'a, F: BaseFloat, C: BaseColor> {
+    pub data: &'a Vec<Vertex<F, C>>,
+    pub center: Point3<F>,
+    pub size: F,
+}
+
+impl<'a, F: BaseFloat, C: BaseColor> IntoIterator for &'a Octree<F, C> {
+    type Item = OctreeIter<'a, F, C>;
+    type IntoIter = std::vec::IntoIter<OctreeIter<'a, F, C>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let mut result = vec![];
+        self.traverse(|data, center, size| result.push(OctreeIter { data, center, size }));
+
+        result.into_iter()
     }
 }

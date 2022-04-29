@@ -49,6 +49,7 @@ impl ply::PropertyAccess for Vertex<f32, u8> {
         }
     }
 
+    #[inline]
     fn get_uchar(&self, _property_name: &String) -> Option<u8> {
         match _property_name.as_str() {
             "red" => Some(self.color[0]),
@@ -58,6 +59,7 @@ impl ply::PropertyAccess for Vertex<f32, u8> {
             _ => None,
         }
     }
+    #[inline]
     fn get_float(&self, _property_name: &String) -> Option<f32> {
         match _property_name.as_str() {
             "x" => Some(self.position[0]),
@@ -95,7 +97,7 @@ impl ply::PropertyAccess for Vertex<f32, f32> {
     }
 }
 
-impl Vertex<f32, f32> {
+impl<F: BaseFloat, C: BaseColor> Vertex<F, C> {
     pub fn element_def(name: String) -> ElementDef {
         let mut point_element = ElementDef::new(name);
         let p = PropertyDef::new("x".to_string(), PropertyType::Scalar(ScalarType::Float));
