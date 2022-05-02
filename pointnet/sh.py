@@ -165,9 +165,11 @@ def to_spherical(coords: torch.Tensor) -> torch.Tensor:
     """
     assert (coords.norm(p=2, dim=1) - 1 < 1e-8).all(), "must be of length 1"
 
-    theta = coords[:, 2].acos()
-    phi = torch.atan2(coords[:, 1], coords[:, 0]) + pi
-    return torch.stack([theta, phi]).T
+    spherical = torch.empty((coords.shape[0], 2), device=coords.device)
+
+    spherical[:, 0] = coords[:, 2].acos()
+    spherical[:, 1] = torch.atan2(coords[:, 1], coords[:, 0]) + torch.pi
+    return spherical
 
 
 def lm2flat_index(l: int, m: int) -> int:

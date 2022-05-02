@@ -35,7 +35,7 @@ class OctantDataset(Dataset):
         sh_coef = torch.empty((len(sh_coefficients), 3), requires_grad=False)
 
         for (l, m, values) in sh_coefficients:
-            sh_coef[lm2flat_index(l, m)] = torch.from_numpy(values)
+            sh_coef[lm2flat_index(l, m)] = torch.tensor(values)
 
         pc = Pointclouds(
             torch.from_numpy(pos).unsqueeze(0),

@@ -1,31 +1,25 @@
 import torch
 from plyfile import PlyData, PlyElement
 import numpy as np
-
+import glob
+from os.path import join, basename
 from sh import to_spherical, calc_coeficients, lm2flat_index
+from tqdm import tqdm
 
 
 if __name__ == "__main__":
     import argparse
 
-    from time import perf_counter
-    from contextlib import contextmanager
-
-    @contextmanager
-    def measure_time() -> float:
-        start = perf_counter()
-        yield lambda: perf_counter() - start
-
     parser = argparse.ArgumentParser(
         description="Calculate Spherical Harmonics for perspective colors"
     )
     parser.add_argument(
-        "in_file",
+        "in_folder",
         type=str,
         help="ply file with camera positions and their perceived colors",
     )
     parser.add_argument(
-        "out_file", type=str, help="ply file where results will be written to"
+        "out_folder", type=str, help="ply file where results will be written to"
     )
     parser.add_argument(
         "--l_max",
@@ -41,13 +35,12 @@ if __name__ == "__main__":
 
     device = "cuda" if args.cuda else "cpu"
 
-    with measure_time() as t:
-        torch.zeros(1, device=device)
-        print(f"pytorch startup took \t{t():.4f} secs")
+    for filename in tqdm(
+        glob.glob(join(args.in_folder, "*.ply")), desc="calculating SHs", ascii=False
+    ):
 
-    with measure_time() as t:
-        plydata = PlyData.read(args.in_file)
-        vertex_data = plydata["vertex"].data
+        plydata = PlyData.read(filename)
+        vertex_data = plydata["camera"].data
 
         def unpack_data(data, field_names):
             return torch.from_numpy(np.stack([data[key] for key in field_names]).T)
@@ -59,14 +52,10 @@ if __name__ == "__main__":
             unpack_data(vertex_data, ["red", "green", "blue"]).float().to(device)
             / 255.0
         )
-        print(f"reading in took \t{t():.4f} secs")
 
-    with measure_time() as t:
         cameras_spherical = to_spherical(cameras)
         coefs = calc_coeficients(l_max, cameras_spherical, perceived_colors)
-        print(f"coef. calc. took \t{t():.4f} secs")
 
-    with measure_time() as t:
         coef_data = []
         for l in range(l_max + 1):
             for m, sh in enumerate(
@@ -80,5 +69,6 @@ if __name__ == "__main__":
 
         sh_elm = PlyElement.describe(ply_sh_data, "sh_coefficients")
 
-        PlyData([sh_elm, plydata["vertex"]]).write(args.out_file)
-        print(f"exporting file took \t{t():.4f} secs")
+        PlyData([sh_elm, plydata["vertex"]]).write(
+            join(args.out_folder, basename(filename))
+        )
