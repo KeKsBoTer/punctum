@@ -197,7 +197,7 @@ fn main() {
                 .map(|(color, cam)| Vertex {
                     position: *cam.position(),
                     // normal: Vector3::zeros(),
-                    color: Vector4::from(color.0).cast(),
+                    color: Vector4::from(color.0).cast() / 255.,
                 })
                 .collect();
 

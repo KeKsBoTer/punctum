@@ -80,5 +80,5 @@ if __name__ == "__main__":
 
         sh_elm = PlyElement.describe(ply_sh_data, "sh_coefficients")
 
-        PlyData([sh_elm, plydata["vertex"]], text=True).write(args.out_file)
+        PlyData([sh_elm, plydata["vertex"]]).write(args.out_file)
         print(f"exporting file took \t{t():.4f} secs")

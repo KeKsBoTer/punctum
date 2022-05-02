@@ -5,6 +5,7 @@ use las::{Read as LasRead, Reader};
 use nalgebra::{center, Point3, Vector4};
 use pbr::ProgressBar;
 use punctum::{Octree, TeeWriter, Vertex};
+use rand::{prelude::StdRng, Rng, SeedableRng};
 use std::path::PathBuf;
 use structopt::StructOpt;
 
@@ -12,6 +13,7 @@ fn build_octree(
     las_file: &PathBuf,
     max_node_size: usize,
     max_octants: Option<usize>,
+    sample_rate: Option<usize>,
 ) -> Octree<f64, u8> {
     let mut reader = Reader::from_path(las_file).unwrap();
 
@@ -30,7 +32,18 @@ fn build_octree(
     let mut pb = ProgressBar::new(number_of_points);
     let mut counter = 0;
     let mut octant_counter = 0;
+
+    let mut rand_gen = StdRng::seed_from_u64(42);
+
     for p in reader.points() {
+        counter += 1;
+        if let Some(rate) = sample_rate {
+            let r: usize = rand_gen.gen();
+            if r % rate != 0 {
+                continue;
+            }
+        }
+
         let point = p.unwrap();
         let color = point.color.unwrap();
         let point = Vertex {
@@ -43,13 +56,12 @@ fn build_octree(
             ),
         };
         octant_counter += octree.insert(point);
-        counter += 1;
         if let Some(max) = max_octants {
             if octant_counter >= max {
                 break;
             }
         }
-        if counter == 100000 {
+        if counter >= number_of_points / 100 {
             pb.add(counter);
             counter = 0;
         }
@@ -72,6 +84,9 @@ struct Opt {
 
     #[structopt(short, long)]
     max_octants: Option<usize>,
+
+    #[structopt(short, long)]
+    sample_rate: Option<usize>,
 }
 
 fn main() {
@@ -80,7 +95,12 @@ fn main() {
         "Building octree from {}:",
         opt.input.as_os_str().to_str().unwrap()
     );
-    let octree = build_octree(&opt.input, opt.max_octant_size, opt.max_octants);
+    let octree = build_octree(
+        &opt.input,
+        opt.max_octant_size,
+        opt.max_octants,
+        opt.sample_rate,
+    );
     println!(
         "octree stats:\n\tnum_points:\t{}\n\tmax_depth:\t{}\n\tnum_octants:\t{}",
         octree.num_points(),

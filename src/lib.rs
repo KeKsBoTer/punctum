@@ -10,7 +10,6 @@ use vulkano::{
         Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned, Queue, QueueCreateInfo,
     },
     instance::{Instance, InstanceCreateInfo},
-    pipeline::graphics::vertex_input::VertexBuffersCollection,
     render_pass::{RenderPass, Subpass},
     swapchain::Surface,
 };
@@ -180,22 +179,6 @@ impl OfflineRenderer {
         }
     }
 
-    pub fn render2<V>(&mut self, camera: Camera, pc: V, num_points: u32) -> Rgba<u8>
-    where
-        V: VertexBuffersCollection,
-    {
-        self.renderer.set_camera(&camera);
-        let cb = self
-            .renderer
-            .render_point_cloud2(self.queue.clone(), pc, num_points);
-
-        self.frame
-            .render(self.queue.clone(), cb, self.buffer.clone());
-
-        let buffer_content = self.buffer.read().unwrap();
-
-        calc_average_color(&buffer_content)
-    }
     pub fn render(&mut self, camera: Camera, pc: &PointCloudGPU) -> Rgba<u8> {
         self.renderer.set_camera(&camera);
         let cb = self.renderer.render_point_cloud(self.queue.clone(), pc);

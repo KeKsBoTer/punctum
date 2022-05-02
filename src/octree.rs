@@ -189,6 +189,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
     }
 
     pub fn insert(&mut self, point: Vertex<F, C>) -> usize {
+        self.num_points += 1;
         match &mut self.root {
             Node::Group(_) => {
                 return self
@@ -204,6 +205,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
                     new_octants +=
                         self.root
                             .insert(point, self.center, self.size, self.max_node_size);
+
                     return new_octants;
                 } else {
                     data.push(point);
@@ -230,6 +232,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
     pub fn num_points(&self) -> u64 {
         self.num_points
     }
+
     pub fn num_octants(&self) -> u64 {
         let mut num_octants = 0;
         self.traverse(|_, _, _| num_octants += 1);
