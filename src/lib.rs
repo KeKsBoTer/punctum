@@ -7,9 +7,10 @@ use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily},
-        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
+        Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned, Queue, QueueCreateInfo,
     },
     instance::{Instance, InstanceCreateInfo},
+    pipeline::graphics::vertex_input::VertexBuffersCollection,
     render_pass::{RenderPass, Subpass},
     swapchain::Surface,
 };
@@ -106,7 +107,6 @@ impl Default for RenderSettings {
 
 pub struct OfflineRenderer {
     renderer: PointCloudRenderer,
-    pc: PointCloudGPU,
     frame: Frame,
     queue: Arc<Queue>,
 
@@ -114,11 +114,7 @@ pub struct OfflineRenderer {
 }
 
 impl OfflineRenderer {
-    pub fn new(
-        pc: Arc<PointCloud<f32, f32>>,
-        img_size: u32,
-        render_settings: RenderSettings,
-    ) -> Self {
+    pub fn new(img_size: u32, render_settings: RenderSettings) -> Self {
         let required_extensions = vulkano_win::required_extensions();
         let instance = Instance::new(InstanceCreateInfo {
             enabled_extensions: required_extensions,
@@ -165,10 +161,6 @@ impl OfflineRenderer {
 
         let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass, viewport);
 
-        let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
-
-        // let pixel_format_size = image_format.components()
-
         let target_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
             BufferUsage::transfer_destination(),
@@ -185,15 +177,17 @@ impl OfflineRenderer {
             frame,
             queue: queue,
             buffer: target_buffer,
-            pc: pc_gpu,
         }
     }
 
-    pub fn render(&mut self, camera: Camera) -> Rgba<u8> {
+    pub fn render2<V>(&mut self, camera: Camera, pc: V, num_points: u32) -> Rgba<u8>
+    where
+        V: VertexBuffersCollection,
+    {
         self.renderer.set_camera(&camera);
         let cb = self
             .renderer
-            .render_point_cloud(self.queue.clone(), &self.pc);
+            .render_point_cloud2(self.queue.clone(), pc, num_points);
 
         self.frame
             .render(self.queue.clone(), cb, self.buffer.clone());
@@ -201,6 +195,24 @@ impl OfflineRenderer {
         let buffer_content = self.buffer.read().unwrap();
 
         calc_average_color(&buffer_content)
+    }
+    pub fn render(&mut self, camera: Camera, pc: &PointCloudGPU) -> Rgba<u8> {
+        self.renderer.set_camera(&camera);
+        let cb = self.renderer.render_point_cloud(self.queue.clone(), pc);
+
+        self.frame
+            .render(self.queue.clone(), cb, self.buffer.clone());
+
+        let buffer_content = self.buffer.read().unwrap();
+
+        let result = calc_average_color(&buffer_content);
+        return result;
+    }
+}
+
+unsafe impl DeviceOwned for OfflineRenderer {
+    fn device(&self) -> &Arc<Device> {
+        &self.queue.device()
     }
 }
 
@@ -212,7 +224,7 @@ fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
             || start,
             |acc, chunk| {
                 acc + chunk.iter().fold(start, |acc, item| {
-                    acc + Vector4::from(item.map(|v| v as f32)) / (255. * 255.) * (item[3] as f32)
+                    acc + Vector4::from(*item).cast() / (255. * 255.) * (item[3] as f32)
                 })
             },
         )

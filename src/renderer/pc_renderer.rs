@@ -11,7 +11,7 @@ use vulkano::{
         graphics::{
             depth_stencil::DepthStencilState,
             input_assembly::{InputAssemblyState, PrimitiveTopology},
-            vertex_input::BuffersDefinition,
+            vertex_input::{BuffersDefinition, VertexBuffersCollection},
             viewport::ViewportState,
         },
         GraphicsPipeline, PartialStateMode, Pipeline, PipelineBindPoint, StateMode,

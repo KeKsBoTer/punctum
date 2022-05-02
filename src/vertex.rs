@@ -95,6 +95,26 @@ impl ply::PropertyAccess for Vertex<f32, f32> {
             (k, _) => panic!("Vertex: Unexpected key/value combination: key: {}", k),
         }
     }
+
+    #[inline]
+    fn get_uchar(&self, _property_name: &String) -> Option<u8> {
+        match _property_name.as_str() {
+            "red" => Some((self.color[0] * 255.) as u8),
+            "green" => Some((self.color[1] * 255.) as u8),
+            "blue" => Some((self.color[2] * 255.) as u8),
+            "alpha" => Some((self.color[3] * 255.) as u8),
+            _ => None,
+        }
+    }
+    #[inline]
+    fn get_float(&self, _property_name: &String) -> Option<f32> {
+        match _property_name.as_str() {
+            "x" => Some(self.position[0]),
+            "y" => Some(self.position[1]),
+            "z" => Some(self.position[2]),
+            _ => None,
+        }
+    }
 }
 
 impl<F: BaseFloat, C: BaseColor> Vertex<F, C> {

@@ -1,4 +1,3 @@
-use rayon::iter::IntoParallelIterator;
 use serde::{Deserialize, Serialize};
 
 use nalgebra::{convert, Point3, Vector3};
@@ -16,10 +15,17 @@ pub enum Node<F: BaseFloat, C: BaseColor> {
 }
 
 impl<F: BaseFloat, C: BaseColor> Node<F, C> {
-    fn insert(&mut self, point: Vertex<F, C>, center: Point3<F>, size: F, max_node_size: usize) {
+    fn insert(
+        &mut self,
+        point: Vertex<F, C>,
+        center: Point3<F>,
+        size: F,
+        max_node_size: usize,
+    ) -> usize {
         let mut node = self;
         let mut center = center;
         let mut size = size;
+        let mut octants_created = 0;
         loop {
             match node {
                 Node::Group(group) => {
@@ -30,17 +36,19 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
                 }
                 Node::Filled(data) => {
                     if data.len() == max_node_size {
-                        *node = Node::Group(Node::split(data, center, size, max_node_size));
+                        let new_octants = Node::split(data, center, size, max_node_size);
+                        octants_created += Node::filled_octants(&new_octants) - 1;
+                        *node = Node::Group(new_octants);
                     } else {
                         data.push(point);
-                        return;
+                        return octants_created;
                     }
                 }
                 Node::Empty => {
                     let mut new_vec = Vec::with_capacity(max_node_size);
                     new_vec.push(point);
                     *node = Node::Filled(new_vec);
-                    return;
+                    return octants_created + 1;
                 }
             }
         }
@@ -148,6 +156,13 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         let new_center: Point3<F> = center + offset * new_size * sqrt3;
         return (new_center, new_size);
     }
+
+    fn filled_octants(octants: &Box<[Node<F, C>; 8]>) -> usize {
+        octants
+            .iter()
+            .map(|c| if let Node::Filled(_) = c { 1 } else { 0 })
+            .sum()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -173,29 +188,35 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         }
     }
 
-    pub fn insert(&mut self, point: Vertex<F, C>) {
+    pub fn insert(&mut self, point: Vertex<F, C>) -> usize {
         match &mut self.root {
             Node::Group(_) => {
-                self.root
+                return self
+                    .root
                     .insert(point, self.center, self.size, self.max_node_size);
             }
             Node::Filled(data) => {
                 if data.len() >= self.max_node_size {
                     let group = Node::split(&data, self.center, self.size, self.max_node_size);
+                    let mut new_octants = Node::filled_octants(&group) - 1;
                     self.root = Node::Group(group);
-                    self.root
-                        .insert(point, self.center, self.size, self.max_node_size);
+
+                    new_octants +=
+                        self.root
+                            .insert(point, self.center, self.size, self.max_node_size);
+                    return new_octants;
                 } else {
                     data.push(point);
+                    return 0;
                 }
             }
             Node::Empty => {
                 let mut new_vec = Vec::with_capacity(self.max_node_size);
                 new_vec.push(point);
                 self.root = Node::Filled(new_vec);
+                return 1;
             }
         }
-        self.num_points += 1;
     }
 
     pub fn traverse<'a, A: FnMut(&'a Vec<Vertex<F, C>>, Point3<F>, F)>(&'a self, mut f: A) {
@@ -216,6 +237,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct OctreeIter<'a, F: BaseFloat, C: BaseColor> {
     pub data: &'a Vec<Vertex<F, C>>,
     pub center: Point3<F>,

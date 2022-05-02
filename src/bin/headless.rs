@@ -5,8 +5,9 @@ use ply_rs::{
     writer::Writer,
 };
 use std::{env, fs::File, sync::Arc};
+use vulkano::device::DeviceOwned;
 
-use punctum::{Camera, OfflineRenderer, PointCloud, RenderSettings, Vertex};
+use punctum::{Camera, OfflineRenderer, PointCloud, PointCloudGPU, RenderSettings, Vertex};
 fn main() {
     let args = env::args();
     if args.len() != 3 {
@@ -39,7 +40,6 @@ fn main() {
     let pc_arc = Arc::new(pc);
 
     let mut renderer = OfflineRenderer::new(
-        pc_arc.clone(),
         256,
         RenderSettings {
             point_size: 20.0,
@@ -47,7 +47,12 @@ fn main() {
         },
     );
 
-    let renders: Vec<Rgba<u8>> = cameras.iter().map(|c| renderer.render(c.clone())).collect();
+    let pc_gpu = PointCloudGPU::from_point_cloud(renderer.device().clone(), pc_arc.clone());
+
+    let renders: Vec<Rgba<u8>> = cameras
+        .iter()
+        .map(|c| renderer.render(c.clone(), &pc_gpu))
+        .collect();
 
     println!("done rendering ... saving ....");
 

@@ -82,7 +82,7 @@ pub struct PointCloudGPU {
 }
 
 impl PointCloudGPU {
-    pub fn from_point_cloud(device: Arc<Device>, pc: Arc<PointCloud<f32, f32>>) -> PointCloudGPU {
+    pub fn from_point_cloud(device: Arc<Device>, pc: Arc<PointCloud<f32, f32>>) -> Self {
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
             device,
             BufferUsage::vertex_buffer(),

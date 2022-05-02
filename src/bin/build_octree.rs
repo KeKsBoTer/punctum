@@ -8,7 +8,11 @@ use punctum::{Octree, TeeWriter, Vertex};
 use std::path::PathBuf;
 use structopt::StructOpt;
 
-fn build_octree(las_file: &PathBuf, max_node_size: usize) -> Octree<f64, u8> {
+fn build_octree(
+    las_file: &PathBuf,
+    max_node_size: usize,
+    max_octants: Option<usize>,
+) -> Octree<f64, u8> {
     let mut reader = Reader::from_path(las_file).unwrap();
 
     let number_of_points = reader.header().number_of_points();
@@ -25,12 +29,12 @@ fn build_octree(las_file: &PathBuf, max_node_size: usize) -> Octree<f64, u8> {
     let mut octree = Octree::new(center(&min_point, &max_point), max_size, max_node_size);
     let mut pb = ProgressBar::new(number_of_points);
     let mut counter = 0;
+    let mut octant_counter = 0;
     for p in reader.points() {
         let point = p.unwrap();
         let color = point.color.unwrap();
         let point = Vertex {
             position: Point3::new(point.x, point.y, point.z),
-            // normal: Vector3::zeros(),
             color: Vector4::new(
                 (color.red / 256) as u8, // 65536 = 2**16
                 (color.green / 256) as u8,
@@ -38,8 +42,13 @@ fn build_octree(las_file: &PathBuf, max_node_size: usize) -> Octree<f64, u8> {
                 255,
             ),
         };
-        octree.insert(point);
+        octant_counter += octree.insert(point);
         counter += 1;
+        if let Some(max) = max_octants {
+            if octant_counter >= max {
+                break;
+            }
+        }
         if counter == 100000 {
             pb.add(counter);
             counter = 0;
@@ -60,6 +69,9 @@ struct Opt {
 
     #[structopt(short, long, default_value = "1024")]
     max_octant_size: usize,
+
+    #[structopt(short, long)]
+    max_octants: Option<usize>,
 }
 
 fn main() {
@@ -68,7 +80,7 @@ fn main() {
         "Building octree from {}:",
         opt.input.as_os_str().to_str().unwrap()
     );
-    let octree = build_octree(&opt.input, opt.max_octant_size);
+    let octree = build_octree(&opt.input, opt.max_octant_size, opt.max_octants);
     println!(
         "octree stats:\n\tnum_points:\t{}\n\tmax_depth:\t{}\n\tnum_octants:\t{}",
         octree.num_points(),
