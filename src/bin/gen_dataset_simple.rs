@@ -1,19 +1,18 @@
 use std::{
     fs::File,
-    io::{BufReader, BufWriter},
+    io::BufWriter,
     sync::{Arc, Mutex},
 };
 
 use image::Rgba;
-use nalgebra::Vector4;
+use nalgebra::{Point3, Vector3, Vector4};
 use pbr::ProgressBar;
 use ply_rs::{
     ply::{Addable, Encoding, Ply},
     writer::Writer,
 };
-use punctum::{
-    Camera, Octree, OfflineRenderer, PointCloud, PointCloudGPU, RenderSettings, TeeReader, Vertex,
-};
+use punctum::{Camera, OfflineRenderer, PointCloud, PointCloudGPU, RenderSettings, Vertex};
+use rand::{prelude::StdRng, Rng, SeedableRng};
 use rayon::prelude::*;
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -22,11 +21,11 @@ use vulkano::device::DeviceOwned;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "Octree Builder")]
 struct Opt {
-    #[structopt(name = "input_las", parse(from_os_str))]
-    input: PathBuf,
-
     #[structopt(name = "output", parse(from_os_str))]
     output_folder: PathBuf,
+
+    #[structopt(short, long, default_value = "1024")]
+    number_of_samples: usize,
 }
 
 struct RenderPool {
@@ -40,9 +39,9 @@ impl RenderPool {
         let rs = (0..size)
             .map(|_| {
                 Arc::new(Mutex::new(OfflineRenderer::new(
-                    256,
+                    64,
                     RenderSettings {
-                        point_size: 20.0,
+                        point_size: 32.0,
                         ..RenderSettings::default()
                     },
                 )))
@@ -116,60 +115,53 @@ fn load_cameras() -> Vec<Camera> {
         .collect::<Vec<Camera>>()
 }
 
+fn rand_point(generator: &mut StdRng) -> Point3<f32> {
+    let x: f32 = generator.gen_range(-1. ..=1.);
+    let y: f32 = generator.gen_range(-1. ..=1.);
+    let z: f32 = generator.gen_range(-1. ..=1.);
+    let p = Vector3::new(x, y, z);
+    return p.normalize().into();
+}
+
 fn main() {
     let opt = Opt::from_args();
-    let filename = opt.input.as_os_str().to_str().unwrap();
-
-    let octree = Arc::new({
-        let in_file = File::open(&opt.input).unwrap();
-
-        let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
-
-        let mut buf = BufReader::new(in_file);
-
-        pb.message(&format!("decoding {}: ", filename));
-
-        pb.set_units(pbr::Units::Bytes);
-        let mut tee = TeeReader::new(&mut buf, &mut pb);
-
-        let octree: Octree<f64, u8> = bincode::deserialize_from(&mut tee).unwrap();
-
-        pb.finish_println("done!");
-
-        octree
-    });
 
     let cameras = load_cameras();
 
-    let pb = Arc::new(Mutex::new(ProgressBar::new(octree.num_octants())));
+    let pb = Arc::new(Mutex::new(ProgressBar::new(opt.number_of_samples as u64)));
     {
         pb.lock().unwrap().message(&format!("exporting octants: "));
     }
 
-    let num_workers = 12;
+    let num_workers = 24;
     let render_pool = RenderPool::new(num_workers);
     let render_pool = Arc::new(Mutex::new(render_pool));
 
-    // let pc_pool = Arc::new(CpuBufferPool::vertex_buffer(device));
-
     let pb_clone = pb.clone();
-    octree
-        .into_iter()
+
+    let mut rand_gen = StdRng::seed_from_u64(42);
+
+    let point_pairs: Vec<(Point3<f32>, Point3<f32>)> = (0..opt.number_of_samples)
+        .map(move |_| (rand_point(&mut rand_gen), rand_point(&mut rand_gen)))
+        .collect();
+
+    point_pairs
+        .iter()
         .enumerate()
         .par_bridge()
-        .into_par_iter()
-        .for_each(|(i, node)| {
-            let data_32 = node
-                .data
-                .iter()
-                .map(|v| punctum::Vertex::<f32, f32> {
-                    position: ((v.position - node.center.coords) / node.size).cast(),
-                    color: v.color.cast() / 255.,
-                })
-                .collect();
+        .for_each(|(i, (p1, p2))| {
+            let points = vec![
+                Vertex {
+                    position: *p1,
+                    color: Vector4::<f32>::new(1., 0., 0., 1.),
+                },
+                Vertex {
+                    position: *p2,
+                    color: Vector4::<f32>::new(0., 0., 1., 1.),
+                },
+            ];
 
-            let mut pc = PointCloud::from_vec(&data_32);
-            pc.scale_to_unit_sphere();
+            let pc = PointCloud::from_vec(&points);
             let pc = Arc::new(pc);
 
             let renders: Vec<Rgba<u8>> = {
@@ -196,7 +188,6 @@ fn main() {
                 .zip(cameras.clone())
                 .map(|(color, cam)| Vertex {
                     position: *cam.position(),
-                    // normal: Vector3::zeros(),
                     color: Vector4::from(color.0).cast() / 255.,
                 })
                 .collect();

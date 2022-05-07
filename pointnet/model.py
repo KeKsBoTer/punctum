@@ -7,7 +7,6 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 from torch_scatter import scatter
-from utils import to_dense_batch
 
 
 class TNet(nn.Module):
@@ -77,16 +76,16 @@ class FeatureNet(nn.Module):
     def __init__(self, batch_norm: bool = False):
         super(FeatureNet, self).__init__()
         # self.tnet = TNet()
-        rfft_dim = 64
-        self.gfft = GaussianFourierFeatureTransform(6, mapping_size=rfft_dim)
-        self.conv1 = torch.nn.Conv1d(rfft_dim * 2, 256, 1, bias=not batch_norm)
-        self.conv2 = torch.nn.Conv1d(256, 512, 1, bias=not batch_norm)
-        self.conv3 = torch.nn.Conv1d(512, 1024, 1, bias=not batch_norm)
+        # rfft_dim = 64
+        # self.gfft = GaussianFourierFeatureTransform(6, mapping_size=rfft_dim)
+        self.conv1 = torch.nn.Conv1d(6, 64, 1, bias=not batch_norm)
+        self.conv2 = torch.nn.Conv1d(64, 128, 1, bias=not batch_norm)
+        self.conv3 = torch.nn.Conv1d(128, 1024, 1, bias=not batch_norm)
 
         self.batch_norm = batch_norm
         if batch_norm:
-            self.bn1 = nn.BatchNorm1d(256)
-            self.bn2 = nn.BatchNorm1d(512)
+            self.bn1 = nn.BatchNorm1d(54)
+            self.bn2 = nn.BatchNorm1d(128)
             self.bn3 = nn.BatchNorm1d(1024)
 
     def forward(
@@ -106,7 +105,7 @@ class FeatureNet(nn.Module):
         # trans = self.tnet(x, batch)
         # x = torch.bmm(trans[batch], x.T.unsqueeze(-1)).squeeze(-1)
         x: torch.Tensor = torch.cat([points, color], dim=-1)
-        x: Tensor = self.gfft(x)
+        # x: Tensor = self.gfft(x)
         x = x.permute(1, 0).unsqueeze(0)
         if self.batch_norm:
             x = F.relu(self.bn1(self.conv1(x)))

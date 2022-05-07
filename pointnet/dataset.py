@@ -2,6 +2,7 @@ import glob
 import os
 from typing import Tuple
 
+import numpy as np
 import torch
 from iopath.common.file_io import PathManager
 from pytorch3d import io
@@ -18,9 +19,12 @@ class OctantDataset(Dataset):
 
     def __init__(
         self, data_dir: str,
+        sub_sample:int = None
     ):
         self.data_dir = data_dir
-        self.ply_files = glob.glob(os.path.join(data_dir, "*.ply"))
+        self.ply_files = np.array(glob.glob(os.path.join(data_dir, "*.ply")))
+        if sub_sample is not None:
+            self.ply_files= np.random.choice(self.ply_files, sub_sample)
 
     def __len__(self):
         return len(self.ply_files)
