@@ -1,4 +1,5 @@
 use std::{
+    f32::consts::PI,
     fs::File,
     io::BufWriter,
     sync::{Arc, Mutex},
@@ -12,20 +13,32 @@ use ply_rs::{
     writer::Writer,
 };
 use punctum::{Camera, OfflineRenderer, PointCloud, PointCloudGPU, RenderSettings, Vertex};
-use rand::{prelude::StdRng, Rng, SeedableRng};
+use rand::{
+    distributions::WeightedIndex,
+    prelude::{Distribution, StdRng},
+    Rng, SeedableRng,
+};
 use rayon::prelude::*;
 use std::path::PathBuf;
 use structopt::StructOpt;
 use vulkano::device::DeviceOwned;
 
+const OCTREE_SIZE_DIST: [f32; 16] = [
+    0.0071, 0.0201, 0.0528, 0.1035, 0.1414, 0.1349, 0.1156, 0.0931, 0.0740, 0.0605, 0.0527, 0.0382,
+    0.0355, 0.0269, 0.0235, 0.0202,
+];
+
 #[derive(StructOpt, Debug)]
 #[structopt(name = "Octree Builder")]
 struct Opt {
+    #[structopt(name = "max_octant_size")]
+    max_octant_size: usize,
+
     #[structopt(name = "output", parse(from_os_str))]
     output_folder: PathBuf,
 
     #[structopt(short, long, default_value = "1024")]
-    number_of_samples: usize,
+    num_samples: usize,
 }
 
 struct RenderPool {
@@ -116,11 +129,23 @@ fn load_cameras() -> Vec<Camera> {
 }
 
 fn rand_point(generator: &mut StdRng) -> Point3<f32> {
-    let x: f32 = generator.gen_range(-1. ..=1.);
-    let y: f32 = generator.gen_range(-1. ..=1.);
-    let z: f32 = generator.gen_range(-1. ..=1.);
-    let p = Vector3::new(x, y, z);
-    return p.normalize().into();
+    loop {
+        let x: f32 = generator.gen_range(-1. ..=1.);
+        let y: f32 = generator.gen_range(-1. ..=1.);
+        let z: f32 = generator.gen_range(-1. ..=1.);
+        let p = Vector3::new(x, y, z);
+        if p.norm_squared() < 1. {
+            return p.into();
+        }
+    }
+}
+
+fn angle_to_rgba(angle: f32) -> Vector4<f32> {
+    let mut color = Vector4::new(angle, angle - 2. * PI / 3., angle + 2. * PI / 3., 1.0);
+    color.x = (color.x.cos() + 1.) / 2.;
+    color.y = (color.y.cos() + 1.) / 2.;
+    color.z = (color.z.cos() + 1.) / 2.;
+    return color;
 }
 
 fn main() {
@@ -128,7 +153,7 @@ fn main() {
 
     let cameras = load_cameras();
 
-    let pb = Arc::new(Mutex::new(ProgressBar::new(opt.number_of_samples as u64)));
+    let pb = Arc::new(Mutex::new(ProgressBar::new(opt.num_samples as u64)));
     {
         pb.lock().unwrap().message(&format!("exporting octants: "));
     }
@@ -139,62 +164,58 @@ fn main() {
 
     let pb_clone = pb.clone();
 
-    let mut rand_gen = StdRng::seed_from_u64(42);
+    let dist = WeightedIndex::new(&OCTREE_SIZE_DIST).unwrap();
 
-    let point_pairs: Vec<(Point3<f32>, Point3<f32>)> = (0..opt.number_of_samples)
-        .map(move |_| (rand_point(&mut rand_gen), rand_point(&mut rand_gen)))
-        .collect();
+    (0..opt.num_samples).par_bridge().for_each(|i| {
+        let mut rand_gen = StdRng::seed_from_u64(i as u64);
 
-    point_pairs
-        .iter()
-        .enumerate()
-        .par_bridge()
-        .for_each(|(i, (p1, p2))| {
-            let points = vec![
+        let octant_size: usize =
+            ((dist.sample(&mut rand_gen) + 1) * opt.max_octant_size) / OCTREE_SIZE_DIST.len();
+
+        let points = (0..octant_size)
+            .map(|j| {
+                let angle = j as f32 / octant_size as f32 * 2. * PI;
                 Vertex {
-                    position: *p1,
-                    color: Vector4::<f32>::new(1., 0., 0., 1.),
-                },
-                Vertex {
-                    position: *p2,
-                    color: Vector4::<f32>::new(0., 0., 1., 1.),
-                },
-            ];
+                    position: rand_point(&mut rand_gen),
+                    color: angle_to_rgba(angle),
+                }
+            })
+            .collect();
 
-            let pc = PointCloud::from_vec(&points);
-            let pc = Arc::new(pc);
+        let pc = PointCloud::from_vec(&points);
+        let pc = Arc::new(pc);
 
-            let renders: Vec<Rgba<u8>> = {
-                let renderer = {
-                    let mut r = render_pool.lock().unwrap();
-                    r.get().clone()
-                };
-
-                let mut renderer = renderer.lock().unwrap();
-
-                let device = renderer.device();
-
-                let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
-
-                let renders = cameras
-                    .iter()
-                    .map(|c| renderer.render(c.clone(), &pc_gpu))
-                    .collect();
-                renders
+        let renders: Vec<Rgba<u8>> = {
+            let renderer = {
+                let mut r = render_pool.lock().unwrap();
+                r.get().clone()
             };
 
-            let cam_colors: Vec<Vertex<f32, f32>> = renders
-                .iter()
-                .zip(cameras.clone())
-                .map(|(color, cam)| Vertex {
-                    position: *cam.position(),
-                    color: Vector4::from(color.0).cast() / 255.,
-                })
-                .collect();
+            let mut renderer = renderer.lock().unwrap();
 
-            let out_file = opt.output_folder.join(format!("octant_{}.ply", i));
-            export_ply(&out_file, pc, &cam_colors);
-            pb_clone.lock().unwrap().inc();
-        });
+            let device = renderer.device();
+
+            let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
+
+            let renders = cameras
+                .iter()
+                .map(|c| renderer.render(c.clone(), &pc_gpu))
+                .collect();
+            renders
+        };
+
+        let cam_colors: Vec<Vertex<f32, f32>> = renders
+            .iter()
+            .zip(cameras.clone())
+            .map(|(color, cam)| Vertex {
+                position: *cam.position(),
+                color: Vector4::from(color.0).cast() / 255.,
+            })
+            .collect();
+
+        let out_file = opt.output_folder.join(format!("octant_{}.ply", i));
+        export_ply(&out_file, pc, &cam_colors);
+        pb_clone.lock().unwrap().inc();
+    });
     pb.lock().unwrap().finish();
 }

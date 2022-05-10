@@ -79,13 +79,13 @@ struct Opt {
     #[structopt(name = "output", parse(from_os_str))]
     output: PathBuf,
 
-    #[structopt(short, long, default_value = "1024")]
+    #[structopt(long, default_value = "1024")]
     max_octant_size: usize,
 
-    #[structopt(short, long)]
+    #[structopt(long)]
     max_octants: Option<usize>,
 
-    #[structopt(short, long)]
+    #[structopt(long)]
     sample_rate: Option<usize>,
 }
 

@@ -166,12 +166,19 @@ def to_spherical(coords: torch.Tensor) -> torch.Tensor:
 class PointNet(nn.Module):
     """_PointNet used to predict SH coefficients """
 
-    def __init__(self, k: int = 3, batch_norm: bool = False, use_dropout: bool = False):
+    def __init__(
+        self,
+        k: int = 3,
+        batch_norm: bool = False,
+        use_dropout: bool = False,
+        use_spherical: bool = False,
+    ):
         super(PointNet, self).__init__()
         self.feat = FeatureNet(batch_norm)
         self.fc1 = nn.Linear(1024, 512, bias=not batch_norm)
         self.fc2 = nn.Linear(512, 256, bias=not batch_norm)
         self.fc3 = nn.Linear(256, k * 3)
+        self.use_spherical = use_spherical
         self.use_dropout = use_dropout
         if use_dropout:
             self.dropout = nn.Dropout(p=0.3)
@@ -193,7 +200,8 @@ class PointNet(nn.Module):
         Returns:
             torch.Tensor[B,K,3]: coefficients
         """
-        points = to_spherical(points)
+        if self.use_spherical:
+            points = to_spherical(points)
         x = self.feat(points, color, batch)
         if self.batch_norm:
             x = F.relu(self.bn1(self.fc1(x)))
