@@ -53,13 +53,19 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
             .iter()
             .fold(Point3::origin(), |acc, v| acc + &v.position.coords)
             / F::from_usize(self.data.len()).unwrap();
-        let max_size = self
+        let mut max_size = self
             .data
             .iter()
             .map(|p| distance_squared(&p.position, &center))
             .reduce(|acum, item| F::max(acum, item))
             .unwrap()
             .sqrt();
+
+        // if we have only one point in the pointcloud we would divide by 0 later
+        // so just set it to 1
+        if max_size.is_zero() {
+            max_size = F::from_subset(&1.);
+        }
 
         self.data.iter_mut().for_each(|p| {
             p.position = (&p.position - &center.coords) / max_size.clone();

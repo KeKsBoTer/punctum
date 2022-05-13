@@ -146,3 +146,12 @@ impl From<Vertex<f64, u8>> for Vertex<f32, f32> {
         }
     }
 }
+
+impl From<Vertex<f64, u8>> for Vertex<f32, u8> {
+    fn from(item: Vertex<f64, u8>) -> Self {
+        Vertex {
+            position: item.position.cast(),
+            color: item.color,
+        }
+    }
+}

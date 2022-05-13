@@ -23,10 +23,7 @@ fn build_octree(
     let min_point = Point3::new(bounds.min.x, bounds.min.y, bounds.min.z);
     let max_point = Point3::new(bounds.max.x, bounds.max.y, bounds.max.z);
     let size = max_point - min_point;
-    let max_size = [size.x, size.y, size.z]
-        .into_iter()
-        .reduce(|a, b| a.max(b))
-        .unwrap();
+    let max_size = size[size.imax()];
 
     let mut octree = Octree::new(center(&min_point, &max_point), max_size, max_node_size);
     let mut pb = ProgressBar::new(number_of_points);

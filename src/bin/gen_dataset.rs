@@ -22,7 +22,7 @@ use vulkano::device::DeviceOwned;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "Octree Builder")]
 struct Opt {
-    #[structopt(name = "input_las", parse(from_os_str))]
+    #[structopt(name = "input_octree", parse(from_os_str))]
     input: PathBuf,
 
     #[structopt(name = "output", parse(from_os_str))]
@@ -163,7 +163,7 @@ fn main() {
                 .data
                 .iter()
                 .map(|v| punctum::Vertex::<f32, f32> {
-                    position: ((v.position - node.center.coords) / node.size).cast(),
+                    position: v.position.cast(),
                     color: v.color.cast() / 255.,
                 })
                 .collect();
