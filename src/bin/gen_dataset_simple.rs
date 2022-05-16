@@ -28,6 +28,12 @@ const OCTREE_SIZE_DIST: [f32; 16] = [
     0.0355, 0.0269, 0.0235, 0.0202,
 ];
 
+const POSITION_DIST: [f32; 32] = [
+    0.0000, 0.0029, 0.0060, 0.0092, 0.0124, 0.0159, 0.0195, 0.0232, 0.0272, 0.0314, 0.0360, 0.0410,
+    0.0464, 0.0527, 0.0600, 0.0697, 0.0929, 0.0697, 0.0600, 0.0527, 0.0464, 0.0410, 0.0360, 0.0314,
+    0.0272, 0.0232, 0.0195, 0.0159, 0.0124, 0.0092, 0.0060, 0.0029,
+];
+
 #[derive(StructOpt, Debug)]
 #[structopt(name = "Octree Builder")]
 struct Opt {
@@ -128,11 +134,12 @@ fn load_cameras() -> Vec<Camera> {
         .collect::<Vec<Camera>>()
 }
 
-fn rand_point(generator: &mut StdRng) -> Point3<f32> {
+fn rand_point(generator: &mut StdRng, dist: &WeightedIndex<f32>) -> Point3<f32> {
+    let to_pos = |i: usize| (i as f32 / POSITION_DIST.len() as f32) * 2. - 1.;
     loop {
-        let x: f32 = generator.gen_range(-1. ..=1.);
-        let y: f32 = generator.gen_range(-1. ..=1.);
-        let z: f32 = generator.gen_range(-1. ..=1.);
+        let x: f32 = to_pos(dist.sample(generator));
+        let y: f32 = to_pos(dist.sample(generator));
+        let z: f32 = to_pos(dist.sample(generator));
         let p = Vector3::new(x, y, z);
         if p.norm_squared() < 1. {
             return p.into();
@@ -165,6 +172,7 @@ fn main() {
     let pb_clone = pb.clone();
 
     let dist = WeightedIndex::new(&OCTREE_SIZE_DIST).unwrap();
+    let pos_dist = WeightedIndex::new(&POSITION_DIST).unwrap();
 
     (0..opt.num_samples).par_bridge().for_each(|i| {
         let mut rand_gen = StdRng::seed_from_u64(i as u64);
@@ -176,7 +184,7 @@ fn main() {
             .map(|j| {
                 let angle = j as f32 / octant_size as f32 * 2. * PI;
                 Vertex {
-                    position: rand_point(&mut rand_gen),
+                    position: rand_point(&mut rand_gen, &pos_dist),
                     color: angle_to_rgba(angle),
                 }
             })

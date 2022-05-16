@@ -40,9 +40,9 @@ impl RenderPool {
         let rs = (0..size)
             .map(|_| {
                 Arc::new(Mutex::new(OfflineRenderer::new(
-                    256,
+                    64,
                     RenderSettings {
-                        point_size: 20.0,
+                        point_size: 32.0,
                         ..RenderSettings::default()
                     },
                 )))
@@ -163,7 +163,7 @@ fn main() {
                 .data
                 .iter()
                 .map(|v| punctum::Vertex::<f32, f32> {
-                    position: v.position.cast(),
+                    position: ((v.position - node.center.coords) * 2. / node.size).cast(),
                     color: v.color.cast() / 255.,
                 })
                 .collect();

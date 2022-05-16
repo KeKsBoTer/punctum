@@ -125,9 +125,9 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
     }
 
     fn child_octant(point: &Vertex<F, C>, center: Point3<F>, size: F) -> (usize, F, Point3<F>) {
-        let z = (point.position[2] > center.z) as usize; // 1 if true
-        let y = (point.position[1] > center.y) as usize;
-        let x = (point.position[0] > center.x) as usize;
+        let z = (point.position.z > center.z) as usize; // 1 if true
+        let y = (point.position.y > center.y) as usize;
+        let x = (point.position.x > center.x) as usize;
         let octant_i = 4 * z + 2 * y + x;
 
         let new_size = size / convert(2.);
