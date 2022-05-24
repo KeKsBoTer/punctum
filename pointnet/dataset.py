@@ -25,16 +25,24 @@ def flat2lm_index(i: int) -> Tuple[int, int]:
 class OctantDataset(Dataset):
     """ Dataset containing pointclouds and their respective SH coefficients"""
 
-    def __init__(self, data_dir: str, sub_sample: int = None):
+    def __init__(self, data_dir: str, sub_sample: int = None, preload: bool = True):
         self.data_dir = data_dir
         self.ply_files = np.array(glob.glob(os.path.join(data_dir, "*.ply")))
+        if len(self.ply_files) == 0:
+            raise FileNotFoundError(f"no ply files found in '{data_dir}'")
+        self.preload = preload
         if sub_sample is not None:
             self.ply_files = np.random.choice(self.ply_files, sub_sample)
+
+        # load all into ram
+        if preload:
+            for i in range(len(self.ply_files)):
+                self.__getitem__(i)
 
     def __len__(self):
         return len(self.ply_files)
 
-    @lru_cache(maxsize=100000)
+    @lru_cache(maxsize=None)
     def load_ply(self, file: str) -> Tuple[Pointclouds, torch.Tensor]:
         _, data = io.ply_io._load_ply_raw(file, path_manager=PathManager())
         pos, color = data["vertex"]

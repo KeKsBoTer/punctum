@@ -204,7 +204,6 @@ class PointNet(nn.Module):
         Returns:
             torch.Tensor[B,K,3]: coefficients
         """
-        color_mean = scatter(color, batch, dim=0, reduce="mean")
         if self.use_spherical:
             points = to_spherical(points)
         x = self.feat(points, color, batch)
