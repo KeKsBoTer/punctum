@@ -2,7 +2,6 @@
 Based on https://github.com/fxia22/pointnet.pytorch
 """
 
-from cmath import acos
 import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
@@ -84,7 +83,7 @@ class FeatureNet(nn.Module):
 
         self.batch_norm = batch_norm
         if batch_norm:
-            self.bn1 = nn.BatchNorm1d(54)
+            self.bn1 = nn.BatchNorm1d(64)
             self.bn2 = nn.BatchNorm1d(128)
             self.bn3 = nn.BatchNorm1d(1024)
 
@@ -104,6 +103,7 @@ class FeatureNet(nn.Module):
         # x = points.transpose(1, 0)
         # trans = self.tnet(x, batch)
         # x = torch.bmm(trans[batch], x.T.unsqueeze(-1)).squeeze(-1)
+
         x: torch.Tensor = torch.cat([points, color], dim=-1)
         # x: Tensor = self.gfft(x)
         x = x.permute(1, 0).unsqueeze(0)
@@ -116,9 +116,13 @@ class FeatureNet(nn.Module):
             x = F.relu(self.conv2(x))
             x = self.conv3(x)
 
-        x = scatter(x.squeeze(0).T, batch, dim=0, reduce="max")
+        x = x.squeeze(0).T
+        # x_mean = scatter(x, batch, dim=0, reduce="mean")
+        x_max = scatter(x, batch, dim=0, reduce="max")
+        # avg_color = scatter(color, batch, dim=0, reduce="mean")
 
-        return x
+        # return torch.cat([x_max, x_mean, avg_color], dim=-1)
+        return x_max
 
 
 class GaussianFourierFeatureTransform(nn.Module):
@@ -200,6 +204,7 @@ class PointNet(nn.Module):
         Returns:
             torch.Tensor[B,K,3]: coefficients
         """
+        color_mean = scatter(color, batch, dim=0, reduce="mean")
         if self.use_spherical:
             points = to_spherical(points)
         x = self.feat(points, color, batch)
@@ -217,4 +222,6 @@ class PointNet(nn.Module):
                 x = F.relu(self.fc2(x))
 
         x: torch.Tensor = self.fc3(x)
-        return x.reshape(-1, x.shape[1] // 3, 3)
+        x = x.reshape(-1, x.shape[1] // 3, 3)
+        return x
+

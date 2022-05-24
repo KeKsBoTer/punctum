@@ -9,10 +9,17 @@ from pytorch3d import io
 from pytorch3d.structures import Pointclouds
 from torch.utils.data import Dataset
 from functools import lru_cache
+from math import sqrt
 
 
 def lm2flat_index(l: int, m: int) -> int:
     return l * (l + 1) - m
+
+
+def flat2lm_index(i: int) -> Tuple[int, int]:
+    l = int(sqrt(i))
+    m = l * (l + 1) - i
+    return l, m
 
 
 class OctantDataset(Dataset):
