@@ -72,20 +72,21 @@ class TNet(nn.Module):
 class FeatureNet(nn.Module):
     """ Global feature extraction network used in PointNet"""
 
-    def __init__(self, batch_norm: bool = False):
+    def __init__(self, batch_norm: bool = False, layer_sizes=[64, 256, 1024]):
         super(FeatureNet, self).__init__()
         # self.tnet = TNet()
         # rfft_dim = 64
         # self.gfft = GaussianFourierFeatureTransform(6, mapping_size=rfft_dim)
-        self.conv1 = torch.nn.Conv1d(6, 64, 1, bias=not batch_norm)
-        self.conv2 = torch.nn.Conv1d(64, 128, 1, bias=not batch_norm)
-        self.conv3 = torch.nn.Conv1d(128, 1024, 1, bias=not batch_norm)
+        s1, s2, s3 = layer_sizes
+        self.conv1 = torch.nn.Conv1d(6, s1, 1, bias=not batch_norm)
+        self.conv2 = torch.nn.Conv1d(s1, s2, 1, bias=not batch_norm)
+        self.conv3 = torch.nn.Conv1d(s2, s3, 1, bias=not batch_norm)
 
         self.batch_norm = batch_norm
         if batch_norm:
-            self.bn1 = nn.BatchNorm1d(64)
-            self.bn2 = nn.BatchNorm1d(128)
-            self.bn3 = nn.BatchNorm1d(1024)
+            self.bn1 = nn.BatchNorm1d(s1)
+            self.bn2 = nn.BatchNorm1d(s2)
+            self.bn3 = nn.BatchNorm1d(s3)
 
     def forward(
         self, points: torch.Tensor, color: torch.Tensor, batch: torch.Tensor
@@ -117,11 +118,7 @@ class FeatureNet(nn.Module):
             x = self.conv3(x)
 
         x = x.squeeze(0).T
-        # x_mean = scatter(x, batch, dim=0, reduce="mean")
         x_max = scatter(x, batch, dim=0, reduce="max")
-        # avg_color = scatter(color, batch, dim=0, reduce="mean")
-
-        # return torch.cat([x_max, x_mean, avg_color], dim=-1)
         return x_max
 
 
@@ -176,20 +173,22 @@ class PointNet(nn.Module):
         batch_norm: bool = False,
         use_dropout: bool = False,
         use_spherical: bool = False,
+        layer_sizes=[512, 256],
     ):
         super(PointNet, self).__init__()
         self.feat = FeatureNet(batch_norm)
-        self.fc1 = nn.Linear(1024, 512, bias=not batch_norm)
-        self.fc2 = nn.Linear(512, 256, bias=not batch_norm)
-        self.fc3 = nn.Linear(256, k * 3)
+        s1, s2 = layer_sizes
+        self.fc1 = nn.Linear(1024, s1, bias=not batch_norm)
+        self.fc2 = nn.Linear(s1, s2, bias=not batch_norm)
+        self.fc3 = nn.Linear(s2, k * 3)
         self.use_spherical = use_spherical
         self.use_dropout = use_dropout
         if use_dropout:
             self.dropout = nn.Dropout(p=0.3)
         self.batch_norm = batch_norm
         if batch_norm:
-            self.bn1 = nn.BatchNorm1d(512)
-            self.bn2 = nn.BatchNorm1d(256)
+            self.bn1 = nn.BatchNorm1d(s1)
+            self.bn2 = nn.BatchNorm1d(s2)
 
     def forward(
         self, points: torch.Tensor, color: torch.Tensor, batch: torch.Tensor
