@@ -180,6 +180,7 @@ def evalute_sh(coefs: int, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     device = coefs.device
     l_max = coefs.shape[0] - 1
     Y = torch.zeros((*x.shape, 3), device=device)
+    clear_spherical_harmonics_cache()
     for l in range(l_max + 1):
         y_lm = get_spherical_harmonics(l, x, y)
         Y += y_lm @ coefs[lm2flat_index(l, l) : lm2flat_index(l, -l) + 1]
@@ -190,7 +191,7 @@ def evalute_sh(coefs: int, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 def calc_sh(l_max: int, coords: torch.Tensor) -> torch.Tensor:
     assert (l_max + 1) ** 2 < coords.shape[0], "to few samples"
     values = torch.zeros((coords.shape[0], (l_max + 1) ** 2), device=coords.device)
-
+    clear_spherical_harmonics_cache()
     for l in range(l_max + 1):
         sh = get_spherical_harmonics(l, coords[:, 0], coords[:, 1])
         values[:, lm2flat_index(l, l) : lm2flat_index(l, -l) + 1] = sh

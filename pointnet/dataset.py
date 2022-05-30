@@ -11,6 +11,8 @@ from torch.utils.data import Dataset
 from functools import lru_cache
 from math import sqrt
 
+from tqdm import tqdm
+
 
 def lm2flat_index(l: int, m: int) -> int:
     return l * (l + 1) - m
@@ -36,7 +38,7 @@ class OctantDataset(Dataset):
 
         # load all into ram
         if preload:
-            for i in range(len(self.ply_files)):
+            for i in tqdm(range(len(self.ply_files)), desc="loading dataset"):
                 self.__getitem__(i)
 
     def __len__(self):

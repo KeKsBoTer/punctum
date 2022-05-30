@@ -53,9 +53,11 @@ if __name__ == "__main__":
             / 255.0
         )
 
-        avg_color = perceived_colors.mean(dim=0)
+        # avg_color = perceived_colors.mean(dim=0)
         cameras_spherical = to_spherical(cameras)
-        coefs = calc_coeficients(l_max, cameras_spherical, perceived_colors - avg_color)
+        coefs = calc_coeficients(
+            l_max, cameras_spherical, perceived_colors
+        )  # - avg_color)
 
         coef_data = []
         for l in range(l_max + 1):

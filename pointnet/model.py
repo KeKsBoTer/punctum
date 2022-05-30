@@ -72,7 +72,7 @@ class TNet(nn.Module):
 class FeatureNet(nn.Module):
     """ Global feature extraction network used in PointNet"""
 
-    def __init__(self, batch_norm: bool = False, layer_sizes=[64, 256, 1024]):
+    def __init__(self, batch_norm: bool = False, layer_sizes=[32, 128, 256]):
         super(FeatureNet, self).__init__()
         # self.tnet = TNet()
         # rfft_dim = 64
@@ -173,14 +173,15 @@ class PointNet(nn.Module):
         batch_norm: bool = False,
         use_dropout: bool = False,
         use_spherical: bool = False,
-        layer_sizes=[512, 256],
+        layer_sizes=[128, 64],
     ):
         super(PointNet, self).__init__()
         self.feat = FeatureNet(batch_norm)
         s1, s2 = layer_sizes
-        self.fc1 = nn.Linear(1024, s1, bias=not batch_norm)
+        self.fc1 = nn.Linear(256, s1, bias=not batch_norm)
         self.fc2 = nn.Linear(s1, s2, bias=not batch_norm)
         self.fc3 = nn.Linear(s2, k * 3)
+        self.k = k
         self.use_spherical = use_spherical
         self.use_dropout = use_dropout
         if use_dropout:
@@ -220,6 +221,5 @@ class PointNet(nn.Module):
                 x = F.relu(self.fc2(x))
 
         x: torch.Tensor = self.fc3(x)
-        x = x.reshape(-1, x.shape[1] // 3, 3)
+        x = x.reshape(-1, self.k, 3)
         return x
-

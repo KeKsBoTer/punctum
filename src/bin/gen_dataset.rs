@@ -40,9 +40,9 @@ impl RenderPool {
         let rs = (0..size)
             .map(|_| {
                 Arc::new(Mutex::new(OfflineRenderer::new(
-                    64,
+                    128,
                     RenderSettings {
-                        point_size: 32.0,
+                        point_size: 10.0,
                         ..RenderSettings::default()
                     },
                 )))
@@ -119,6 +119,10 @@ fn load_cameras() -> Vec<Camera> {
 fn main() {
     let opt = Opt::from_args();
     let filename = opt.input.as_os_str().to_str().unwrap();
+
+    if !opt.output_folder.exists() {
+        std::fs::create_dir(opt.output_folder.clone()).unwrap();
+    }
 
     let octree = Arc::new({
         let in_file = File::open(&opt.input).unwrap();
