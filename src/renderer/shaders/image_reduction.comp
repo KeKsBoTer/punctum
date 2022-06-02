@@ -1,9 +1,14 @@
 #version 450
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba8) uniform readonly image2D img_in;
-layout(set = 0, binding = 1, rgba8) uniform writeonly image2D img_out;
+layout(set = 0, binding = 0, rgba32f) uniform readonly image2D img_in;
+layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D img_out;
+
+
+layout(push_constant) uniform PushConstantData {
+    bool first;
+} pc;
 
 void main() {
     ivec2 idx = ivec2(gl_GlobalInvocationID.xy);
@@ -13,10 +18,22 @@ void main() {
         return;
     }
 
-    vec4 color =  imageLoad(img_in, idx) 
-                + imageLoad(img_in, idx + ivec2(1,0)) 
-                + imageLoad(img_in, idx + ivec2(0,1)) 
-                + imageLoad(img_in, idx + ivec2(1,1));
+    ivec2 idx_src = 2*idx;
+    vec4 c1 = imageLoad(img_in, idx_src + ivec2(0,0));
+    vec4 c2 = imageLoad(img_in, idx_src + ivec2(1,0));
+    vec4 c3 = imageLoad(img_in, idx_src + ivec2(0,1));
+    vec4 c4 = imageLoad(img_in, idx_src + ivec2(1,1));
 
-    imageStore(img_out, idx, color);
+    // set alphas to one if we are not in the first iteration
+    // we only do alpha weighting in the first iteration
+    vec4 alphas = vec4(c1.a,c2.a,c3.a,c4.a) * float(pc.first) + (1-float(pc.first));
+    vec3 color = (
+          c1.rgb * alphas.x 
+        + c2.rgb * alphas.y 
+        + c3.rgb * alphas.z 
+        + c4.rgb * alphas.w
+    ) / 4;
+    float avg_alpha = (c1.a + c2.a + c3.a + c4.a) / 4;
+
+    imageStore(img_out, idx, vec4(color, avg_alpha));
 }
