@@ -5,13 +5,19 @@ use nalgebra::{vector, Vector4};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
+    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer},
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily},
         Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned, Queue, QueueCreateInfo,
     },
+    format::Format,
+    image::{view::ImageView, ImageAccess, ImageDimensions, ImageViewAbstract, StorageImage},
     instance::{Instance, InstanceCreateInfo},
+    pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
     render_pass::{RenderPass, Subpass},
     swapchain::Surface,
+    sync::{self, GpuFuture},
 };
 use winit::window::Window;
 
@@ -199,7 +205,7 @@ unsafe impl DeviceOwned for OfflineRenderer {
     }
 }
 
-fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
+pub fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
     let start = vector!(0., 0., 0., 0.);
     let mean = data
         .par_chunks_exact(1024)
@@ -214,3 +220,135 @@ fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
         .reduce(|| start, |acc, item| acc + item);
     Rgba(mean.map(|v| (v * 255. / mean[3]).round() as u8).into())
 }
+
+// mod cs {
+//     vulkano_shaders::shader! {
+//         ty: "compute",
+//         path: "src/renderer/shaders/image_reduction.comp"
+//     }
+// }
+
+// pub struct ImageAvgColor {
+//     device: Arc<Device>,
+//     queue: Arc<Queue>,
+//     command_buffer: Arc<PrimaryAutoCommandBuffer>,
+//     target_buffer: Arc<CpuAccessibleBuffer<[[u8; 4]]>>,
+// }
+
+// const IMG_SIZES: [u32; 11] = [1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1];
+
+// impl ImageAvgColor {
+//     pub fn new(
+//         device: Arc<Device>,
+//         queue: Arc<Queue>,
+//         src_img: Arc<dyn ImageViewAbstract>,
+//         start_size: u32,
+//     ) -> Self {
+//         assert!(IMG_SIZES.contains(&start_size));
+
+//         let sizes: Vec<u32> = IMG_SIZES.into_iter().filter(|s| *s < start_size).collect();
+
+//         let images: Vec<Arc<ImageView<StorageImage>>> = sizes
+//             .iter()
+//             .map(|s| {
+//                 let img = StorageImage::new(
+//                     device.clone(),
+//                     ImageDimensions::Dim2d {
+//                         width: *s,
+//                         height: *s,
+//                         array_layers: 1,
+//                     },
+//                     Format::R8G8B8A8_UNORM,
+//                     Some(queue.family()),
+//                 )
+//                 .unwrap();
+
+//                 ImageView::new_default(img).unwrap()
+//             })
+//             .collect();
+
+//         let target_buffer = CpuAccessibleBuffer::from_iter(
+//             device.clone(),
+//             BufferUsage::transfer_destination(),
+//             false,
+//             (0..1).map(|_| [0u8; 4]),
+//         )
+//         .unwrap();
+
+//         let shader = cs::load(device.clone()).unwrap();
+
+//         let compute_pipeline = ComputePipeline::new(
+//             device.clone(),
+//             shader.entry_point("main").unwrap(),
+//             &(),
+//             None,
+//             |_| {},
+//         )
+//         .unwrap();
+
+//         let layout = compute_pipeline.layout().set_layouts().get(0).unwrap();
+
+//         let mut builder = AutoCommandBufferBuilder::primary(
+//             device.clone(),
+//             queue.family(),
+//             CommandBufferUsage::MultipleSubmit,
+//         )
+//         .unwrap();
+
+//         builder.bind_pipeline_compute(compute_pipeline.clone());
+
+//         for i in 0..sizes.len() {
+//             let set = PersistentDescriptorSet::new(
+//                 layout.clone(),
+//                 [
+//                     if i == 0 {
+//                         WriteDescriptorSet::image_view(0, src_img.clone())
+//                     } else {
+//                         WriteDescriptorSet::image_view(0, images[i - 1].clone())
+//                     },
+//                     WriteDescriptorSet::image_view(1, images[i].clone()),
+//                 ],
+//             )
+//             .unwrap();
+//             builder
+//                 .bind_descriptor_sets(
+//                     PipelineBindPoint::Compute,
+//                     compute_pipeline.layout().clone(),
+//                     0,
+//                     set,
+//                 )
+//                 .dispatch([sizes[i], sizes[i], 1])
+//                 .unwrap();
+//         }
+
+//         builder
+//             .copy_image_to_buffer(
+//                 images.last().unwrap().image().clone(),
+//                 target_buffer.clone(),
+//             )
+//             .unwrap();
+
+//         let command_buffer = Arc::new(builder.build().unwrap());
+
+//         ImageAvgColor {
+//             device,
+//             queue,
+//             command_buffer,
+//             target_buffer,
+//         }
+//     }
+
+//     fn calc_average_color(&self) -> Rgba<u8> {
+//         let future = sync::now(self.device.clone())
+//             .then_execute(self.queue.clone(), self.command_buffer.clone())
+//             .unwrap()
+//             .then_signal_fence_and_flush()
+//             .unwrap();
+
+//         future.wait(None).unwrap();
+
+//         let buffer_content = self.target_buffer.read().unwrap();
+
+//         return Rgba([0, 0, 0, 0]);
+//     }
+// }
