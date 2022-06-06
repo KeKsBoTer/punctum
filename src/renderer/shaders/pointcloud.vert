@@ -24,10 +24,8 @@ layout(location = 0) out vec4 vertex_color;
 void main() {
     mat4 worldview = uniforms.view * uniforms.world;
     gl_Position = uniforms.proj * worldview * vec4(position, 1.0);
-    // gl_Position =  worldview * vec4(position, 1.0);
 
-
-    gl_PointSize = uniforms.point_size;
+    gl_PointSize =  uniforms.point_size;
 
     vertex_color = color;
 }

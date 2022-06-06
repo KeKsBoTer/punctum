@@ -7,7 +7,9 @@ use ply_rs::{
 use std::{env, fs::File, sync::Arc};
 use vulkano::device::DeviceOwned;
 
-use punctum::{Camera, OfflineRenderer, PointCloud, PointCloudGPU, RenderSettings, Vertex};
+use punctum::{
+    OfflineRenderer, OrthographicCamera, PointCloud, PointCloudGPU, RenderSettings, Vertex,
+};
 fn main() {
     let args = env::args();
     if args.len() != 3 {
@@ -31,8 +33,8 @@ fn main() {
         .unwrap()
         .clone()
         .iter()
-        .map(|c| Camera::on_unit_sphere(c.position.into()))
-        .collect::<Vec<Camera>>();
+        .map(|c| OrthographicCamera::on_unit_sphere(c.position.into()))
+        .collect::<Vec<OrthographicCamera>>();
 
     let mut pc = PointCloud::from_ply_file(ply_file);
     pc.scale_to_unit_sphere();

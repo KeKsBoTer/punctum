@@ -10,7 +10,6 @@ use vulkano::{
     image::{view::ImageView, ImageDimensions, ImageViewAbstract, StorageImage},
     pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
     sampler::Filter,
-    shader::{SpecializationConstants, SpecializationMapEntry},
     sync::{self, GpuFuture},
 };
 
@@ -29,32 +28,6 @@ pub struct ImageAvgColor {
 }
 
 const IMG_SIZES: [u32; 11] = [1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1];
-
-#[repr(C)]
-struct ShaderGroupSize {
-    x: u32,
-    y: u32,
-}
-
-unsafe impl SpecializationConstants for ShaderGroupSize {
-    #[inline]
-    fn descriptors() -> &'static [SpecializationMapEntry] {
-        static DESCRIPTORS: [SpecializationMapEntry; 2] = [
-            SpecializationMapEntry {
-                constant_id: 0,
-                offset: 0,
-                size: 4,
-            },
-            SpecializationMapEntry {
-                constant_id: 1,
-                offset: 4,
-                size: 4,
-            },
-        ];
-
-        &DESCRIPTORS
-    }
-}
 
 impl ImageAvgColor {
     pub fn new(
@@ -96,7 +69,26 @@ impl ImageAvgColor {
 
         let shader = cs::load(device.clone()).unwrap();
 
-        let spec_consts = ShaderGroupSize { x: 32, y: 32 };
+        let (local_size_x, local_size_y) = match device.physical_device().properties().subgroup_size
+        {
+            Some(subgroup_size) => (32, subgroup_size / 2),
+            // Using fallback constant
+            None => (8, 8),
+        };
+
+        println!(
+            "Local size will be set to: ({}, {}, 1) (max: {:?})",
+            local_size_x,
+            local_size_y,
+            device
+                .physical_device()
+                .properties()
+                .max_compute_work_group_size,
+        );
+        let spec_consts = cs::SpecializationConstants {
+            constant_0: local_size_x,
+            constant_1: local_size_y,
+        };
 
         let compute_pipeline = ComputePipeline::new(
             device.clone(),
@@ -150,13 +142,13 @@ impl ImageAvgColor {
                 first: (i == 0) as u32,
             };
 
-            let group_count_x = if sizes[i] / spec_consts.x > 0 {
-                sizes[i] / spec_consts.x
+            let group_count_x = if sizes[i] / spec_consts.constant_0 > 0 {
+                sizes[i] / spec_consts.constant_0
             } else {
                 1
             };
-            let group_count_y = if sizes[i] / spec_consts.y > 0 {
-                sizes[i] / spec_consts.y
+            let group_count_y = if sizes[i] / spec_consts.constant_1 > 0 {
+                sizes[i] / spec_consts.constant_1
             } else {
                 1
             };

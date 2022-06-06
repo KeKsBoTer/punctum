@@ -37,6 +37,19 @@ impl PointCloud<f32, f32> {
     }
 }
 
+impl Into<PointCloud<f32, u8>> for &PointCloud<f32, f32> {
+    fn into(self) -> PointCloud<f32, u8> {
+        PointCloud {
+            data: self
+                .data
+                .iter()
+                .map(|p| (*p).into())
+                .collect::<Vec<Vertex<f32, u8>>>(),
+            bbox: self.bbox.clone(),
+        }
+    }
+}
+
 impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
     pub fn from_vec(points: &Vec<Vertex<F, C>>) -> Self {
         let bbox = BoundingBox::from_points(points);
@@ -69,6 +82,22 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
 
         self.data.iter_mut().for_each(|p| {
             p.position = (&p.position - &center.coords) / max_size.clone();
+        });
+        self.bbox = BoundingBox::from_points(&self.data);
+    }
+
+    pub fn scale_to_size(&mut self, size: F) {
+        let center = self.bbox.center();
+        let mut max_size = self.bbox.size().amax();
+
+        // if we have only one point in the pointcloud we would divide by 0 later
+        // so just set it to 1
+        if max_size.is_zero() {
+            max_size = F::from_subset(&1.);
+        }
+
+        self.data.iter_mut().for_each(|p| {
+            p.position = (&p.position - &center.coords) / max_size.clone() * size;
         });
         self.bbox = BoundingBox::from_points(&self.data);
     }

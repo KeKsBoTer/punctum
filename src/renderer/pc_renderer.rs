@@ -1,9 +1,17 @@
-use crate::{camera::Camera, pointcloud::PointCloudGPU, vertex::Vertex, Viewport};
+use crate::{
+    camera::{Camera, Projection},
+    pointcloud::PointCloudGPU,
+    vertex::Vertex,
+    Viewport,
+};
 use nalgebra::Matrix4;
 use std::sync::Arc;
 use vulkano::{
-    buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool, TypedBufferAccess},
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
+    buffer::{BufferUsage, CpuBufferPool, DeviceLocalBuffer, TypedBufferAccess},
+    command_buffer::{
+        AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
+        PrimaryAutoCommandBuffer, SecondaryAutoCommandBuffer,
+    },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, Queue},
     memory::pool::StdMemoryPool,
@@ -18,6 +26,7 @@ use vulkano::{
     },
     render_pass::Subpass,
     shader::ShaderModule,
+    sync::{self, GpuFuture, NowFuture},
 };
 
 mod vs {
@@ -61,36 +70,66 @@ mod fs {
 }
 
 pub struct PointCloudRenderer {
+    device: Arc<Device>,
+    queue: Arc<Queue>,
+
     pipeline: Arc<GraphicsPipeline>,
+    set: Arc<PersistentDescriptorSet>,
 
     uniform_buffer_pool: Arc<CpuBufferPool<vs::UniformData, Arc<StdMemoryPool>>>,
-    uniform_buffer: Arc<CpuBufferPoolSubbuffer<vs::UniformData, Arc<StdMemoryPool>>>,
-
+    uniform_buffer: Arc<DeviceLocalBuffer<vs::UniformData>>,
+    uniform_data: vs::UniformData,
+    // uniform_future: Option<CommandBufferExecFuture<NowFuture, PrimaryAutoCommandBuffer>>,
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
-
-    uniform_data: vs::UniformData,
 }
 
 impl PointCloudRenderer {
-    pub fn new(device: Arc<Device>, subpass: Subpass, viewport: Viewport) -> Self {
+    pub fn new(
+        device: Arc<Device>,
+        queue: Arc<Queue>,
+        subpass: Subpass,
+        viewport: Viewport,
+    ) -> Self {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
         let pool = Arc::new(CpuBufferPool::new(device.clone(), BufferUsage::all()));
 
-        let pipeline =
-            PointCloudRenderer::build_pipeline(vs.clone(), fs.clone(), subpass, viewport, device);
+        let pipeline = PointCloudRenderer::build_pipeline(
+            vs.clone(),
+            fs.clone(),
+            subpass,
+            viewport,
+            device.clone(),
+        );
+
+        let uniform_buffer: Arc<DeviceLocalBuffer<vs::UniformData>> = DeviceLocalBuffer::new(
+            device.clone(),
+            BufferUsage::uniform_buffer_transfer_destination(),
+            None,
+        )
+        .unwrap();
+
+        let layout = pipeline.layout().set_layouts().get(0).unwrap();
+
+        let set = PersistentDescriptorSet::new(
+            layout.clone(),
+            [WriteDescriptorSet::buffer(0, uniform_buffer.clone())],
+        )
+        .unwrap();
 
         PointCloudRenderer {
-            pipeline: pipeline,
-            uniform_buffer_pool: pool.clone(),
-            uniform_buffer: pool.next(vs::UniformData::default()).unwrap(),
-
+            device,
+            queue,
+            pipeline,
+            set,
+            uniform_buffer_pool: pool,
+            uniform_buffer,
+            uniform_data: vs::UniformData::default(),
+            // uniform_future: None,
             vs: vs,
             fs: fs,
-
-            uniform_data: vs::UniformData::default(),
         }
     }
 
@@ -133,14 +172,6 @@ impl PointCloudRenderer {
         queue: Arc<Queue>,
         point_cloud: &PointCloudGPU,
     ) -> Arc<SecondaryAutoCommandBuffer> {
-        // TODO dont recreate every time
-        let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
-        let set = PersistentDescriptorSet::new(
-            layout.clone(),
-            [WriteDescriptorSet::buffer(0, self.uniform_buffer.clone())],
-        )
-        .unwrap();
-
         let mut builder = AutoCommandBufferBuilder::secondary_graphics(
             queue.device().clone(),
             queue.family(),
@@ -157,13 +188,38 @@ impl PointCloudRenderer {
                 PipelineBindPoint::Graphics,
                 self.pipeline.layout().clone(),
                 0,
-                set.clone(),
+                self.set.clone(),
             )
             .bind_vertex_buffers(0, pc_buffer.clone())
             .draw(pc_buffer.len() as u32, 1, 0, 0)
             .unwrap();
-
         Arc::new(builder.build().unwrap())
+    }
+
+    fn update_uniforms(&mut self) {
+        let new_uniform_buffer = self.uniform_buffer_pool.next(self.uniform_data).unwrap();
+
+        let mut builder = AutoCommandBufferBuilder::primary(
+            self.device.clone(),
+            self.queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        builder
+            .copy_buffer(new_uniform_buffer, self.uniform_buffer.clone())
+            .unwrap();
+
+        let cb = builder.build().unwrap();
+
+        // TODO dont do wait here but in render
+        sync::now(self.device.clone())
+            .then_execute(self.queue.clone(), cb)
+            .unwrap()
+            .then_signal_fence_and_flush()
+            .unwrap()
+            .wait(None)
+            .unwrap();
     }
 
     pub fn set_point_size(&mut self, point_size: f32) {
@@ -171,16 +227,16 @@ impl PointCloudRenderer {
             point_size,
             ..self.uniform_data
         };
-        self.uniform_buffer = self.uniform_buffer_pool.next(self.uniform_data).unwrap();
+        self.update_uniforms();
     }
 
-    pub fn set_camera(&mut self, camera: &Camera) {
+    pub fn set_camera(&mut self, camera: &Camera<impl Projection>) {
         self.uniform_data = vs::UniformData {
             world: Matrix4::identity().into(),
             view: camera.view().clone().into(),
             proj: camera.projection().clone().into(),
             ..self.uniform_data
         };
-        self.uniform_buffer = self.uniform_buffer_pool.next(self.uniform_data).unwrap();
+        self.update_uniforms();
     }
 }

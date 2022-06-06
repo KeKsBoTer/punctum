@@ -5,59 +5,65 @@ use winit::{dpi::PhysicalPosition, event::*};
 
 use crate::pointcloud::BoundingBox;
 
-#[derive(Debug, Clone, Copy)]
-enum Projection {
-    Perspective { fovy: f32, aspect_ratio: f32 },
-    Orthographic { width: f32, height: f32 },
+pub trait Projection {
+    fn projection_matrix(&self) -> Matrix4<f32>;
 }
 
-impl Projection {
-    fn projection_matrix(&self, camera: &Camera) -> Matrix4<f32> {
-        match self {
-            Projection::Perspective { fovy, aspect_ratio } => {
-                Matrix4::new_perspective(*aspect_ratio, *fovy, camera.znear, camera.zfar)
-            }
-            Projection::Orthographic { width, height } => Matrix4::new_orthographic(
-                -width / 2.,
-                width / 2.,
-                -height / 2.,
-                height / 2.,
-                camera.znear,
-                camera.zfar,
-            ),
-        }
+#[derive(Debug, Clone, Copy)]
+pub struct PerspectiveProjection {
+    fovy: f32,
+    aspect_ratio: f32,
+    znear: f32,
+    zfar: f32,
+}
+
+impl Projection for PerspectiveProjection {
+    fn projection_matrix(&self) -> Matrix4<f32> {
+        Matrix4::new_perspective(self.aspect_ratio, self.fovy, self.znear, self.zfar)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Camera {
-    pos: Point3<f32>,
-    rot: Vector3<f32>,
-
+pub struct OrthographicProjection {
+    width: f32,
+    height: f32,
     znear: f32,
     zfar: f32,
+}
+
+impl Projection for OrthographicProjection {
+    fn projection_matrix(&self) -> Matrix4<f32> {
+        Matrix4::new_orthographic(
+            -self.width / 2.,
+            self.width / 2.,
+            -self.height / 2.,
+            self.height / 2.,
+            self.znear,
+            self.zfar,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Camera<P: Projection> {
+    pos: Point3<f32>,
+    rot: Vector3<f32>,
 
     view: Matrix4<f32>,
     proj: Matrix4<f32>,
 
-    projection: Projection,
+    projection: P,
 }
 
-impl Camera {
-    fn update_view_matrix(&mut self) {
-        let rot = self.rot_mat();
-        let trans = Matrix4::new_translation(&vector!(-self.pos.x, -self.pos.y, self.pos.z));
-
-        self.view = trans * rot;
-    }
-
+impl<P: Projection> Camera<P> {
     fn update_proj_matrix(&mut self) {
-        self.proj = self.projection.projection_matrix(&self);
+        self.proj = self.projection.projection_matrix();
     }
 
     pub fn view(&self) -> &Matrix4<f32> {
         &self.view
     }
+
     pub fn projection(&self) -> &Matrix4<f32> {
         &self.proj
     }
@@ -67,12 +73,41 @@ impl Camera {
     }
 
     fn rot_mat(&self) -> Matrix4<f32> {
-        Matrix4::from_euler_angles(self.rot.z, self.rot.y, self.rot.z)
+        Matrix4::from_euler_angles(self.rot.x, self.rot.y, self.rot.z)
+    }
+}
+
+impl Camera<PerspectiveProjection> {
+    pub fn new() -> Self {
+        let fovy: f32 = PI / 2.;
+        let mut c = Camera {
+            pos: Point3::new(0., 0., 0.),
+            rot: vector!(0., 0., 0.),
+
+            view: Matrix4::identity(),
+            proj: Matrix4::identity(),
+            projection: PerspectiveProjection {
+                fovy: fovy,
+                aspect_ratio: 1.0,
+                znear: 0.1,
+                zfar: 1000.,
+            },
+        };
+        c.update_view_matrix();
+        c.update_proj_matrix();
+        return c;
+    }
+
+    fn update_view_matrix(&mut self) {
+        let rot = self.rot_mat();
+        let trans = Matrix4::new_translation(&vector!(-self.pos.x, -self.pos.y, self.pos.z));
+
+        self.view = rot * trans;
     }
 
     // creates a camera that looks at the bounding box (move in z)
     // ensures that the y of the bounding box fits to screen
-    pub fn look_at_perspective(bbox: BoundingBox<f32>) -> Self {
+    pub fn look_at(bbox: BoundingBox<f32>) -> Self {
         let center = bbox.center();
         let size = bbox.size();
 
@@ -81,23 +116,45 @@ impl Camera {
         let distance = 0.5 * size.y / (fovy / 2.0).tan();
         let pos = center - vector!(0., 0., 0.5 * size.z + distance);
 
+        println!(
+            "min: {:?}, max: {:?}, zfar: {:?}",
+            bbox.min,
+            bbox.max,
+            0.5 * size.z + distance
+        );
+
         let mut c = Camera {
             pos: pos,
             rot: vector!(0., 0., 0.),
 
             view: Matrix4::identity(),
             proj: Matrix4::identity(),
-            znear: 0.001,
-            zfar: 100.0,
-            projection: Projection::Perspective {
+            projection: PerspectiveProjection {
                 fovy: fovy,
                 aspect_ratio: 1.0,
+                znear: 0.001,
+                zfar: 2. * (0.5 * size.z + distance),
             },
         };
         c.update_view_matrix();
         c.update_proj_matrix();
         return c;
     }
+
+    pub fn set_aspect_ratio(&mut self, aspect_ratio: f32) {
+        self.projection.aspect_ratio = aspect_ratio;
+        self.update_proj_matrix();
+    }
+}
+
+impl Camera<OrthographicProjection> {
+    fn update_view_matrix(&mut self) {
+        let rot = self.rot_mat();
+        let trans = Matrix4::new_translation(&vector!(-self.pos.x, -self.pos.y, self.pos.z));
+
+        self.view = trans * rot;
+    }
+
     pub fn look_at_ortho_bbox(bbox: BoundingBox<f32>) -> Self {
         let size = bbox.size();
         let center = bbox.center();
@@ -107,11 +164,11 @@ impl Camera {
 
             view: Matrix4::identity(),
             proj: Matrix4::identity(),
-            znear: -10.,
-            zfar: 10.,
-            projection: Projection::Orthographic {
+            projection: OrthographicProjection {
                 width: size.x,
                 height: size.y,
+                znear: -10.,
+                zfar: 10.,
             },
         };
         c.update_view_matrix();
@@ -129,11 +186,11 @@ impl Camera {
 
             view: Matrix4::identity(),
             proj: Matrix4::identity(),
-            znear: -2.0,
-            zfar: 2.0,
-            projection: Projection::Orthographic {
+            projection: OrthographicProjection {
                 width: 2.,
                 height: 2.,
+                znear: -2.0,
+                zfar: 2.0,
             },
         };
 
@@ -144,6 +201,9 @@ impl Camera {
         return c;
     }
 }
+
+pub type OrthographicCamera = Camera<OrthographicProjection>;
+pub type PerspectiveCamera = Camera<PerspectiveProjection>;
 
 #[derive(Debug)]
 pub struct CameraController {
@@ -225,11 +285,11 @@ impl CameraController {
         };
     }
 
-    pub fn update_camera(&mut self, camera: &mut Camera, dt: Duration) {
+    pub fn update_camera(&mut self, camera: &mut PerspectiveCamera, dt: Duration) {
         let dt = dt.as_secs_f32();
 
         let cam_front = Vector3::new(
-            -camera.rot.x.cos() * camera.rot.y.sin(),
+            camera.rot.x.cos() * camera.rot.y.sin(),
             camera.rot.x.sin(),
             camera.rot.x.cos() * camera.rot.y.cos(),
         )

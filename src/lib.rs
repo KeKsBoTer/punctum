@@ -1,7 +1,12 @@
-use std::sync::Arc;
+use std::{fs::File, io::BufWriter, path::PathBuf, sync::Arc};
 
+use camera::Projection;
 use image::Rgba;
 use nalgebra::{vector, Vector4};
+use ply_rs::{
+    ply::{Addable, Encoding, Ply},
+    writer::Writer,
+};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
@@ -25,7 +30,7 @@ mod tee;
 mod vertex;
 
 pub use avg_color::ImageAvgColor;
-pub use camera::{Camera, CameraController};
+pub use camera::{Camera, CameraController, OrthographicCamera, PerspectiveCamera};
 pub use octree::{Node, Octree};
 pub use pointcloud::{BoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
@@ -130,6 +135,8 @@ impl OfflineRenderer {
         let (physical_device, queue_family) =
             select_physical_device(&instance, &device_extensions, None);
 
+        println!("using device {}", physical_device.properties().device_name);
+
         let (device, mut queues) = Device::new(
             // Which physical device to connect to.
             physical_device,
@@ -162,7 +169,8 @@ impl OfflineRenderer {
 
         let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-        let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass, viewport);
+        let mut renderer =
+            PointCloudRenderer::new(device.clone(), queue.clone(), scene_subpass, viewport);
 
         let target_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
@@ -189,7 +197,7 @@ impl OfflineRenderer {
         }
     }
 
-    pub fn render(&mut self, camera: Camera, pc: &PointCloudGPU) -> Rgba<u8> {
+    pub fn render(&mut self, camera: Camera<impl Projection>, pc: &PointCloudGPU) -> Rgba<u8> {
         self.renderer.set_camera(&camera);
         let cb = self.renderer.render_point_cloud(self.queue.clone(), pc);
 
@@ -228,4 +236,24 @@ pub fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
         mean.map(|v| (v * 255. / (data.len() as f32)).round() as u8)
             .into(),
     )
+}
+
+pub fn export_ply(output_file: &PathBuf, pc: &PointCloud<f32, u8>) {
+    let mut file = BufWriter::new(File::create(output_file).unwrap());
+
+    let mut ply = Ply::<Vertex<f32, u8>>::new();
+    let mut elm_def = Vertex::<f32, u8>::element_def("vertex".to_string());
+    elm_def.count = pc.points().len();
+    ply.header.encoding = Encoding::Ascii;
+    ply.header.elements.add(elm_def.clone());
+
+    let w = Writer::<Vertex<f32, u8>>::new();
+    w.write_header(&mut file, &ply.header).unwrap();
+    w.write_payload_of_element(
+        &mut file,
+        pc.points(),
+        ply.header.elements.get("vertex").unwrap(),
+        &ply.header,
+    )
+    .unwrap();
 }

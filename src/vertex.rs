@@ -155,3 +155,17 @@ impl From<Vertex<f64, u8>> for Vertex<f32, u8> {
         }
     }
 }
+
+impl From<Vertex<f32, f32>> for Vertex<f32, u8> {
+    fn from(item: Vertex<f32, f32>) -> Self {
+        Vertex {
+            position: item.position.clone(),
+            color: Vector4::new(
+                (item.color.x * 255.) as u8,
+                (item.color.y * 255.) as u8,
+                (item.color.z * 255.) as u8,
+                (item.color.w * 255.) as u8,
+            ),
+        }
+    }
+}

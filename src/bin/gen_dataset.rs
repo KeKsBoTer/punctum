@@ -12,7 +12,8 @@ use ply_rs::{
     writer::Writer,
 };
 use punctum::{
-    Camera, Octree, OfflineRenderer, PointCloud, PointCloudGPU, RenderSettings, TeeReader, Vertex,
+    Octree, OfflineRenderer, OrthographicCamera, PointCloud, PointCloudGPU, RenderSettings,
+    TeeReader, Vertex,
 };
 use rayon::prelude::*;
 use std::path::PathBuf;
@@ -97,7 +98,7 @@ fn export_ply(
     .unwrap();
 }
 
-fn load_cameras() -> Vec<Camera> {
+fn load_cameras() -> Vec<OrthographicCamera> {
     let mut f = std::fs::File::open("sphere.ply").unwrap();
 
     // create a parser
@@ -112,8 +113,8 @@ fn load_cameras() -> Vec<Camera> {
         .unwrap()
         .clone()
         .iter()
-        .map(|c| Camera::on_unit_sphere(c.position.into()))
-        .collect::<Vec<Camera>>()
+        .map(|c| OrthographicCamera::on_unit_sphere(c.position.into()))
+        .collect::<Vec<OrthographicCamera>>()
 }
 
 fn main() {

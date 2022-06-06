@@ -1,7 +1,10 @@
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use nalgebra::Point3;
+use pbr::ProgressBar;
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
 use vulkano::instance::{Instance, InstanceCreateInfo};
@@ -15,11 +18,47 @@ use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton,
 use winit::event_loop::ControlFlow;
 
 use punctum::{
-    get_render_pass, select_physical_device, Camera, CameraController, PointCloud, PointCloudGPU,
-    PointCloudRenderer, SurfaceFrame, Viewport,
+    export_ply, get_render_pass, select_physical_device, CameraController, Octree,
+    PerspectiveCamera, PointCloud, PointCloudGPU, PointCloudRenderer, SurfaceFrame, TeeReader,
+    Viewport,
 };
 
 fn main() {
+    let filename = "dataset/octree_64_512max.bin";
+
+    let octree = {
+        let in_file = File::open(filename).unwrap();
+
+        let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
+
+        let mut buf = BufReader::new(in_file);
+
+        pb.message(&format!("decoding {}: ", filename));
+
+        pb.set_units(pbr::Units::Bytes);
+        let mut tee = TeeReader::new(&mut buf, &mut pb);
+
+        let octree: Octree<f64, u8> = bincode::deserialize_from(&mut tee).unwrap();
+
+        pb.finish_println("done!");
+
+        octree
+    };
+
+    let mut pc_raw = PointCloud::from_vec(&octree.into());
+
+    pc_raw.scale_to_size(1000.);
+
+    export_ply(
+        &Path::new("test_octree.ply").to_path_buf(),
+        &((&pc_raw).into()),
+    );
+
+    println!("test: {:?}", pc_raw.points()[0]);
+
+    // let mut pc_raw = PointCloud::from_ply_file("bunny.ply");
+    // pc_raw.scale_to_unit_sphere();
+
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(InstanceCreateInfo {
         enabled_extensions: required_extensions,
@@ -42,6 +81,7 @@ fn main() {
     let (physical_device, queue_family) =
         select_physical_device(&instance, &device_extensions, Some(surface.clone()));
 
+    println!("using device {}", physical_device.properties().device_name);
     let (device, mut queues) = Device::new(
         // Which physical device to connect to.
         physical_device,
@@ -78,17 +118,18 @@ fn main() {
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let mut renderer = PointCloudRenderer::new(device.clone(), scene_subpass, viewport.clone());
+    let pc = PointCloudGPU::from_point_cloud(device.clone(), Arc::new(pc_raw));
 
-    let mut pc_raw = PointCloud::from_ply_file("bunny.ply");
-    pc_raw.scale_to_unit_sphere();
-    let pc = PointCloudGPU::from_point_cloud(device, Arc::new(pc_raw));
+    let mut renderer = PointCloudRenderer::new(
+        device.clone(),
+        queue.clone(),
+        scene_subpass,
+        viewport.clone(),
+    );
 
-    // let mut camera = Camera::look_at_perspective(pc.cpu().bounding_box().clone());
-    let mut camera = Camera::on_unit_sphere(Point3::new(0., -1., 0.));
+    let mut camera = PerspectiveCamera::new(); //::look_at(pc.cpu().bounding_box().clone());
 
-    // let mut camera = Camera::look_at_perspective(*pc.cpu().bounding_box());
-    let mut camera_controller = CameraController::new(0.1, 0.1);
+    let mut camera_controller = CameraController::new(10., 1.);
 
     let mut last_update_inst = Instant::now();
 
@@ -108,7 +149,7 @@ fn main() {
         } => {
             viewport.resize(size.into());
             renderer.set_viewport(viewport.clone());
-            // camera.resize(size.into());
+            camera.set_aspect_ratio(size.width as f32 / size.height as f32);
             frame.force_recreate();
         }
         Event::WindowEvent {
@@ -159,10 +200,10 @@ fn main() {
             frame.recreate_if_necessary();
 
             let time_since_last_frame = last_update_inst.elapsed();
-            let fps = 1. / time_since_last_frame.as_secs_f32();
-            if fps < 55. {
-                println!("FPS: {:}", fps);
-            }
+            let _fps = 1. / time_since_last_frame.as_secs_f32();
+            // if fps < 55. {
+            //     println!("FPS: {:}", fps);
+            // }
             camera_controller.update_camera(&mut camera, time_since_last_frame);
 
             last_update_inst = Instant::now();
@@ -170,8 +211,8 @@ fn main() {
         }
         Event::RedrawRequested(..) => {
             renderer.set_camera(&camera);
-            let cb = renderer.render_point_cloud(queue.clone(), &pc);
-            frame.render(queue.clone(), cb);
+            let pc_cb = renderer.render_point_cloud(queue.clone(), &pc);
+            frame.render(queue.clone(), pc_cb.clone());
         }
         _ => (),
     });

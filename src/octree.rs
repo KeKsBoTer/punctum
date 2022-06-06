@@ -141,6 +141,8 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         return (octant_i, new_size, new_center);
     }
 
+    /// calculates the center and size of the i-th octant
+    /// based on the current center and size of an octant
     fn octant_box(i: usize, center: Point3<F>, size: F) -> (Point3<F>, F) {
         let z = i / 4;
         let y = (i - 4 * z) / 2;
@@ -238,6 +240,12 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         self.traverse(|_, _, _| num_octants += 1);
         return num_octants;
     }
+
+    pub fn flat_points(&self) -> Vec<Vertex<F, C>> {
+        self.into_iter()
+            .flat_map(|octant| octant.data.clone())
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -256,5 +264,19 @@ impl<'a, F: BaseFloat, C: BaseColor> IntoIterator for &'a Octree<F, C> {
         self.traverse(|data, center, size| result.push(OctreeIter { data, center, size }));
 
         result.into_iter()
+    }
+}
+
+impl Into<Vec<Vertex<f32, f32>>> for Octree<f64, u8> {
+    fn into(self) -> Vec<Vertex<f32, f32>> {
+        self.into_iter()
+            .flat_map(|octant| {
+                octant
+                    .data
+                    .iter()
+                    .map(|p| (*p).into())
+                    .collect::<Vec<Vertex<f32, f32>>>()
+            })
+            .collect()
     }
 }
