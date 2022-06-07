@@ -5,18 +5,21 @@ use ply_rs::{
     writer::Writer,
 };
 
-use crate::{PointCloud, Vertex};
+use crate::{
+    vertex::{BaseColor, BaseFloat},
+    PointCloud, Vertex,
+};
 
-pub fn export_ply(output_file: &PathBuf, pc: &PointCloud<f32, u8>) {
+pub fn export_ply<F: BaseFloat, C: BaseColor>(output_file: &PathBuf, pc: &PointCloud<F, C>) {
     let mut file = BufWriter::new(File::create(output_file).unwrap());
 
-    let mut ply = Ply::<Vertex<f32, u8>>::new();
-    let mut elm_def = Vertex::<f32, u8>::element_def("vertex".to_string());
+    let mut ply = Ply::<Vertex<F, C>>::new();
+    let mut elm_def = Vertex::<F, C>::element_def("vertex".to_string());
     elm_def.count = pc.points().len();
-    ply.header.encoding = Encoding::Ascii;
+    ply.header.encoding = Encoding::BinaryLittleEndian;
     ply.header.elements.add(elm_def.clone());
 
-    let w = Writer::<Vertex<f32, u8>>::new();
+    let w = Writer::<Vertex<F, C>>::new();
     w.write_header(&mut file, &ply.header).unwrap();
     w.write_payload_of_element(
         &mut file,

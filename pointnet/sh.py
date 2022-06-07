@@ -173,7 +173,13 @@ def to_spherical(coords: torch.Tensor) -> torch.Tensor:
 
 
 def lm2flat_index(l: int, m: int) -> int:
-    return l * (l + 1) - m
+    return l * (l + 1) + m
+
+
+def flat2lm_index(i: int) -> Tuple[int, int]:
+    l = int(sqrt(i))
+    m = l * (l + 1) - i
+    return l, -m
 
 
 def evalute_sh(coefs: int, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -183,7 +189,7 @@ def evalute_sh(coefs: int, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     clear_spherical_harmonics_cache()
     for l in range(l_max + 1):
         y_lm = get_spherical_harmonics(l, x, y)
-        Y += y_lm @ coefs[lm2flat_index(l, l) : lm2flat_index(l, -l) + 1]
+        Y += y_lm @ coefs[lm2flat_index(l, -l) : lm2flat_index(l, l) + 1]
 
     return Y
 
@@ -194,7 +200,7 @@ def calc_sh(l_max: int, coords: torch.Tensor) -> torch.Tensor:
     clear_spherical_harmonics_cache()
     for l in range(l_max + 1):
         sh = get_spherical_harmonics(l, coords[:, 0], coords[:, 1])
-        values[:, lm2flat_index(l, l) : lm2flat_index(l, -l) + 1] = sh
+        values[:, lm2flat_index(l, -l) : lm2flat_index(l, l) + 1] = sh
     return values
 
 

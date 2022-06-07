@@ -1,15 +1,10 @@
-use std::{
-    f32::consts::PI,
-    fs::File,
-    io::{BufReader, Write},
-    path::Path,
-    sync::Arc,
-};
+use std::{f32::consts::PI, fs::File, io::BufReader, path::PathBuf, sync::Arc};
 
 use nalgebra::Vector4;
 use pbr::ProgressBar;
 use punctum::{export_ply, BoundingBox, Octree, PointCloud, TeeReader, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};
+use structopt::StructOpt;
 
 fn angle_to_rgba(angle: f32) -> Vector4<u8> {
     let mut color = Vector4::new(angle, angle - 2. * PI / 3., angle + 2. * PI / 3., 1.0);
@@ -24,16 +19,26 @@ fn angle_to_rgba(angle: f32) -> Vector4<u8> {
     );
 }
 
+#[derive(StructOpt, Debug)]
+#[structopt(name = "Octree Builder")]
+struct Opt {
+    #[structopt(name = "input_octree", parse(from_os_str))]
+    input: PathBuf,
+
+    #[structopt(name = "output_ply", parse(from_os_str))]
+    output: PathBuf,
+}
+
 fn main() {
-    let filename = "dataset/octree_16_1024max.bin";
+    let opt = Opt::from_args();
     let octree = Arc::new({
-        let in_file = File::open(filename).unwrap();
+        let in_file = File::open(opt.input.clone()).unwrap();
 
         let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
 
         let mut buf = BufReader::new(in_file);
 
-        pb.message(&format!("decoding {}: ", filename));
+        pb.message(&format!("decoding {:?}: ", opt.input));
 
         pb.set_units(pbr::Units::Bytes);
         let mut tee = TeeReader::new(&mut buf, &mut pb);
@@ -67,15 +72,8 @@ fn main() {
         bboxes.push(BoundingBox::from_points(octant.data).size());
         pb.inc();
     }
-
-    let mut size_file = File::create("octant_sizes.txt").unwrap();
-
-    for size in bboxes {
-        writeln!(&mut size_file, "{} {} {}", size.x, size.y, size.z).unwrap();
-    }
-
     println!("num_points: {}", points.len());
     let pc = PointCloud::from_vec(&points);
 
-    export_ply(&Path::new("test_octree_64.ply").to_path_buf(), &pc);
+    export_ply(&opt.output, &pc);
 }

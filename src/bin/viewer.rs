@@ -1,10 +1,11 @@
 use std::fs::File;
 use std::io::BufReader;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
 use pbr::ProgressBar;
+use structopt::StructOpt;
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
 use vulkano::instance::{Instance, InstanceCreateInfo};
@@ -23,8 +24,16 @@ use punctum::{
     Viewport,
 };
 
+#[derive(StructOpt, Debug)]
+#[structopt(name = "Octree Builder")]
+struct Opt {
+    #[structopt(name = "input_octree", parse(from_os_str))]
+    input: PathBuf,
+}
+
 fn main() {
-    let filename = "dataset/octree_64_512max.bin";
+    let opt = Opt::from_args();
+    let filename = opt.input.as_os_str().to_str().unwrap();
 
     let octree = {
         let in_file = File::open(filename).unwrap();
@@ -54,11 +63,6 @@ fn main() {
         &((&pc_raw).into()),
     );
 
-    println!("test: {:?}", pc_raw.points()[0]);
-
-    // let mut pc_raw = PointCloud::from_ply_file("bunny.ply");
-    // pc_raw.scale_to_unit_sphere();
-
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(InstanceCreateInfo {
         enabled_extensions: required_extensions,
@@ -69,7 +73,7 @@ fn main() {
     let event_loop = EventLoop::new(); // ignore this for now
     let surface = WindowBuilder::new()
         .with_title("puncTUM")
-        .with_inner_size(PhysicalSize::new(512, 512))
+        .with_inner_size(PhysicalSize::new(800, 600))
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 
@@ -127,9 +131,9 @@ fn main() {
         viewport.clone(),
     );
 
-    let mut camera = PerspectiveCamera::new(); //::look_at(pc.cpu().bounding_box().clone());
+    let mut camera = PerspectiveCamera::new();
 
-    let mut camera_controller = CameraController::new(10., 1.);
+    let mut camera_controller = CameraController::new(50., 1.);
 
     let mut last_update_inst = Instant::now();
 

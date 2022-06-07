@@ -1,10 +1,11 @@
 import argparse
 import math
 from asyncio.log import logger
-from ntpath import join
 from typing import List, Tuple
+
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 import torch.utils.data as data
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
@@ -15,8 +16,9 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from dataset import OctantDataset, lm2flat_index
-from .model import PointNet
 from sh import calc_sh, to_spherical
+
+from model import PointNet
 
 torch.backends.cudnn.benchmark = True
 
@@ -27,6 +29,7 @@ def collate_batched_point_clouds(batch: List[Tuple[Pointclouds, torch.Tensor]]):
         points=[x[0].points_packed() for x in batch],
         features=[x[0].features_packed() for x in batch],
     )
+    pcs.file_names = [x[0].file_names[0] for x in batch]
     return (pcs, coefs)
 
 
@@ -45,7 +48,7 @@ def unpack_pointclouds(pcs: Pointclouds):
 
 def weighted_l2_loss(weights: torch.Tensor):
     def loss(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        diff = prediction - target
+        diff = prediction[:, 1:] - target[:, 1:]
         l2 = diff.square().sum(-1)
         return (l2 * weights.to(prediction.device)).mean()
 
@@ -54,10 +57,18 @@ def weighted_l2_loss(weights: torch.Tensor):
 
 def camera_loss(l_max: int, positions: torch.Tensor):
 
-    y = calc_sh(l_max, positions)
+    num_rand = 64
+    offsets = torch.randn((num_rand, *positions.shape)) * 0.1
+    offsets[:, :, 1] *= 2
+
+    rnd_pos = positions + offsets * 0.5
+
+    y = calc_sh(l_max, rnd_pos.flatten(0, 1))
+    y = y.reshape((num_rand, positions.shape[0], (l_max + 1) ** 2))
 
     def loss(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        y_r = y.to(prediction.device)
+        r_i = torch.randint(0, len(y), (1,)).item()
+        y_r = y.to(prediction.device)[r_i]
         pred_img = y_r @ prediction
         target_img = y_r @ target
         diff = pred_img - target_img
@@ -84,10 +95,10 @@ class CoefNormalizer:
         self.std = std
 
     def normalize(self, x: torch.Tensor) -> torch.Tensor:
-        return x  # (x - self.mean) / self.std
+        return (x - self.mean) / self.std
 
     def denormalize(self, x: torch.Tensor) -> torch.Tensor:
-        return x  # x * self.std + self.mean
+        return x * self.std + self.mean
 
     def plot(self) -> Figure:
         fig, ax = plt.subplots()
@@ -138,7 +149,8 @@ def plot_samples(
         avg = pc.features_list()[s].float().mean(0).reshape(1, 1, 4) / 255.0
         ax3.imshow(avg)
 
-        ax1.set_title("target")
+        name = pc.file_names[s].split("/")[-1]
+        ax1.set_title(f"target ({name})")
         ax1.set_axis_off()
         ax1.imshow(targets[i])
 
@@ -205,7 +217,7 @@ if __name__ == "__main__":
         "--batch-size",
         dest="batch_size",
         type=int,
-        default=4096,
+        default=512,
         help="batch size used for training",
     )
 
@@ -228,10 +240,13 @@ if __name__ == "__main__":
     epochs = args.epochs
     experiment_name = args.name
 
-    logger.setLevel("DEBUG")
+    logger.setLevel("INFO")
 
     logger.info(f"loading dataset {ds_path}")
-    ds = OctantDataset(ds_path, preload=True)
+
+    selected_indices = torch.load("top_100k.pt")
+
+    ds = OctantDataset(ds_path, preload=True, selected_samples=selected_indices)
 
     num_train = int(0.8 * len(ds))
 
@@ -243,10 +258,17 @@ if __name__ == "__main__":
     val_batches = random_batches(len(ds_val), batch_size)
 
     model = PointNet(
-        (l_max + 1) ** 2, batch_norm=False, use_dropout=False, use_spherical=False
+        (l_max + 1) ** 2, batch_norm=True, use_dropout=False, use_spherical=False
     ).cuda()
 
-    coefs = torch.stack([c[: lm2flat_index(l_max, -l_max) + 1] for _, c in ds_train])
+    # model = torch.load(f"logs/l_max=10 1024 complete/model.pt").cuda()
+
+    coefs = torch.stack(
+        [
+            ds_train[i][1][: lm2flat_index(l_max, l_max) + 1]
+            for i in torch.randint(0, len(ds_train), (1000,))
+        ]
+    )
 
     coef_transform = CoefNormalizer(coefs.mean(0).cuda(), coefs.std(0).cuda())
 
@@ -264,7 +286,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
     scheduler = OneCycleLR(
-        optimizer, max_lr=1e-3, steps_per_epoch=len(train_batches), epochs=epochs
+        optimizer, max_lr=1e-4, steps_per_epoch=len(train_batches), epochs=epochs
     )
 
     train_batches_pre = [
@@ -275,24 +297,39 @@ if __name__ == "__main__":
     ]
 
     step = 0
-    for epoch in tqdm(range(epochs), desc="epoch"):
+    for epoch in range(epochs):
 
-        save_plot = epoch % 10 == 0
+        if epoch % 5 == 0:
+            train_batches_pre = [
+                collate_batched_point_clouds([ds_train[i] for i in s])
+                for s in train_batches
+            ]
+            val_batches_pre = [
+                collate_batched_point_clouds([ds_val[i] for i in s])
+                for s in val_batches
+            ]
 
-        for i, batch_indices in enumerate(train_batches):
+        for i, train_batch in tqdm(
+            enumerate(train_batches),
+            total=len(train_batches),
+            desc=f"epoch {epoch}/{epochs}",
+        ):
 
             pcs, coefs = train_batches_pre[i]
+
+            save_plot = step % 100 == 0
+
             model.train()
             optimizer.zero_grad()
 
             vertices, color, batch = unpack_pointclouds(pcs)
-            target_coefs = coefs[:, : lm2flat_index(l_max, -l_max) + 1].cuda()
+            target_coefs = coefs[:, : lm2flat_index(l_max, l_max) + 1].cuda()
 
             pred_coefs = model(vertices, color, batch)
             target_coefs_n = coef_transform.normalize(target_coefs)
-            c_loss: torch.Tensor = loss_fn(pred_coefs, target_coefs_n)
-            coef_loss: torch.Tensor = coef_loss_fn(pred_coefs, target_coefs_n)
-            train_loss = c_loss + coef_loss
+            c_loss = loss_fn(coef_transform.denormalize(pred_coefs), target_coefs)
+            coef_loss = coef_loss_fn(pred_coefs, target_coefs_n)
+            train_loss = c_loss + coef_loss * 0.01
             train_loss.backward()
 
             optimizer.step()
@@ -329,21 +366,18 @@ if __name__ == "__main__":
             # do validation batch every 4th train batch
             if i % 8 == 0:
                 model.eval()
-                rand_sample = torch.randint(0, len(val_batches), (1,)).item()
-                # pcs, coefs = collate_batched_point_clouds(
-                #     [ds_val[i] for i in val_batches[rand_sample]]
-                # )
 
-                pcs, coefs = val_batches_pre[rand_sample]
+                rnd_batch_idx = torch.randint(0, len(val_batches), (1,)).item()
+                pcs, coefs = val_batches_pre[rnd_batch_idx]
 
                 vertices, color, batch = unpack_pointclouds(pcs)
-                target_coefs = coefs[:, : lm2flat_index(l_max, -l_max) + 1].cuda()
+                target_coefs = coefs[:, : lm2flat_index(l_max, l_max) + 1].cuda()
                 pred_coefs = model(vertices, color, batch)
                 target_coefs_n = coef_transform.normalize(target_coefs)
 
-                c_loss = loss_fn(pred_coefs, target_coefs_n)
+                c_loss = loss_fn(coef_transform.denormalize(pred_coefs), target_coefs)
                 coef_loss = coef_loss_fn(pred_coefs, target_coefs_n)
-                val_loss = c_loss + coef_loss
+                val_loss = c_loss + coef_loss * 0.01
 
                 writer_val.add_scalar(
                     "loss/camera", c_loss.item(), step, new_style=True
@@ -374,10 +408,9 @@ if __name__ == "__main__":
                     writer_val.add_figure("coefficients/error_relative", fig3, step)
 
             step += 1
-            save_plot = False
 
     writer_train.close()
     writer_val.close()
 
-    torch.save(model, join("logs", experiment_name, "model.pt"))
+    torch.save(model.state_dict(), f"logs/{experiment_name}/model.pt")
 

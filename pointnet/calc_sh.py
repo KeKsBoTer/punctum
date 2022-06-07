@@ -62,7 +62,7 @@ if __name__ == "__main__":
         coef_data = []
         for l in range(l_max + 1):
             for m, sh in enumerate(
-                coefs.cpu()[lm2flat_index(l, l) : lm2flat_index(l, -l) + 1]
+                coefs.cpu()[lm2flat_index(l, -l) : lm2flat_index(l, l) + 1]
             ):
                 coef_data.append((l, -l + m, list(sh.numpy())))
 

@@ -235,6 +235,13 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         self.num_points
     }
 
+    pub fn size(&self) -> F {
+        self.size
+    }
+    pub fn center(&self) -> &Point3<F> {
+        &self.center
+    }
+
     pub fn num_octants(&self) -> u64 {
         let mut num_octants = 0;
         self.traverse(|_, _, _| num_octants += 1);

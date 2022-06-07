@@ -6,20 +6,18 @@ use winit::{dpi::PhysicalPosition, event::*};
 use crate::pointcloud::BoundingBox;
 
 pub trait Projection {
-    fn projection_matrix(&self) -> Matrix4<f32>;
+    fn projection_matrix(&self, znear: f32, zfar: f32) -> Matrix4<f32>;
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct PerspectiveProjection {
     fovy: f32,
     aspect_ratio: f32,
-    znear: f32,
-    zfar: f32,
 }
 
 impl Projection for PerspectiveProjection {
-    fn projection_matrix(&self) -> Matrix4<f32> {
-        Matrix4::new_perspective(self.aspect_ratio, self.fovy, self.znear, self.zfar)
+    fn projection_matrix(&self, znear: f32, zfar: f32) -> Matrix4<f32> {
+        Matrix4::new_perspective(self.aspect_ratio, self.fovy, znear, zfar)
     }
 }
 
@@ -27,19 +25,17 @@ impl Projection for PerspectiveProjection {
 pub struct OrthographicProjection {
     width: f32,
     height: f32,
-    znear: f32,
-    zfar: f32,
 }
 
 impl Projection for OrthographicProjection {
-    fn projection_matrix(&self) -> Matrix4<f32> {
+    fn projection_matrix(&self, znear: f32, zfar: f32) -> Matrix4<f32> {
         Matrix4::new_orthographic(
             -self.width / 2.,
             self.width / 2.,
             -self.height / 2.,
             self.height / 2.,
-            self.znear,
-            self.zfar,
+            znear,
+            zfar,
         )
     }
 }
@@ -53,11 +49,13 @@ pub struct Camera<P: Projection> {
     proj: Matrix4<f32>,
 
     projection: P,
+    znear: f32,
+    zfar: f32,
 }
 
 impl<P: Projection> Camera<P> {
     fn update_proj_matrix(&mut self) {
-        self.proj = self.projection.projection_matrix();
+        self.proj = self.projection.projection_matrix(self.znear, self.zfar);
     }
 
     pub fn view(&self) -> &Matrix4<f32> {
@@ -70,6 +68,14 @@ impl<P: Projection> Camera<P> {
 
     pub fn position(&self) -> &Point3<f32> {
         &self.pos
+    }
+
+    pub fn znear(&self) -> &f32 {
+        &self.znear
+    }
+
+    pub fn zfar(&self) -> &f32 {
+        &self.zfar
     }
 
     fn rot_mat(&self) -> Matrix4<f32> {
@@ -89,9 +95,9 @@ impl Camera<PerspectiveProjection> {
             projection: PerspectiveProjection {
                 fovy: fovy,
                 aspect_ratio: 1.0,
-                znear: 0.1,
-                zfar: 1000.,
             },
+            znear: 0.1,
+            zfar: 1000.,
         };
         c.update_view_matrix();
         c.update_proj_matrix();
@@ -116,13 +122,6 @@ impl Camera<PerspectiveProjection> {
         let distance = 0.5 * size.y / (fovy / 2.0).tan();
         let pos = center - vector!(0., 0., 0.5 * size.z + distance);
 
-        println!(
-            "min: {:?}, max: {:?}, zfar: {:?}",
-            bbox.min,
-            bbox.max,
-            0.5 * size.z + distance
-        );
-
         let mut c = Camera {
             pos: pos,
             rot: vector!(0., 0., 0.),
@@ -132,9 +131,9 @@ impl Camera<PerspectiveProjection> {
             projection: PerspectiveProjection {
                 fovy: fovy,
                 aspect_ratio: 1.0,
-                znear: 0.001,
-                zfar: 2. * (0.5 * size.z + distance),
             },
+            znear: 0.001,
+            zfar: 2. * (0.5 * size.z + distance),
         };
         c.update_view_matrix();
         c.update_proj_matrix();
@@ -167,9 +166,9 @@ impl Camera<OrthographicProjection> {
             projection: OrthographicProjection {
                 width: size.x,
                 height: size.y,
-                znear: -10.,
-                zfar: 10.,
             },
+            znear: -10.,
+            zfar: 10.,
         };
         c.update_view_matrix();
         c.update_proj_matrix();
@@ -189,9 +188,9 @@ impl Camera<OrthographicProjection> {
             projection: OrthographicProjection {
                 width: 2.,
                 height: 2.,
-                znear: -2.0,
-                zfar: 2.0,
             },
+            znear: -2.0,
+            zfar: 2.0,
         };
 
         // add epsilon z value to avoid NaN in view matrix

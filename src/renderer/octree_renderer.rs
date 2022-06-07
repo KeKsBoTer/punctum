@@ -2,7 +2,7 @@ use crate::{
     camera::{Camera, Projection},
     pointcloud::PointCloudGPU,
     vertex::Vertex,
-    Viewport,
+    Octree, Viewport,
 };
 use nalgebra::Matrix4;
 use std::sync::Arc;
@@ -70,7 +70,7 @@ mod fs {
     }
 }
 
-pub struct PointCloudRenderer {
+pub struct OctreeRenderer {
     device: Arc<Device>,
     queue: Arc<Queue>,
 
@@ -82,27 +82,25 @@ pub struct PointCloudRenderer {
     uniform_data: vs::UniformData,
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
+
+    octree: Arc<Octree<f32, f32>>,
 }
 
-impl PointCloudRenderer {
+impl OctreeRenderer {
     pub fn new(
         device: Arc<Device>,
         queue: Arc<Queue>,
         subpass: Subpass,
         viewport: Viewport,
+        octree: Arc<Octree<f32, f32>>,
     ) -> Self {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
         let pool = Arc::new(CpuBufferPool::new(device.clone(), BufferUsage::all()));
 
-        let pipeline = PointCloudRenderer::build_pipeline(
-            vs.clone(),
-            fs.clone(),
-            subpass,
-            viewport,
-            device.clone(),
-        );
+        let pipeline =
+            Self::build_pipeline(vs.clone(), fs.clone(), subpass, viewport, device.clone());
 
         let uniform_buffer: Arc<DeviceLocalBuffer<vs::UniformData>> = DeviceLocalBuffer::new(
             device.clone(),
@@ -119,7 +117,7 @@ impl PointCloudRenderer {
         )
         .unwrap();
 
-        PointCloudRenderer {
+        OctreeRenderer {
             device,
             queue,
             pipeline,
@@ -127,8 +125,9 @@ impl PointCloudRenderer {
             uniform_buffer_pool: pool,
             uniform_buffer,
             uniform_data: vs::UniformData::default(),
-            vs: vs,
-            fs: fs,
+            vs,
+            fs,
+            octree,
         }
     }
 
@@ -157,7 +156,7 @@ impl PointCloudRenderer {
     }
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
-        self.pipeline = PointCloudRenderer::build_pipeline(
+        self.pipeline = Self::build_pipeline(
             self.vs.clone(),
             self.fs.clone(),
             self.pipeline.subpass().clone(),
@@ -166,20 +165,14 @@ impl PointCloudRenderer {
         );
     }
 
-    pub fn render_point_cloud(
-        &self,
-        queue: Arc<Queue>,
-        point_cloud: &PointCloudGPU,
-    ) -> Arc<SecondaryAutoCommandBuffer> {
+    pub fn render(&self) -> Arc<SecondaryAutoCommandBuffer> {
         let mut builder = AutoCommandBufferBuilder::secondary_graphics(
-            queue.device().clone(),
-            queue.family(),
+            self.device.clone(),
+            self.queue.family(),
             CommandBufferUsage::OneTimeSubmit,
             self.pipeline.subpass().clone(),
         )
         .unwrap();
-
-        let pc_buffer = point_cloud.gpu_buffer();
 
         builder
             .bind_pipeline_graphics(self.pipeline.clone())
@@ -188,10 +181,10 @@ impl PointCloudRenderer {
                 self.pipeline.layout().clone(),
                 0,
                 self.set.clone(),
-            )
-            .bind_vertex_buffers(0, pc_buffer.clone())
-            .draw(pc_buffer.len() as u32, 1, 0, 0)
-            .unwrap();
+            );
+        // .bind_vertex_buffers(0, pc_buffer.clone())
+        // .draw(pc_buffer.len() as u32, 1, 0, 0)
+        // .unwrap();
         Arc::new(builder.build().unwrap())
     }
 

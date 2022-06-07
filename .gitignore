@@ -20,4 +20,4 @@ test.*
 datasets/*
 
 graphs/
-logs/
+logs*/

@@ -76,15 +76,6 @@ impl ImageAvgColor {
             None => (8, 8),
         };
 
-        println!(
-            "Local size will be set to: ({}, {}, 1) (max: {:?})",
-            local_size_x,
-            local_size_y,
-            device
-                .physical_device()
-                .properties()
-                .max_compute_work_group_size,
-        );
         let spec_consts = cs::SpecializationConstants {
             constant_0: local_size_x,
             constant_1: local_size_y,

@@ -34,10 +34,6 @@ name = "viewer"
 path = "src/bin/viewer.rs"
 
 [[bin]]
-name = "headless"
-path = "src/bin/headless.rs"
-
-[[bin]]
 name = "octree_builder"
 path = "src/bin/build_octree.rs"
 
