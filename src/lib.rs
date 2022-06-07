@@ -1,12 +1,8 @@
-use std::{fs::File, io::BufWriter, path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use camera::Projection;
 use image::Rgba;
 use nalgebra::{vector, Vector4};
-use ply_rs::{
-    ply::{Addable, Encoding, Ply},
-    writer::Writer,
-};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
@@ -23,6 +19,7 @@ use winit::window::Window;
 
 mod avg_color;
 mod camera;
+mod io;
 mod octree;
 mod pointcloud;
 mod renderer;
@@ -31,6 +28,7 @@ mod vertex;
 
 pub use avg_color::ImageAvgColor;
 pub use camera::{Camera, CameraController, OrthographicCamera, PerspectiveCamera};
+pub use io::export_ply;
 pub use octree::{Node, Octree};
 pub use pointcloud::{BoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{PointCloudRenderer, SurfaceFrame, Viewport};
@@ -236,24 +234,4 @@ pub fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
         mean.map(|v| (v * 255. / (data.len() as f32)).round() as u8)
             .into(),
     )
-}
-
-pub fn export_ply(output_file: &PathBuf, pc: &PointCloud<f32, u8>) {
-    let mut file = BufWriter::new(File::create(output_file).unwrap());
-
-    let mut ply = Ply::<Vertex<f32, u8>>::new();
-    let mut elm_def = Vertex::<f32, u8>::element_def("vertex".to_string());
-    elm_def.count = pc.points().len();
-    ply.header.encoding = Encoding::Ascii;
-    ply.header.elements.add(elm_def.clone());
-
-    let w = Writer::<Vertex<f32, u8>>::new();
-    w.write_header(&mut file, &ply.header).unwrap();
-    w.write_payload_of_element(
-        &mut file,
-        pc.points(),
-        ply.header.elements.get("vertex").unwrap(),
-        &ply.header,
-    )
-    .unwrap();
 }

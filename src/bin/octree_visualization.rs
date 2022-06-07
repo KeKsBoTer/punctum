@@ -1,20 +1,15 @@
 use std::{
     f32::consts::PI,
     fs::File,
-    io::{BufReader, BufWriter, Write},
+    io::{BufReader, Write},
     path::Path,
     sync::Arc,
 };
 
 use nalgebra::Vector4;
 use pbr::ProgressBar;
-use ply_rs::{
-    ply::{Addable, Encoding, Ply},
-    writer::Writer,
-};
 use punctum::{export_ply, BoundingBox, Octree, PointCloud, TeeReader, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};
-use std::path::PathBuf;
 
 fn angle_to_rgba(angle: f32) -> Vector4<u8> {
     let mut color = Vector4::new(angle, angle - 2. * PI / 3., angle + 2. * PI / 3., 1.0);
@@ -63,7 +58,6 @@ fn main() {
             octant
                 .data
                 .iter()
-                // .filter(|p| rand_gen.gen::<u32>() % 32u32 == 0u32)
                 .map(|p| Vertex {
                     position: p.position.cast(),
                     color: color,
