@@ -97,14 +97,14 @@ pub fn get_render_pass(
 
 #[derive(Debug, Clone)]
 pub struct RenderSettings {
-    pub point_size: f32,
+    pub point_size: u32,
     pub background_color: [f32; 4],
 }
 
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
-            point_size: 10.0,
+            point_size: 1,
             background_color: [0.; 4],
         }
     }

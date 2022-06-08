@@ -189,6 +189,21 @@ fn main() {
                 last_mouse_position = None;
             }
         },
+        Event::WindowEvent {
+            event:
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            virtual_keycode: Some(key),
+                            state,
+                            ..
+                        },
+                    ..
+                },
+            ..
+        } => {
+            camera_controller.process_keyboard(key, state);
+        }
         Event::DeviceEvent { event, .. } => match event {
             DeviceEvent::Key(KeyboardInput {
                 virtual_keycode: Some(key),

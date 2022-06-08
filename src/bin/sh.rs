@@ -1,6 +1,5 @@
-use std::f32::consts::PI;
-
 use image::{GrayImage, Luma, Pixel};
+use std::f32::consts::PI;
 
 fn semifactorial(x: u64) -> u64 {
     let mut result = 1;
@@ -53,71 +52,66 @@ fn lpmv(l: u64, m: i64, x: f32) -> f32 {
     return y;
 }
 
-fn get_spherical_harmonics_element(l: u64, m: i64, theta: f32, phi: f32) -> f32 {
+fn get_spherical_harmonics_element(l: u64, m: i64, phi: f32, leg: f32) -> f32 {
     let m_abs = m.abs() as u64;
-    assert!(m_abs <= l, "|m| > l");
-
-    let mut N = ((2. * l as f32 + 1.) / (4. * PI)).sqrt();
-    let leg = lpmv(l, m_abs as i64, theta.cos());
-
     if m == 0 {
-        return N * leg;
+        let n = ((2. * l as f32 + 1.) / (4. * PI)).sqrt();
+        return leg * n;
     }
 
-    let mut Y = if m > 0 {
+    let mut y = if m > 0 {
         (m as f32 * phi).cos()
     } else {
         (m_abs as f32 * phi).sin()
     };
 
-    Y *= leg;
-    N *= (2.0 / pochhammer(l - m_abs + 1, 2 * m_abs) as f32).sqrt();
-    Y *= N;
-    return Y;
+    y *= leg * (2.0 / pochhammer(l - m_abs + 1, 2 * m_abs) as f32).sqrt();
+    return y;
 }
 
-// fn main() {
-//     let l_max = 5i64;
-
-//     let res = 100;
-
-//     let mut img = GrayImage::new(res, res);
-
-//     for i in 0..res {
-//         for j in 0..res {
-//             let theta = PI * (j as f32 / res as f32);
-//             let phi = 2. * PI * (i as f32 / res as f32);
-
-//             let mut value = 0.;
-//             for l in 0..l_max + 1 {
-//                 for m in -l..l + 1 {
-//                     value += get_spherical_harmonics_element(l as u64, m, theta, phi);
-//                 }
-//             }
-//             img.put_pixel(i, j, Luma::from([((value + 1.) / 2. * 255.) as u8]));
-//         }
-//     }
-
-//     img.save("test.png").unwrap();
-// }
+fn lm2flat_index(l: i64, m: i64) -> usize {
+    (l * (l + 1) + m) as usize
+}
 
 fn main() {
     let l_max = 5i64;
 
-    let res = 100;
+    let res = 1000;
+
+    let mut images = (0..lm2flat_index(l_max, l_max) + 1)
+        .map(|_| GrayImage::new(res, res))
+        .collect::<Vec<GrayImage>>();
 
     for l in 0..l_max + 1 {
-        for m in -l..l + 1 {
-            let mut img = GrayImage::new(res, res);
-            for i in 0..res {
-                for j in 0..res {
-                    let theta = PI * (j as f32 / res as f32);
+        for m in 0..l + 1 {
+            for j in 0..res {
+                let theta = PI * (j as f32 / res as f32);
+                let leg = lpmv(l as u64, m.abs() as i64, theta.cos());
+                for i in 0..res {
                     let phi = 2. * PI * (i as f32 / res as f32);
-                    let value = get_spherical_harmonics_element(l as u64, m, theta, phi);
-                    img.put_pixel(i, j, Luma::from([((value + 1.) / 2. * 255.) as u8]));
+                    let value = get_spherical_harmonics_element(l as u64, m, phi, leg);
+
+                    images[lm2flat_index(l, m)].put_pixel(
+                        i,
+                        j,
+                        Luma::from([((value + 1.) / 2. * 255.) as u8]),
+                    );
+
+                    // // make use of the fact that sperical harmonics are symetric to m (with a shift of pi/2)
+                    // if m != 0 {
+                    //     images[lm2flat_index(l, -m)].put_pixel(
+                    //         (i + res / 4) % res,
+                    //         j,
+                    //         Luma::from([((value + 1.) / 2. * 255.) as u8]),
+                    //     );
+                    // }
                 }
             }
-
+        }
+    }
+    for l in 0..l_max + 1 {
+        for m in -l..l + 1 {
+            let img = &mut images[lm2flat_index(l, m)];
             img.save(format!("sh_tests/l={}_m={}.png", l, m)).unwrap();
         }
     }
