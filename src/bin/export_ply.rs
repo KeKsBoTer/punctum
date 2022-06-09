@@ -1,6 +1,5 @@
 use std::{fs::File, io::BufReader, path::PathBuf, sync::Arc};
 
-use nalgebra::Norm;
 use pbr::ProgressBar;
 use punctum::{export_ply, Octree, PointCloud, TeeReader, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};

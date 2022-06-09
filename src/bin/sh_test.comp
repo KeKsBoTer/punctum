@@ -1,0 +1,29 @@
+#version 450
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2DArray img_shs;
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D img_out;
+
+
+void main() {
+    ivec2 idx = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(imageSize(img_out));
+
+    if(idx.x >= size.x || idx.y >= size.y){
+        return;
+    }
+
+    int num_sh = textureSize(img_shs,0).z;
+
+    ivec2 n_sample_pos = ivec2((idx.x-size.x/4) % size.x,idx.y);
+    vec4 color = vec4(0);
+    for(int i=0;i<num_sh;i++){
+        float m_pos = texture(img_shs, vec3(vec2(idx)/vec2(size),i)).r;
+        float m_neg = texture(img_shs, vec3((vec2(n_sample_pos))/vec2(size),i)).r;
+        color += m_pos + m_neg;
+    }
+    // color += texture(img_shs, vec3((vec2(n_sample_pos))/vec2(size),7)).r;
+
+    imageStore(img_out, idx, vec4((color.rgb+10)/20,1.));
+}

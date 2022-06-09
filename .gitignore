@@ -21,3 +21,4 @@ datasets/*
 
 graphs/
 logs*/
+sh_tests/

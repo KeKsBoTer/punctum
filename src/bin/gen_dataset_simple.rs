@@ -13,7 +13,7 @@ use ply_rs::{
     writer::Writer,
 };
 use punctum::{
-     OfflineRenderer, OrthographicCamera, PointCloud, PointCloudGPU, RenderSettings, Vertex,
+    OfflineRenderer, OrthographicCamera, PointCloud, PointCloudGPU, RenderSettings, Vertex,
 };
 use rand::{
     distributions::WeightedIndex,
@@ -62,7 +62,7 @@ impl RenderPool {
                 Arc::new(Mutex::new(OfflineRenderer::new(
                     64,
                     RenderSettings {
-                        point_size: 32.0,
+                        point_size: 32,
                         ..RenderSettings::default()
                     },
                 )))

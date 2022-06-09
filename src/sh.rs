@@ -1,4 +1,4 @@
-use image::{GrayImage, ImageBuffer, Luma, Pixel, Rgb32FImage};
+use image::{ImageBuffer, Luma};
 use rayon::prelude::*;
 use std::f32::consts::PI;
 
@@ -70,40 +70,47 @@ fn get_spherical_harmonics_element(l: u64, m: i64, phi: f32, leg: f32) -> f32 {
     return y;
 }
 
-fn lm2flat_index(l: i64, m: i64) -> usize {
-    (l * (l + 1) + m) as usize
+#[inline]
+pub fn lm2flat_index(l: u64, m: u64) -> usize {
+    ((l + 1) * l / 2 + m) as usize
 }
 
-fn flat2lm_index(i: usize) -> (i64, i64) {
-    let l = (i as f32).sqrt() as i64;
-    let m = (l * (l + 1)) as i64 - i as i64;
-    return (l, -m);
+/// useses Triangular roots to calculate l and m
+/// for a given index i
+/// see https://en.wikipedia.org/wiki/Triangular_number
+#[inline]
+pub fn flat2lm_index(i: usize) -> (u64, u64) {
+    let l = ((((8 * i + 1) as f32).sqrt() - 1.) / 2.) as u64;
+    let m = i as u64 - (l * (l + 1) / 2) as u64;
+    return (l, m);
 }
 
-type Grayf32Image = ImageBuffer<Luma<f32>, Vec<f32>>;
+pub type Grayf32Image = ImageBuffer<Luma<f32>, Vec<f32>>;
 
-fn main() {
-    let l_max = 5i64;
+pub fn calc_sh(l_max: u64, resolution: u32) -> Vec<Vec<f32>> {
+    let res = resolution;
 
-    let res = 1000;
-
-    let images = (0..(l_max + 1) * (l_max + 1))
+    let images = (0..lm2flat_index(l_max, l_max) + 1)
         .into_par_iter()
         .map(|i| {
             let (l, m) = flat2lm_index(i as usize);
-            let mut img = Grayf32Image::new(res, res);
+
+            let mut buffer: Vec<f32> = Vec::with_capacity((res * res) as usize);
+            unsafe { buffer.set_len((res * res) as usize) }
 
             for j in 0..res {
                 let theta = PI * (j as f32 / res as f32);
-                let leg = lpmv(l as u64, m.abs() as i64, theta.cos());
+                let leg = lpmv(l as u64, m as i64, theta.cos());
                 for i in 0..res {
                     let phi = 2. * PI * (i as f32 / res as f32);
-                    let value = get_spherical_harmonics_element(l as u64, m, phi, leg);
+                    let value = get_spherical_harmonics_element(l as u64, m as i64, phi, leg);
 
-                    img.put_pixel(i, j, Luma::from([value]));
+                    buffer[(j * res + i) as usize] = value;
                 }
             }
-            return img;
+
+            return buffer;
         })
-        .collect::<Vec<Grayf32Image>>();
+        .collect::<Vec<Vec<f32>>>();
+    return images;
 }

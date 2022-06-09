@@ -43,7 +43,7 @@ impl RenderPool {
                 Arc::new(Mutex::new(OfflineRenderer::new(
                     128,
                     RenderSettings {
-                        point_size: 10.0,
+                        point_size: 10,
                         ..RenderSettings::default()
                     },
                 )))

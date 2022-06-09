@@ -1,11 +1,7 @@
-use std::{fs::File, io::BufWriter};
-
-use bincode::{serialize_into, serialized_size};
 use las::{Read as LasRead, Reader};
 use nalgebra::{center, Point3, Vector4};
 use pbr::ProgressBar;
-use punctum::{export_ply, Octree, PointCloud, TeeWriter, Vertex};
-use rand::{prelude::StdRng, Rng, SeedableRng};
+use punctum::{export_ply, PointCloud, Vertex};
 use std::path::PathBuf;
 use structopt::StructOpt;
 

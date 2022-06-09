@@ -23,6 +23,7 @@ mod io;
 mod octree;
 mod pointcloud;
 mod renderer;
+pub mod sh;
 mod tee;
 mod vertex;
 
