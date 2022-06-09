@@ -122,10 +122,10 @@ def get_spherical_harmonics_element(
     m_abs = abs(m)
     assert m_abs <= l, "absolute value of order m must be <= degree l"
 
-    N = sqrt((2 * l + 1) / (4 * pi))
     leg = lpmv(l, m_abs, torch.cos(theta))
 
     if m == 0:
+        N = sqrt((2 * l + 1) / (4 * pi))
         return N * leg
 
     if m > 0:
@@ -134,8 +134,7 @@ def get_spherical_harmonics_element(
         Y = torch.sin(m_abs * phi)
 
     Y *= leg
-    N *= sqrt(2.0 / pochhammer(l - m_abs + 1, 2 * m_abs))
-    Y *= N
+    Y *= sqrt(2.0 / pochhammer(l - m_abs + 1, 2 * m_abs))
     return Y
 
 
@@ -195,7 +194,6 @@ def evalute_sh(coefs: int, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
 
 def calc_sh(l_max: int, coords: torch.Tensor) -> torch.Tensor:
-    assert (l_max + 1) ** 2 < coords.shape[0], "to few samples"
     values = torch.zeros((coords.shape[0], (l_max + 1) ** 2), device=coords.device)
     clear_spherical_harmonics_cache()
     for l in range(l_max + 1):
@@ -220,6 +218,7 @@ def calc_coeficients(
         Assertion if (l_max+1)**2 >= N
 
     """
+    assert (l_max + 1) ** 2 < coords.shape[0], "to few samples"
     sh = calc_sh(l_max, coords)
     A = sh.T @ sh
     B = sh.T @ target
