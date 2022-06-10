@@ -55,8 +55,10 @@ fn lpmv(l: u64, m: i64, x: f32) -> f32 {
 
 fn get_spherical_harmonics_element(l: u64, m: i64, phi: f32, leg: f32) -> f32 {
     let m_abs = m.abs() as u64;
+
+    let n = ((2. * l as f32 + 1.) / (4. * PI)).sqrt();
+
     if m == 0 {
-        let n = ((2. * l as f32 + 1.) / (4. * PI)).sqrt();
         return leg * n;
     }
 
@@ -66,26 +68,21 @@ fn get_spherical_harmonics_element(l: u64, m: i64, phi: f32, leg: f32) -> f32 {
         (m_abs as f32 * phi).sin()
     };
 
-    y *= leg * (2.0 / pochhammer(l - m_abs + 1, 2 * m_abs) as f32).sqrt();
+    y *= n * leg * (2.0 / pochhammer(l - m_abs + 1, 2 * m_abs) as f32).sqrt();
     return y;
 }
 
 #[inline]
 pub fn lm2flat_index(l: u64, m: u64) -> usize {
-    ((l + 1) * l / 2 + m) as usize
+    ((l * (l + 1)) as i64 + m as i64) as usize
 }
 
-/// useses Triangular roots to calculate l and m
-/// for a given index i
-/// see https://en.wikipedia.org/wiki/Triangular_number
 #[inline]
-pub fn flat2lm_index(i: usize) -> (u64, u64) {
-    let l = ((((8 * i + 1) as f32).sqrt() - 1.) / 2.) as u64;
-    let m = i as u64 - (l * (l + 1) / 2) as u64;
-    return (l, m);
+pub fn flat2lm_index(i: usize) -> (u64, i64) {
+    let l = (i as f32).sqrt() as u64;
+    let m = (l * (l + 1)) as i64 - i as i64;
+    return (l, -m);
 }
-
-pub type Grayf32Image = ImageBuffer<Luma<f32>, Vec<f32>>;
 
 pub fn calc_sh(l_max: u64, resolution: u32) -> Vec<Vec<f32>> {
     let res = resolution;
