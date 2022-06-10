@@ -9,8 +9,8 @@ layout(set = 0, binding = 2) uniform SphericalHarmonicsCoefficients{
 } sh;
 
 ivec2 flat2lm_index(int i) {
-    int l = int((sqrt(8 * i + 1) - 1.) / 2.);
-    int m = i - (l * (l + 1) / 2);
+    int l = int(sqrt(i));
+    int m = l * (l+1) - i;
     return ivec2(l, m);
 }
 
@@ -30,16 +30,12 @@ void main() {
 
     int num_sh = textureSize(img_shs,0).z;
 
-    ivec2 n_sample_pos = ivec2((idx.x-size.x/4) % size.x,idx.y);
     vec4 color = vec4(0);
     for(int i=0;i<num_sh;i++){
         ivec2 lm = flat2lm_index(i);
         vec4 coefs = sh.coefs[lm2flat_index(lm.x,lm.y)];
-        color +=  texture(img_shs, vec3(vec2(idx)/vec2(size),i)).r;
-        if(lm.y != 0){
-            coefs = sh.coefs[lm2flat_index(lm.x,-lm.y)];
-            //color +=  texture(img_shs, vec3((vec2(n_sample_pos))/vec2(size),i)).r;
-        }
+        color += coefs * texture(img_shs, vec3(vec2(idx)/vec2(size),i)).r;
+        // color +=  texture(img_shs, vec3(vec2(idx)/vec2(size),i)).r;
     }
-    imageStore(img_out, idx, vec4((color.rgb+1)/2,1.));
+    imageStore(img_out, idx, vec4(color.rgb,1.));
 }

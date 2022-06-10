@@ -1,4 +1,5 @@
 use image::{ImageBuffer, Luma};
+use num_traits::Float;
 use rayon::prelude::*;
 use std::f32::consts::PI;
 
@@ -53,23 +54,27 @@ fn lpmv(l: u64, m: i64, x: f32) -> f32 {
     return y;
 }
 
-fn get_spherical_harmonics_element(l: u64, m: i64, phi: f32, leg: f32) -> f32 {
+fn phi_independent_part(l: u64, m: i64, thata: f32) -> f32 {
     let m_abs = m.abs() as u64;
+    let norm = ((2 * l + 1) as f32 / (4. * PI)).sqrt();
+    let p = norm * lpmv(l, m_abs as i64, thata.cos());
+    return p;
+}
 
-    let n = ((2. * l as f32 + 1.) / (4. * PI)).sqrt();
-
+fn get_spherical_harmonics_element(l: u64, m: i64, phi: f32, p: f32) -> f32 {
+    let m_abs = m.abs() as u64;
     if m == 0 {
-        return leg * n;
-    }
-
-    let mut y = if m > 0 {
-        (m as f32 * phi).cos()
+        return p;
     } else {
-        (m_abs as f32 * phi).sin()
-    };
-
-    y *= n * leg * (2.0 / pochhammer(l - m_abs + 1, 2 * m_abs) as f32).sqrt();
-    return y;
+        let pre = (1.).powf(m_abs as f32)
+            * (2.0 / pochhammer(l - m_abs + 1, 2 * m_abs) as f32).sqrt()
+            * p;
+        if m < 0 {
+            return pre * (phi * m_abs as f32).sin();
+        } else {
+            return pre * (phi * m_abs as f32).cos();
+        }
+    }
 }
 
 #[inline]
@@ -97,10 +102,10 @@ pub fn calc_sh(l_max: u64, resolution: u32) -> Vec<Vec<f32>> {
 
             for j in 0..res {
                 let theta = PI * (j as f32 / res as f32);
-                let leg = lpmv(l as u64, m as i64, theta.cos());
+                let p = phi_independent_part(l, m, theta);
                 for i in 0..res {
                     let phi = 2. * PI * (i as f32 / res as f32);
-                    let value = get_spherical_harmonics_element(l as u64, m as i64, phi, leg);
+                    let value = get_spherical_harmonics_element(l as u64, m as i64, phi, p);
 
                     buffer[(j * res + i) as usize] = value;
                 }

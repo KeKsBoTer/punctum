@@ -1,38 +1,41 @@
-use std::fs::{self, File};
+use std::fs;
 
-use image::{ImageBuffer, Rgba};
-use nalgebra::{Vector3, Vector4};
+use image::{GrayImage, ImageBuffer, Luma, Rgba};
+use nalgebra::Vector4;
 use punctum::sh::calc_sh;
 
 use punctum::select_physical_device;
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, ImmutableBuffer},
+    buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo},
     format::Format,
     image::{view::ImageView, ImageDimensions, ImmutableImage, StorageImage},
     instance::{Instance, InstanceCreateInfo},
-    pipeline::{
-        layout::PipelineLayoutCreateInfo, ComputePipeline, Pipeline, PipelineBindPoint,
-        PipelineLayout,
-    },
+    pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
     sampler::{Sampler, SamplerCreateInfo},
     sync::{self, GpuFuture},
 };
 
-// fn main_imgs() {
-//     let l_max = 5;
+fn main() {
+    let l_max = 5;
 
-//     let res = 1000;
-//     let images = calc_sh(l_max, res);
-//     for (i, img_data) in images.into_iter().enumerate() {
-//         let img = GrayImage::from_fn(res as u32, res as u32, |x, y| {
-//             Luma::from([((img_data.get_pixel(x, y)[0] + 1.) / 2. * 255.) as u8])
-//         });
-//         img.save(format!("sh_tests/test_{}.png", i)).unwrap();
-//     }
-// }
+    let res = 1024;
+    let images = calc_sh(l_max, res);
+    for (i, img_data) in images.into_iter().enumerate() {
+        // let img = GrayImage::from_fn(res as u32, res as u32, |x, y| {
+        //     Luma::from([((img_data[(y * res + x) as usize] + 1.) / 2. * 255.) as u8])
+        // });
+        let data = img_data
+            .iter()
+            .map(|v| v.to_le_bytes().to_vec())
+            .flatten()
+            .collect::<Vec<u8>>();
+
+        fs::write(format!("sh_tests/test_{}.bin", i), data).unwrap();
+    }
+}
 
 mod cs {
     vulkano_shaders::shader! {
@@ -56,7 +59,7 @@ fn read_coefs() -> Vec<Vector4<f32>> {
     coefs
 }
 
-fn main() {
+fn main2() {
     let instance = Instance::new(InstanceCreateInfo {
         ..Default::default()
     })
@@ -167,7 +170,7 @@ fn main() {
         [
             WriteDescriptorSet::image_view_sampler(0, sh_images_view.clone(), sampler.clone()),
             WriteDescriptorSet::image_view(1, target_img_view),
-            WriteDescriptorSet::buffer(2, coef_buffer),
+            WriteDescriptorSet::buffer(2, coef_buffer.clone()),
         ],
     )
     .unwrap();
