@@ -1,4 +1,7 @@
+use std::fs::{self, File};
+
 use image::{ImageBuffer, Rgba};
+use nalgebra::{Vector3, Vector4};
 use punctum::sh::calc_sh;
 
 use punctum::select_physical_device;
@@ -36,6 +39,21 @@ mod cs {
         ty: "compute",
         path: "src/bin/sh_test.comp"
     }
+}
+
+fn read_coefs() -> Vec<Vector4<f32>> {
+    let contents = fs::read_to_string("sample_coefs.csv").unwrap();
+    let coefs = contents
+        .split("\n")
+        .map(|line| {
+            let n = line
+                .split(" ")
+                .map(|s| s.parse::<f32>().unwrap())
+                .collect::<Vec<f32>>();
+            Vector4::new(n[0], n[1], n[2], 1.)
+        })
+        .collect::<Vec<Vector4<f32>>>();
+    coefs
 }
 
 fn main() {
@@ -111,6 +129,11 @@ fn main() {
     )
     .unwrap();
 
+    let coefs = read_coefs();
+    let coef_buffer =
+        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::uniform_buffer(), false, coefs)
+            .unwrap();
+
     let (local_size_x, local_size_y) = match device.physical_device().properties().subgroup_size {
         Some(subgroup_size) => (32, subgroup_size / 2),
         // Using fallback constant
@@ -136,9 +159,6 @@ fn main() {
     let layout = pipeline.layout();
 
     let ds_layout = layout.set_layouts().get(0).unwrap();
-    // for b in ds_layout.bindings() {
-    //     println!("id={}, {:?}", *b.0, b.1);
-    // }
 
     let target_img_view = ImageView::new_default(target_image.clone()).unwrap();
 
@@ -147,6 +167,7 @@ fn main() {
         [
             WriteDescriptorSet::image_view_sampler(0, sh_images_view.clone(), sampler.clone()),
             WriteDescriptorSet::image_view(1, target_img_view),
+            WriteDescriptorSet::buffer(2, coef_buffer),
         ],
     )
     .unwrap();

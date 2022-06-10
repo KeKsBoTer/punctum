@@ -122,10 +122,10 @@ def get_spherical_harmonics_element(
     m_abs = abs(m)
     assert m_abs <= l, "absolute value of order m must be <= degree l"
 
+    N = sqrt((2 * l + 1) / (4 * pi))
     leg = lpmv(l, m_abs, torch.cos(theta))
 
     if m == 0:
-        N = sqrt((2 * l + 1) / (4 * pi))
         return N * leg
 
     if m > 0:
@@ -134,7 +134,8 @@ def get_spherical_harmonics_element(
         Y = torch.sin(m_abs * phi)
 
     Y *= leg
-    Y *= sqrt(2.0 / pochhammer(l - m_abs + 1, 2 * m_abs))
+    N *= sqrt(2.0 / pochhammer(l - m_abs + 1, 2 * m_abs))
+    Y *= N
     return Y
 
 
