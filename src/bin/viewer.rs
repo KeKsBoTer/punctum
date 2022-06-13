@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::time::Instant;
 
 use pbr::ProgressBar;
@@ -19,9 +18,8 @@ use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton,
 use winit::event_loop::ControlFlow;
 
 use punctum::{
-    export_ply, get_render_pass, select_physical_device, CameraController, Octree,
-    PerspectiveCamera, PointCloud, PointCloudGPU, PointCloudRenderer, SurfaceFrame, TeeReader,
-    Viewport,
+    get_render_pass, select_physical_device, CameraController, Octree, OctreeRenderer,
+    PerspectiveCamera, SurfaceFrame, TeeReader, Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -53,15 +51,6 @@ fn main() {
 
         octree
     };
-
-    let mut pc_raw = PointCloud::from_vec(&octree.into());
-
-    pc_raw.scale_to_size(1000.);
-
-    export_ply(
-        &Path::new("test_octree.ply").to_path_buf(),
-        &((&pc_raw).into()),
-    );
 
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(InstanceCreateInfo {
@@ -122,14 +111,15 @@ fn main() {
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let pc = PointCloudGPU::from_point_cloud(device.clone(), Arc::new(pc_raw));
-
-    let mut renderer = PointCloudRenderer::new(
+    let mut renderer = OctreeRenderer::new(
         device.clone(),
         queue.clone(),
         scene_subpass,
         viewport.clone(),
+        octree.into(),
     );
+
+    renderer.set_point_size(1);
 
     let mut camera = PerspectiveCamera::new();
 
@@ -230,7 +220,8 @@ fn main() {
         }
         Event::RedrawRequested(..) => {
             renderer.set_camera(&camera);
-            let pc_cb = renderer.render_point_cloud(queue.clone(), &pc);
+
+            let pc_cb = renderer.render();
             frame.render(queue.clone(), pc_cb.clone());
         }
         _ => (),

@@ -3,14 +3,14 @@ use std::sync::Arc;
 use vulkano::{
     buffer::CpuAccessibleBuffer,
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
-        SecondaryAutoCommandBuffer, SubpassContents,
+        AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
+        PrimaryAutoCommandBuffer, SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
     image::{ImageDimensions, StorageImage},
     render_pass::RenderPass,
-    swapchain::{AcquireError, Surface},
-    sync::{self, FlushError, GpuFuture},
+    swapchain::{AcquireError, PresentFuture, Surface, SwapchainAcquireFuture},
+    sync::{self, FenceSignalFuture, FlushError, GpuFuture, JoinFuture},
 };
 use winit::window::Window;
 
@@ -89,6 +89,23 @@ pub struct SurfaceFrame {
     surface: Arc<Surface<Window>>,
 
     recreate_swapchain: bool,
+
+    fences: Vec<
+        Option<
+            Arc<
+                FenceSignalFuture<
+                    PresentFuture<
+                        CommandBufferExecFuture<
+                            JoinFuture<Box<dyn GpuFuture>, SwapchainAcquireFuture<Window>>,
+                            PrimaryAutoCommandBuffer,
+                        >,
+                        Window,
+                    >,
+                >,
+            >,
+        >,
+    >,
+    previous_fence_i: usize,
 }
 
 impl SurfaceFrame {
@@ -107,11 +124,17 @@ impl SurfaceFrame {
             render_pass,
         );
 
+        let frames_in_flight = sc.num_images();
+        let fences = vec![None; frames_in_flight];
+        let previous_fence_i = 0;
+
         SurfaceFrame {
             swapchain: sc,
             surface: surface,
 
             recreate_swapchain: false,
+            fences,
+            previous_fence_i,
         }
     }
 
@@ -162,7 +185,23 @@ impl SurfaceFrame {
 
         // submit command buffer
 
-        let execution = sync::now(self.swapchain.device().clone())
+        if let Some(image_fence) = &self.fences[image_i] {
+            image_fence.wait(None).unwrap();
+        }
+
+        let previous_future = match self.fences[self.previous_fence_i].clone() {
+            // Create a NowFuture
+            None => {
+                let mut now = sync::now(device.clone());
+                now.cleanup_finished();
+
+                now.boxed()
+            }
+            // Use the existing FenceSignalFuture
+            Some(fence) => fence.boxed(),
+        };
+
+        let future = previous_future
             .join(acquire_future)
             .then_execute(queue.clone(), command_buffer)
             .unwrap()
@@ -173,16 +212,17 @@ impl SurfaceFrame {
             )
             .then_signal_fence_and_flush();
 
-        match execution {
-            Ok(future) => {
-                future.wait(None).unwrap(); // wait for the GPU to finish
-            }
+        self.fences[image_i] = match future {
+            Ok(value) => Some(Arc::new(value)),
             Err(FlushError::OutOfDate) => {
                 self.recreate_swapchain = true;
+                None
             }
             Err(e) => {
                 println!("Failed to flush future: {:?}", e);
+                None
             }
-        }
+        };
+        self.previous_fence_i = image_i;
     }
 }

@@ -25,6 +25,9 @@ pbr = { version = "1.0.4" }
 num-traits = "0.2.14"
 structopt = "0.3"
 
+[profile.release]
+debug = 1
+
 [lib]
 name = "punctum"
 path = "src/lib.rs"

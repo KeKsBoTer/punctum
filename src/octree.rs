@@ -287,3 +287,31 @@ impl Into<Vec<Vertex<f32, f32>>> for Octree<f64, u8> {
             .collect()
     }
 }
+
+impl Into<Node<f32, f32>> for Node<f64, u8> {
+    fn into(self) -> Node<f32, f32> {
+        match self {
+            Node::Group(octants) => Node::Group(Box::new(octants.map(|octant| octant.into()))),
+            Node::Filled(points) => Node::Filled(
+                points
+                    .iter()
+                    .map(|p| (*p).into())
+                    .collect::<Vec<Vertex<f32, f32>>>(),
+            ),
+            Node::Empty => Node::Empty,
+        }
+    }
+}
+
+impl Into<Octree<f32, f32>> for Octree<f64, u8> {
+    fn into(self) -> Octree<f32, f32> {
+        Octree {
+            root: self.root.into(),
+            center: self.center.cast(),
+            size: self.size as f32,
+            max_node_size: self.max_node_size,
+            depth: self.depth,
+            num_points: self.num_points,
+        }
+    }
+}

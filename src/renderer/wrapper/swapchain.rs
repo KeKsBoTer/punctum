@@ -91,6 +91,10 @@ impl Swapchain {
         }
     }
 
+    pub fn num_images(&self) -> usize {
+        self.buffers.len()
+    }
+
     pub fn vk_swapchain(&self) -> &Arc<VulkanSwapchain<Window>> {
         &self.sc
     }

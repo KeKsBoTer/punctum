@@ -1,13 +1,12 @@
 use crate::{
     camera::{Camera, Projection},
-    pointcloud::PointCloudGPU,
     vertex::Vertex,
-    Octree, Viewport,
+    Octree, PerspectiveCamera, Viewport,
 };
-use nalgebra::Matrix4;
+use nalgebra::{vector, Matrix4, Vector3};
 use std::sync::Arc;
 use vulkano::{
-    buffer::{BufferUsage, CpuBufferPool, DeviceLocalBuffer, TypedBufferAccess},
+    buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, Queue},
@@ -23,8 +22,9 @@ use vulkano::{
     },
     render_pass::Subpass,
     shader::ShaderModule,
-    sync::{self, GpuFuture},
 };
+
+use super::UniformBuffer;
 
 mod vs {
     use bytemuck::{Pod, Zeroable};
@@ -41,7 +41,7 @@ mod vs {
         pub world: Matrix4<f32>,
         pub view: Matrix4<f32>,
         pub proj: Matrix4<f32>,
-        pub point_size: f32,
+        pub point_size: u32,
         pub znear: f32,
         pub zfar: f32,
     }
@@ -55,7 +55,7 @@ mod vs {
                 world: Matrix4::identity().into(),
                 view: Matrix4::identity().into(),
                 proj: Matrix4::identity().into(),
-                point_size: 10.,
+                point_size: 1,
                 znear: 0.01,
                 zfar: 100.,
             }
@@ -70,6 +70,11 @@ mod fs {
     }
 }
 
+struct OctantBuffer<const T: usize> {
+    length: u32,
+    points: Arc<CpuBufferPoolSubbuffer<[Vertex<f32, f32>; T], Arc<StdMemoryPool>>>,
+}
+
 pub struct OctreeRenderer {
     device: Arc<Device>,
     queue: Arc<Queue>,
@@ -77,13 +82,12 @@ pub struct OctreeRenderer {
     pipeline: Arc<GraphicsPipeline>,
     set: Arc<PersistentDescriptorSet>,
 
-    uniform_buffer_pool: Arc<CpuBufferPool<vs::UniformData, Arc<StdMemoryPool>>>,
-    uniform_buffer: Arc<DeviceLocalBuffer<vs::UniformData>>,
-    uniform_data: vs::UniformData,
+    uniforms: UniformBuffer<vs::UniformData>,
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
 
-    octree: Arc<Octree<f32, f32>>,
+    octree: Octree<f32, f32>,
+    octants: Vec<OctantBuffer<512>>,
 }
 
 impl OctreeRenderer {
@@ -92,42 +96,74 @@ impl OctreeRenderer {
         queue: Arc<Queue>,
         subpass: Subpass,
         viewport: Viewport,
-        octree: Arc<Octree<f32, f32>>,
+        octree: Octree<f32, f32>,
     ) -> Self {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
-        let pool = Arc::new(CpuBufferPool::new(device.clone(), BufferUsage::all()));
-
         let pipeline =
             Self::build_pipeline(vs.clone(), fs.clone(), subpass, viewport, device.clone());
 
-        let uniform_buffer: Arc<DeviceLocalBuffer<vs::UniformData>> = DeviceLocalBuffer::new(
+        let max_size = octree.size();
+        let center = octree.center();
+        let scale_size = 1000.;
+
+        let world =
+            Matrix4::new_scaling(scale_size / max_size) * Matrix4::new_translation(&-center.coords);
+        // let world = Matrix4::identity();
+
+        let uniforms = UniformBuffer::new(
             device.clone(),
-            BufferUsage::uniform_buffer_transfer_destination(),
-            None,
-        )
-        .unwrap();
+            Some(vs::UniformData {
+                world: world.into(),
+                ..vs::UniformData::default()
+            }),
+        );
 
         let layout = pipeline.layout().set_layouts().get(0).unwrap();
 
         let set = PersistentDescriptorSet::new(
             layout.clone(),
-            [WriteDescriptorSet::buffer(0, uniform_buffer.clone())],
+            [WriteDescriptorSet::buffer(0, uniforms.buffer().clone())],
         )
         .unwrap();
 
+        let pool: CpuBufferPool<[Vertex<f32, f32>; 512]> =
+            CpuBufferPool::new(device.clone(), BufferUsage::vertex_buffer());
+
+        println!("center: {:?}, size: {}", center, max_size);
+
+        let octants = octree
+            .into_iter()
+            .map(|octant| {
+                let mut data = [Vertex::<f32, f32>::default(); 512];
+                for (i, p) in octant.data.iter().enumerate() {
+                    data[i] = Vertex {
+                        // TODO move this operation to the world matrix
+                        position: p.position.into(), //((p.position - center) / max_size * scale_size).into(),
+                        color: p.color,
+                    };
+                }
+                OctantBuffer {
+                    length: octant.data.len() as u32,
+                    points: pool.next(data).unwrap(),
+                }
+            })
+            .collect::<Vec<OctantBuffer<512>>>();
+
+        // let indirect_args_pool = CpuBufferPool::new(device.clone(), BufferUsage::all());
+
+        println!("num octants: {:}", octants.len());
         OctreeRenderer {
             device,
             queue,
             pipeline,
             set,
-            uniform_buffer_pool: pool,
-            uniform_buffer,
-            uniform_data: vs::UniformData::default(),
+            uniforms,
             vs,
             fs,
             octree,
+            octants,
         }
     }
 
@@ -155,6 +191,8 @@ impl OctreeRenderer {
             .unwrap()
     }
 
+    pub fn frustum_culling(&mut self, camera: &PerspectiveCamera) {}
+
     pub fn set_viewport(&mut self, viewport: Viewport) {
         self.pipeline = Self::build_pipeline(
             self.vs.clone(),
@@ -166,6 +204,16 @@ impl OctreeRenderer {
     }
 
     pub fn render(&self) -> Arc<SecondaryAutoCommandBuffer> {
+        let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
+        let set = PersistentDescriptorSet::new(
+            layout.clone(),
+            [WriteDescriptorSet::buffer(
+                0,
+                self.uniforms.pool_chunk().clone(),
+            )],
+        )
+        .unwrap();
+
         let mut builder = AutoCommandBufferBuilder::secondary_graphics(
             self.device.clone(),
             self.queue.family(),
@@ -180,57 +228,32 @@ impl OctreeRenderer {
                 PipelineBindPoint::Graphics,
                 self.pipeline.layout().clone(),
                 0,
-                self.set.clone(),
+                set.clone(),
             );
-        // .bind_vertex_buffers(0, pc_buffer.clone())
-        // .draw(pc_buffer.len() as u32, 1, 0, 0)
-        // .unwrap();
+
+        for octant in self.octants.iter() {
+            builder
+                .bind_vertex_buffers(0, octant.points.clone())
+                .draw(octant.length, 1, 0, 0)
+                .unwrap();
+        }
         Arc::new(builder.build().unwrap())
     }
 
-    fn update_uniforms(&mut self) {
-        let new_uniform_buffer = self.uniform_buffer_pool.next(self.uniform_data).unwrap();
-
-        let mut builder = AutoCommandBufferBuilder::primary(
-            self.device.clone(),
-            self.queue.family(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-        .unwrap();
-
-        builder
-            .copy_buffer(new_uniform_buffer, self.uniform_buffer.clone())
-            .unwrap();
-
-        let cb = builder.build().unwrap();
-
-        // TODO dont do wait here but in render
-        sync::now(self.device.clone())
-            .then_execute(self.queue.clone(), cb)
-            .unwrap()
-            .then_signal_fence_and_flush()
-            .unwrap()
-            .wait(None)
-            .unwrap();
-    }
-
-    pub fn set_point_size(&mut self, point_size: f32) {
-        self.uniform_data = vs::UniformData {
+    pub fn set_point_size(&mut self, point_size: u32) {
+        self.uniforms.update(vs::UniformData {
             point_size,
-            ..self.uniform_data
-        };
-        self.update_uniforms();
+            ..*self.uniforms.data()
+        });
     }
 
     pub fn set_camera(&mut self, camera: &Camera<impl Projection>) {
-        self.uniform_data = vs::UniformData {
-            world: Matrix4::identity().into(),
+        self.uniforms.update(vs::UniformData {
             view: camera.view().clone().into(),
             proj: camera.projection().clone().into(),
             znear: *camera.znear(),
             zfar: *camera.zfar(),
-            ..self.uniform_data
-        };
-        self.update_uniforms();
+            ..*self.uniforms.data()
+        });
     }
 }
