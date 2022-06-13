@@ -1,7 +1,7 @@
 use std::fs;
 
 use image::{ImageBuffer, Rgba};
-use punctum::sh::{calc_sh, lm2flat_index};
+use punctum::sh::{calc_sh_grid, lm2flat_index};
 
 use punctum::select_physical_device;
 use vulkano::{
@@ -21,7 +21,7 @@ fn main2() {
     let l_max = 5;
 
     let res = 1024;
-    let images = calc_sh(l_max, res);
+    let images = calc_sh_grid(l_max, res);
     for (i, img_data) in images.into_iter().enumerate() {
         let data = img_data
             .iter()
@@ -87,7 +87,7 @@ fn main() {
     let img_size = 1024;
     let lmax = 10;
 
-    let images = calc_sh(lmax, img_size);
+    let images = calc_sh_grid(lmax, img_size);
     println!("num shs: {}", images.len());
     let dimensions = ImageDimensions::Dim2d {
         width: img_size,

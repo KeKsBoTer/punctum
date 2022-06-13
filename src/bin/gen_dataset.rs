@@ -71,31 +71,22 @@ fn export_ply(
     let mut file = BufWriter::new(File::create(output_file).unwrap());
 
     let mut ply = Ply::<punctum::Vertex<f32, f32>>::new();
-    let mut elm_def = punctum::Vertex::<f32, f32>::element_def("vertex".to_string());
-    elm_def.count = pc.points().len();
     ply.header.encoding = Encoding::BinaryLittleEndian;
-    ply.header.elements.add(elm_def.clone());
 
-    let mut elm_def = Vertex::<f32, f32>::element_def("camera".to_string());
-    elm_def.count = observed_colors.len();
-    ply.header.elements.add(elm_def);
+    let mut elm_def_vertex = punctum::Vertex::<f32, f32>::element_def("vertex".to_string());
+    elm_def_vertex.count = pc.points().len();
+    // ply.header.elements.add(elm_def.clone());
+
+    let mut elm_def_camera = Vertex::<f32, f32>::element_def("camera".to_string());
+    elm_def_camera.count = observed_colors.len();
+    // ply.header.elements.add(elm_def);
 
     let w = Writer::<punctum::Vertex<f32, f32>>::new();
     w.write_header(&mut file, &ply.header).unwrap();
-    w.write_payload_of_element(
-        &mut file,
-        pc.points(),
-        ply.header.elements.get("vertex").unwrap(),
-        &ply.header,
-    )
-    .unwrap();
-    w.write_payload_of_element(
-        &mut file,
-        observed_colors,
-        ply.header.elements.get("camera").unwrap(),
-        &ply.header,
-    )
-    .unwrap();
+    w.write_payload_of_element(&mut file, pc.points(), &elm_def_vertex, &ply.header)
+        .unwrap();
+    w.write_payload_of_element(&mut file, observed_colors, &elm_def_camera, &ply.header)
+        .unwrap();
 }
 
 fn load_cameras() -> Vec<OrthographicCamera> {
@@ -201,7 +192,6 @@ fn main() {
                 .zip(cameras.clone())
                 .map(|(color, cam)| Vertex {
                     position: *cam.position(),
-                    // normal: Vector3::zeros(),
                     color: Vector4::from(color.0).cast() / 255.,
                 })
                 .collect();
