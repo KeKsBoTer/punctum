@@ -1,3 +1,4 @@
+use nalgebra::Vector2;
 use num_traits::Float;
 use rayon::prelude::*;
 use std::f32::consts::PI;
@@ -88,7 +89,7 @@ pub fn flat2lm_index(i: usize) -> (u64, i64) {
     return (l, -m);
 }
 
-pub fn calc_sh(l_max: u64, resolution: u32) -> Vec<Vec<f32>> {
+pub fn calc_sh_grid(l_max: u64, resolution: u32) -> Vec<Vec<f32>> {
     let res = resolution;
 
     let images = (0..lm2flat_index(l_max, l_max) + 1)
@@ -114,4 +115,24 @@ pub fn calc_sh(l_max: u64, resolution: u32) -> Vec<Vec<f32>> {
         })
         .collect::<Vec<Vec<f32>>>();
     return images;
+}
+
+pub fn calc_sh_sparse(l_max: u64, coords: Vec<Vector2<f32>>) -> Vec<Vec<f32>> {
+    (0..lm2flat_index(l_max, l_max) + 1)
+        .into_par_iter()
+        .map(|i| {
+            let (l, m) = flat2lm_index(i as usize);
+
+            coords
+                .iter()
+                .map(|pos| {
+                    let theta = pos.x;
+                    let phi = pos.y;
+                    let p = phi_independent_part(l, m, theta);
+                    let value = get_spherical_harmonics_element(l as u64, m as i64, phi, p);
+                    return value;
+                })
+                .collect::<Vec<f32>>()
+        })
+        .collect::<Vec<Vec<f32>>>()
 }

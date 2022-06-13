@@ -58,6 +58,10 @@ impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
             "x" => Some(self.position[0].to_f32().unwrap()),
             "y" => Some(self.position[1].to_f32().unwrap()),
             "z" => Some(self.position[2].to_f32().unwrap()),
+            "red" => Some(<C as Color>::to_f32(self.color[0])),
+            "green" => Some(<C as Color>::to_f32(self.color[1])),
+            "blue" => Some(<C as Color>::to_f32(self.color[2])),
+            "alpha" => Some(<C as Color>::to_f32(self.color[3])),
             _ => None,
         }
     }
