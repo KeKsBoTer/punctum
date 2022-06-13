@@ -1,4 +1,3 @@
-use image::{ImageBuffer, Luma};
 use num_traits::Float;
 use rayon::prelude::*;
 use std::f32::consts::PI;

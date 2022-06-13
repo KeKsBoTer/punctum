@@ -1,8 +1,7 @@
 use std::fs;
 
-use image::{GrayImage, ImageBuffer, Luma, Rgba};
-use nalgebra::Vector4;
-use punctum::sh::calc_sh;
+use image::{ImageBuffer, Rgba};
+use punctum::sh::{calc_sh, lm2flat_index};
 
 use punctum::select_physical_device;
 use vulkano::{
@@ -18,15 +17,12 @@ use vulkano::{
     sync::{self, GpuFuture},
 };
 
-fn main() {
+fn main2() {
     let l_max = 5;
 
     let res = 1024;
     let images = calc_sh(l_max, res);
     for (i, img_data) in images.into_iter().enumerate() {
-        // let img = GrayImage::from_fn(res as u32, res as u32, |x, y| {
-        //     Luma::from([((img_data[(y * res + x) as usize] + 1.) / 2. * 255.) as u8])
-        // });
         let data = img_data
             .iter()
             .map(|v| v.to_le_bytes().to_vec())
@@ -40,26 +36,27 @@ fn main() {
 mod cs {
     vulkano_shaders::shader! {
         ty: "compute",
-        path: "src/bin/sh_test.comp"
+        path: "src/bin/sh_test.comp",
     }
 }
 
-fn read_coefs() -> Vec<Vector4<f32>> {
+fn read_coefs() -> Vec<[f32; 4]> {
     let contents = fs::read_to_string("sample_coefs.csv").unwrap();
     let coefs = contents
         .split("\n")
+        .filter(|s| s.len() > 0)
         .map(|line| {
             let n = line
                 .split(" ")
                 .map(|s| s.parse::<f32>().unwrap())
                 .collect::<Vec<f32>>();
-            Vector4::new(n[0], n[1], n[2], 1.)
+            [n[0], n[1], n[2], 1.]
         })
-        .collect::<Vec<Vector4<f32>>>();
+        .collect::<Vec<[f32; 4]>>();
     coefs
 }
 
-fn main2() {
+fn main() {
     let instance = Instance::new(InstanceCreateInfo {
         ..Default::default()
     })
@@ -87,8 +84,9 @@ fn main2() {
 
     let queue = queues.next().unwrap();
 
-    let img_size = 128;
-    let lmax = 5;
+    let img_size = 1024;
+    let lmax = 10;
+
     let images = calc_sh(lmax, img_size);
     println!("num shs: {}", images.len());
     let dimensions = ImageDimensions::Dim2d {
@@ -107,6 +105,13 @@ fn main2() {
         queue.clone(),
     )
     .unwrap();
+
+    sync::now(device.clone())
+        .join(future)
+        .then_signal_fence_and_flush()
+        .unwrap()
+        .wait(None)
+        .unwrap();
 
     let sh_images_view = ImageView::new_default(sh_images.clone()).unwrap();
 
@@ -131,11 +136,6 @@ fn main2() {
         (0..render_size * render_size * 4).map(|_| 0u8),
     )
     .unwrap();
-
-    let coefs = read_coefs();
-    let coef_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::uniform_buffer(), false, coefs)
-            .unwrap();
 
     let (local_size_x, local_size_y) = match device.physical_device().properties().subgroup_size {
         Some(subgroup_size) => (32, subgroup_size / 2),
@@ -165,54 +165,65 @@ fn main2() {
 
     let target_img_view = ImageView::new_default(target_image.clone()).unwrap();
 
-    let set = PersistentDescriptorSet::new(
-        ds_layout.clone(),
-        [
-            WriteDescriptorSet::image_view_sampler(0, sh_images_view.clone(), sampler.clone()),
-            WriteDescriptorSet::image_view(1, target_img_view),
-            WriteDescriptorSet::buffer(2, coef_buffer.clone()),
-        ],
-    )
-    .unwrap();
+    for l in 0..(lmax + 1) {
+        let coefs = &read_coefs()[0..lm2flat_index(l, l) + 1];
 
-    let mut builder = AutoCommandBufferBuilder::primary(
-        device.clone(),
-        queue.family(),
-        CommandBufferUsage::OneTimeSubmit,
-    )
-    .unwrap();
-
-    let group_count_x = if render_size / spec_consts.constant_0 > 0 {
-        render_size / spec_consts.constant_0
-    } else {
-        1
-    };
-    let group_count_y = if render_size / spec_consts.constant_1 > 0 {
-        render_size / spec_consts.constant_1
-    } else {
-        1
-    };
-
-    builder
-        .bind_pipeline_compute(pipeline.clone())
-        .bind_descriptor_sets(PipelineBindPoint::Compute, layout.clone(), 0, set)
-        .dispatch([group_count_x, group_count_y, 1])
-        .unwrap()
-        .copy_image_to_buffer(target_image.clone(), cpu_buffer.clone())
+        let coef_buffer = CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage::storage_buffer(),
+            false,
+            coefs.iter().map(|v| *v),
+        )
         .unwrap();
 
-    let command_buffer = builder.build().unwrap();
-
-    sync::now(device.clone())
-        .join(future)
-        .then_execute(queue.clone(), command_buffer)
-        .unwrap()
-        .then_signal_fence_and_flush()
-        .unwrap()
-        .wait(None)
+        let set = PersistentDescriptorSet::new(
+            ds_layout.clone(),
+            [
+                WriteDescriptorSet::image_view_sampler(0, sh_images_view.clone(), sampler.clone()),
+                WriteDescriptorSet::image_view(1, target_img_view.clone()),
+                WriteDescriptorSet::buffer(2, coef_buffer.clone()),
+            ],
+        )
         .unwrap();
 
-    let buffer_content = cpu_buffer.read().unwrap();
-    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(1024, 1024, &buffer_content[..]).unwrap();
-    image.save("image.png").unwrap();
+        let mut builder = AutoCommandBufferBuilder::primary(
+            device.clone(),
+            queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        let group_count_x = if render_size / spec_consts.constant_0 > 0 {
+            render_size / spec_consts.constant_0
+        } else {
+            1
+        };
+        let group_count_y = if render_size / spec_consts.constant_1 > 0 {
+            render_size / spec_consts.constant_1
+        } else {
+            1
+        };
+
+        builder
+            .bind_pipeline_compute(pipeline.clone())
+            .bind_descriptor_sets(PipelineBindPoint::Compute, layout.clone(), 0, set)
+            .dispatch([group_count_x, group_count_y, 1])
+            .unwrap()
+            .copy_image_to_buffer(target_image.clone(), cpu_buffer.clone())
+            .unwrap();
+
+        let command_buffer = builder.build().unwrap();
+
+        sync::now(device.clone())
+            .then_execute(queue.clone(), command_buffer)
+            .unwrap()
+            .then_signal_fence_and_flush()
+            .unwrap()
+            .wait(None)
+            .unwrap();
+
+        let buffer_content = cpu_buffer.read().unwrap();
+        let image = ImageBuffer::<Rgba<u8>, _>::from_raw(1024, 1024, &buffer_content[..]).unwrap();
+        image.save(format!("sh_tests/image_{}.png", l)).unwrap();
+    }
 }
