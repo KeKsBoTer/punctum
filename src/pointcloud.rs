@@ -10,7 +10,7 @@ use crate::vertex::{BaseColor, BaseFloat, Vertex};
 
 pub struct PointCloud<F: BaseFloat, C: BaseColor> {
     data: Vec<Vertex<F, C>>,
-    bbox: BoundingBox<F>,
+    bbox: CubeBoundingBox<F>,
 }
 
 impl PointCloud<f32, f32> {
@@ -28,7 +28,7 @@ impl PointCloud<f32, f32> {
         let ply = ply.unwrap();
 
         let points = ply.payload.get("vertex").unwrap().clone();
-        let bbox = BoundingBox::from_points(&points);
+        let bbox = CubeBoundingBox::from_points(&points);
 
         PointCloud {
             data: points,
@@ -52,7 +52,7 @@ impl Into<PointCloud<f32, u8>> for &PointCloud<f32, f32> {
 
 impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
     pub fn from_vec(points: &Vec<Vertex<F, C>>) -> Self {
-        let bbox = BoundingBox::from_points(points);
+        let bbox = CubeBoundingBox::from_points(points);
         PointCloud {
             data: points.clone(),
             bbox: bbox,
@@ -83,12 +83,12 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
         self.data.iter_mut().for_each(|p| {
             p.position = (&p.position - &center.coords) / max_size.clone();
         });
-        self.bbox = BoundingBox::from_points(&self.data);
+        self.bbox = CubeBoundingBox::from_points(&self.data);
     }
 
     pub fn scale_to_size(&mut self, size: F) {
         let center = self.bbox.center();
-        let mut max_size = self.bbox.size().amax();
+        let mut max_size = self.bbox.size();
 
         // if we have only one point in the pointcloud we would divide by 0 later
         // so just set it to 1
@@ -99,10 +99,10 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
         self.data.iter_mut().for_each(|p| {
             p.position = (&p.position - &center.coords) / max_size.clone() * size;
         });
-        self.bbox = BoundingBox::from_points(&self.data);
+        self.bbox = CubeBoundingBox::from_points(&self.data);
     }
 
-    pub fn bounding_box(&self) -> &BoundingBox<F> {
+    pub fn bounding_box(&self) -> &CubeBoundingBox<F> {
         &self.bbox
     }
 
@@ -141,34 +141,30 @@ impl PointCloudGPU {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct BoundingBox<F: BaseFloat> {
-    pub min: Point3<F>,
-    pub max: Point3<F>,
+pub struct CubeBoundingBox<F: BaseFloat> {
+    center: Point3<F>,
+    size: F,
 }
 
-impl<F: BaseFloat> BoundingBox<F> {
-    pub fn new(p1: Point3<F>, p2: Point3<F>) -> Self {
-        BoundingBox {
-            min: BoundingBox::elm_min(&p1, &p2),
-            max: BoundingBox::elm_max(&p1, &p2),
-        }
+impl<F: BaseFloat> CubeBoundingBox<F> {
+    pub fn new(center: Point3<F>, size: F) -> Self {
+        Self { center, size }
     }
 
-    pub fn center(&self) -> Point3<F> {
-        center(&self.max, &self.min)
+    pub fn center(&self) -> &Point3<F> {
+        &self.center
     }
 
-    pub fn size(&self) -> Vector3<F> {
-        &self.max - &self.min
+    pub fn size(&self) -> F {
+        self.size
     }
 
     pub fn contains(&self, p: Point3<F>) -> bool {
-        self.min.x <= p.x
-            && self.min.y <= p.y
-            && self.min.z <= p.z
-            && self.max.x >= p.x
-            && self.max.y >= p.y
-            && self.max.z >= p.z
+        let half = F::from_subset(&0.5);
+        let half_size = Vector3::new(self.size, self.size, self.size) * half;
+        let min = self.center - half_size;
+        let max = self.center + half_size;
+        min.x <= p.x && min.y <= p.y && min.z <= p.z && max.x >= p.x && max.y >= p.y && max.z >= p.z
     }
 
     fn elm_min(p1: &Point3<F>, p2: &Point3<F>) -> Point3<F> {
@@ -194,12 +190,32 @@ impl<F: BaseFloat> BoundingBox<F> {
         let mut max_corner = Point3::new(min_f, min_f, min_f);
         for v in points.iter() {
             let p: &Point3<F> = &v.position;
-            min_corner = BoundingBox::elm_min(&p, &min_corner);
-            max_corner = BoundingBox::elm_max(&p, &max_corner);
+            min_corner = Self::elm_min(&p, &min_corner);
+            max_corner = Self::elm_max(&p, &max_corner);
         }
-        BoundingBox {
-            min: min_corner,
-            max: max_corner,
+        Self {
+            center: center(&min_corner, &max_corner),
+            size: (max_corner - min_corner).amax(),
         }
     }
+
+    // pub fn corners(&self) -> [Vector3<F>; 8] {
+    //     let size = self.size();
+    //     [self.min,
+    //     self.min + Vector3::new(size.x,0,0),
+    //     self.min + Vector3::new(size.x,size.y,0),
+    //     ]
+    // }
+
+    // pub fn points_visible(&self, projection: Matrix4<f32>) -> bool {
+    //     let points = [];
+
+    //     points
+    //         .map(|p| {
+    //             let screen_space = view_transform * p.to_homogeneous();
+    //             let n_pos = screen_space.xyz() / screen_space.w;
+    //             n_pos.abs() <= Vector3::new(1., 1., 1.)
+    //         })
+    //         .contains(&true)
+    // }
 }

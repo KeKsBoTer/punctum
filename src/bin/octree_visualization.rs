@@ -2,7 +2,7 @@ use std::{f32::consts::PI, fs::File, io::BufReader, path::PathBuf, sync::Arc};
 
 use nalgebra::Vector4;
 use pbr::ProgressBar;
-use punctum::{export_ply, BoundingBox, Octree, PointCloud, TeeReader, Vertex};
+use punctum::{export_ply, CubeBoundingBox, Octree, PointCloud, TeeReader, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use structopt::StructOpt;
 
@@ -69,7 +69,7 @@ fn main() {
                 })
                 .collect::<Vec<Vertex<f32, u8>>>(),
         );
-        bboxes.push(BoundingBox::from_points(octant.data).size());
+        bboxes.push(CubeBoundingBox::from_points(octant.data).size());
         pb.inc();
     }
     println!("num_points: {}", points.len());

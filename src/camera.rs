@@ -3,7 +3,7 @@ use nalgebra::{vector, Matrix4, Point3, Vector3};
 use std::{f32::consts::PI, time::Duration};
 use winit::{dpi::PhysicalPosition, event::*};
 
-use crate::pointcloud::BoundingBox;
+use crate::pointcloud::CubeBoundingBox;
 
 pub trait Projection {
     fn projection_matrix(&self, znear: f32, zfar: f32) -> Matrix4<f32>;
@@ -113,14 +113,14 @@ impl Camera<PerspectiveProjection> {
 
     // creates a camera that looks at the bounding box (move in z)
     // ensures that the y of the bounding box fits to screen
-    pub fn look_at(bbox: BoundingBox<f32>) -> Self {
+    pub fn look_at(bbox: CubeBoundingBox<f32>) -> Self {
         let center = bbox.center();
         let size = bbox.size();
 
         let fovy: f32 = PI / 2.;
 
-        let distance = 0.5 * size.y / (fovy / 2.0).tan();
-        let pos = center - vector!(0., 0., 0.5 * size.z + distance);
+        let distance = 0.5 * size / (fovy / 2.0).tan();
+        let pos = center - vector!(0., 0., 0.5 * size + distance);
 
         let mut c = Camera {
             pos: pos,
@@ -133,7 +133,7 @@ impl Camera<PerspectiveProjection> {
                 aspect_ratio: 1.0,
             },
             znear: 0.001,
-            zfar: 2. * (0.5 * size.z + distance),
+            zfar: 2. * (0.5 * size + distance),
         };
         c.update_view_matrix();
         c.update_proj_matrix();
@@ -154,18 +154,18 @@ impl Camera<OrthographicProjection> {
         self.view = trans * rot;
     }
 
-    pub fn look_at_ortho_bbox(bbox: BoundingBox<f32>) -> Self {
+    pub fn look_at_ortho_bbox(bbox: CubeBoundingBox<f32>) -> Self {
         let size = bbox.size();
         let center = bbox.center();
         let mut c = Camera {
-            pos: Point3::new(center.x, center.y, center.z - size.z),
+            pos: Point3::new(center.x, center.y, center.z - size),
             rot: vector!(0., 0., 0.),
 
             view: Matrix4::identity(),
             proj: Matrix4::identity(),
             projection: OrthographicProjection {
-                width: size.x,
-                height: size.y,
+                width: size,
+                height: size,
             },
             znear: -10.,
             zfar: 10.,
