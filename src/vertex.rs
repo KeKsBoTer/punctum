@@ -21,6 +21,11 @@ pub struct Vertex<F: BaseFloat, C: BaseColor> {
 unsafe impl Zeroable for Vertex<f32, f32> {}
 unsafe impl Pod for Vertex<f32, f32> {}
 
+unsafe impl Zeroable for Vertex<f32, u8> {}
+unsafe impl Pod for Vertex<f32, u8> {}
+unsafe impl Zeroable for Vertex<f64, u8> {}
+unsafe impl Pod for Vertex<f64, u8> {}
+
 vulkano::impl_vertex!(Vertex<f32,f32>, position, color);
 
 impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {

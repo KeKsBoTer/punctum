@@ -4,7 +4,10 @@ use crate::{
     Octree, Viewport,
 };
 use nalgebra::{matrix, Vector3};
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 use vulkano::{
     buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
@@ -70,6 +73,7 @@ mod fs {
     }
 }
 
+#[derive(Clone)]
 pub struct OctantBuffer<const T: usize> {
     length: u32,
     points: Arc<CpuBufferPoolSubbuffer<[Vertex<f32, f32>; T], Arc<StdMemoryPool>>>,
@@ -86,7 +90,7 @@ pub struct OctreeRenderer {
     vs: Arc<ShaderModule>,
 
     octree: Arc<Octree<f32, f32>>,
-    octants: RwLock<Vec<OctantBuffer<8192>>>,
+    loaded_octants: RwLock<HashMap<u64, OctantBuffer<8192>>>,
     octants_pool: CpuBufferPool<[Vertex<f32, f32>; 8192]>,
 }
 
@@ -116,6 +120,14 @@ impl OctreeRenderer {
             0., 0., 0.   , 1.
         ];
 
+        // let test_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>> = DeviceLocalBuffer::array(
+        //     device.clone(),
+        //     100,
+        //     BufferUsage::vertex_buffer(),
+        //     [queue.family()],
+        // )
+        // .unwrap();
+
         let uniforms = RwLock::new(UniformBuffer::new(
             device.clone(),
             Some(vs::UniformData {
@@ -137,7 +149,7 @@ impl OctreeRenderer {
             vs,
             fs,
             octree,
-            octants: RwLock::new(Vec::new()),
+            loaded_octants: RwLock::new(HashMap::new()),
             octants_pool: pool,
         }
     }
@@ -173,8 +185,11 @@ impl OctreeRenderer {
         };
         let view_transform = u.proj * u.view * u.world;
 
-        let visible = self
-            .octree
+        let octants = self.loaded_octants.read().unwrap();
+
+        let mut new = 0;
+        let mut new_octants = HashMap::new();
+        self.octree
             .into_iter()
             .filter(|octant| {
                 let size = octant.size / 2.;
@@ -197,24 +212,35 @@ impl OctreeRenderer {
                     })
                     .contains(&true)
             })
-            .map(|octant| {
-                let mut data = [Vertex::<f32, f32>::default(); 8192];
-                for (i, p) in octant.data.iter().enumerate() {
-                    data[i] = Vertex {
-                        position: p.position.into(),
-                        color: p.color,
-                    };
+            .for_each(|octant| {
+                if let Some(o) = octants.get(&octant.id) {
+                    new_octants.insert(octant.id, o.clone());
+                } else {
+                    let mut data = [Vertex::<f32, f32>::default(); 8192];
+                    for (i, p) in octant.data.iter().enumerate() {
+                        data[i] = Vertex {
+                            position: p.position.into(),
+                            color: p.color,
+                        };
+                    }
+                    new += 1;
+                    new_octants.insert(
+                        octant.id,
+                        OctantBuffer {
+                            length: octant.data.len() as u32,
+                            points: self.octants_pool.next(data).unwrap(),
+                        },
+                    );
                 }
-                OctantBuffer {
-                    length: octant.data.len() as u32,
-                    points: self.octants_pool.next(data).unwrap(),
-                }
-            })
-            .collect::<Vec<OctantBuffer<8192>>>();
+            });
 
-        println!("visible octants: {}", visible.len());
-        let mut octants = self.octants.write().unwrap();
-        *octants = visible;
+        if new > 0 {
+            println!("new octants: {}", new);
+        }
+        drop(octants);
+
+        let mut octants = self.loaded_octants.write().unwrap();
+        *octants = new_octants;
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
@@ -259,7 +285,7 @@ impl OctreeRenderer {
                 set.clone(),
             );
 
-        for octant in self.octants.read().unwrap().iter() {
+        for (_, octant) in self.loaded_octants.read().unwrap().iter() {
             builder
                 .bind_vertex_buffers(0, octant.points.clone())
                 .draw(octant.length, 1, 0, 0)

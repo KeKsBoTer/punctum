@@ -123,6 +123,20 @@ fn main() {
         opt.sample_rate,
         opt.flip_yz,
     );
+
+    // we check that all ids are unqiue
+    // if not the three is to deep (or something is wrong in the code :P)
+    let mut ids = octree
+        .into_iter()
+        .map(|octant| octant.id)
+        .collect::<Vec<u64>>();
+    ids.sort_unstable();
+
+    let in_order = ids.iter().zip(ids.iter().skip(1)).find(|(a, b)| **a == **b);
+    if let Some(duplicate) = in_order {
+        panic!("duplicate id {:}!", duplicate.0);
+    }
+
     println!(
         "octree stats:\n\tnum_points:\t{}\n\tmax_depth:\t{}\n\tnum_octants:\t{}",
         octree.num_points(),

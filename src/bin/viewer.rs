@@ -1,7 +1,8 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::mpsc::TryRecvError;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Instant;
 
@@ -14,6 +15,7 @@ use vulkano::render_pass::Subpass;
 use vulkano_win::VkSurfaceBuild;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event_loop::EventLoop;
+use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::WindowBuilder;
 
 use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, WindowEvent};
@@ -62,7 +64,7 @@ fn main() {
     })
     .unwrap();
 
-    let event_loop = EventLoop::new(); // ignore this for now
+    let mut event_loop = EventLoop::new(); // ignore this for now
     let surface = WindowBuilder::new()
         .with_title("puncTUM")
         .with_inner_size(PhysicalSize::new(800, 600))
@@ -130,8 +132,16 @@ fn main() {
     renderer.frustum_culling();
 
     let renderer_clone = renderer.clone();
-    thread::spawn(move || loop {
+
+    let (tx, rx) = mpsc::channel();
+    let frustum_culling_thread = thread::spawn(move || loop {
         renderer_clone.frustum_culling();
+        match rx.try_recv() {
+            Ok(_) | Err(TryRecvError::Disconnected) => {
+                break;
+            }
+            Err(TryRecvError::Empty) => {}
+        }
     });
 
     let mut camera_controller = CameraController::new(50., 1.);
@@ -141,7 +151,7 @@ fn main() {
     let mut last_mouse_position: Option<PhysicalPosition<f64>> = None;
     let mut mouse_pressed = false;
 
-    event_loop.run(move |event, _, control_flow| match event {
+    event_loop.run_return(move |event, _, control_flow| match event {
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,
             ..
@@ -235,6 +245,11 @@ fn main() {
             let pc_cb = renderer.render();
             frame.render(queue.clone(), pc_cb.clone());
         }
+        Event::LoopDestroyed => {
+            let _ = tx.send(());
+        }
         _ => (),
     });
+
+    frustum_culling_thread.join().unwrap();
 }
