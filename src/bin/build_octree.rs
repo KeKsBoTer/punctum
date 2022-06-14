@@ -14,18 +14,32 @@ fn build_octree(
     max_node_size: usize,
     max_octants: Option<usize>,
     sample_rate: Option<usize>,
+    flip_yz: bool,
 ) -> Octree<f64, u8> {
     let mut reader = Reader::from_path(las_file).unwrap();
 
     let number_of_points = reader.header().number_of_points();
 
-    let bounds = reader.header().bounds();
-    let min_point = Point3::new(bounds.min.x, bounds.min.y, bounds.min.z);
-    let max_point = Point3::new(bounds.max.x, bounds.max.y, bounds.max.z);
-    let size = max_point - min_point;
-    let max_size = size[size.imax()];
+    // normalize octree to a cube of side length 100
+    let cube_size = 100.;
 
-    let mut octree = Octree::new(center(&min_point, &max_point), max_size, max_node_size);
+    let bounds = reader.header().bounds();
+    let min_point = if flip_yz {
+        Point3::new(bounds.min.x, bounds.min.z, bounds.min.y)
+    } else {
+        Point3::new(bounds.min.x, bounds.min.y, bounds.min.z)
+    };
+    let max_point = if flip_yz {
+        Point3::new(bounds.max.x, bounds.max.z, bounds.max.y)
+    } else {
+        Point3::new(bounds.max.x, bounds.max.y, bounds.max.z)
+    };
+
+    let bb_size = max_point - min_point;
+    let max_size = bb_size[bb_size.imax()];
+    let center = center(&min_point, &max_point);
+
+    let mut octree = Octree::new(Point3::new(0., 0., 0.), cube_size, max_node_size);
     let mut pb = ProgressBar::new(number_of_points);
     let mut counter = 0;
     let mut octant_counter = 0;
@@ -43,8 +57,15 @@ fn build_octree(
 
         let point = p.unwrap();
         let color = point.color.unwrap();
+
+        let position = if flip_yz {
+            Point3::new(point.x, point.z, point.y)
+        } else {
+            Point3::new(point.x, point.y, point.z)
+        };
+
         let point = Vertex {
-            position: Point3::new(point.x, point.y, point.z),
+            position: (&position - &center.coords) * cube_size / max_size,
             color: Vector4::new(
                 (color.red / 256) as u8, // 65536 = 2**16
                 (color.green / 256) as u8,
@@ -84,6 +105,9 @@ struct Opt {
 
     #[structopt(long)]
     sample_rate: Option<usize>,
+
+    #[structopt(long)]
+    flip_yz: bool,
 }
 
 fn main() {
@@ -97,6 +121,7 @@ fn main() {
         opt.max_octant_size,
         opt.max_octants,
         opt.sample_rate,
+        opt.flip_yz,
     );
     println!(
         "octree stats:\n\tnum_points:\t{}\n\tmax_depth:\t{}\n\tnum_octants:\t{}",

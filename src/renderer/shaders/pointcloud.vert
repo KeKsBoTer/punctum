@@ -29,7 +29,6 @@ layout(location = 0) out vec4 vertex_color;
 
 void main() {
     vec3 pos = position;
-    pos.yz = pos.zy;
     mat4 worldview = uniforms.view * uniforms.world;
     gl_Position = uniforms.proj * worldview * vec4(pos, 1.0);
     

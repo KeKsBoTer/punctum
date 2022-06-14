@@ -75,11 +75,11 @@ fn export_ply(
 
     let mut elm_def_vertex = punctum::Vertex::<f32, f32>::element_def("vertex".to_string());
     elm_def_vertex.count = pc.points().len();
-    // ply.header.elements.add(elm_def.clone());
+    ply.header.elements.add(elm_def_vertex.clone());
 
     let mut elm_def_camera = Vertex::<f32, f32>::element_def("camera".to_string());
     elm_def_camera.count = observed_colors.len();
-    // ply.header.elements.add(elm_def);
+    ply.header.elements.add(elm_def_camera.clone());
 
     let w = Writer::<punctum::Vertex<f32, f32>>::new();
     w.write_header(&mut file, &ply.header).unwrap();

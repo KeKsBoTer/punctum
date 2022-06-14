@@ -253,6 +253,10 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
             .flat_map(|octant| octant.data.clone())
             .collect()
     }
+
+    pub fn max_node_size(&self) -> usize {
+        self.max_node_size
+    }
 }
 
 #[derive(Clone, Copy)]

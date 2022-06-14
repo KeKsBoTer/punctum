@@ -37,9 +37,9 @@ name = "viewer"
 path = "src/bin/viewer.rs"
 
 [[bin]]
-name = "octree_builder"
+name = "build_octree"
 path = "src/bin/build_octree.rs"
 
 [[bin]]
-name = "dataset_builder"
+name = "gen_dataset"
 path = "src/bin/gen_dataset.rs"

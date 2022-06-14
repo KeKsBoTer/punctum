@@ -72,7 +72,9 @@ class TNet(nn.Module):
 class FeatureNet(nn.Module):
     """ Global feature extraction network used in PointNet"""
 
-    def __init__(self, batch_norm: bool = False, layer_sizes=[32, 128, 256]):
+    def __init__(
+        self, batch_norm: bool = False, layer_sizes=[32, 128, 256],
+    ):
         super(FeatureNet, self).__init__()
         # self.tnet = TNet()
         # rfft_dim = 64

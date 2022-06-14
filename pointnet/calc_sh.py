@@ -72,6 +72,6 @@ if __name__ == "__main__":
 
         sh_elm = PlyElement.describe(ply_sh_data, "sh_coefficients")
 
-        PlyData([sh_elm, plydata["vertex"]]).write(
+        PlyData([sh_elm, plydata["camera"], plydata["vertex"]]).write(
             join(args.out_folder, basename(filename))
         )

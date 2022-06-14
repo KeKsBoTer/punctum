@@ -84,7 +84,7 @@ impl<P: Projection> Camera<P> {
 }
 
 impl Camera<PerspectiveProjection> {
-    pub fn new() -> Self {
+    pub fn new(aspect_ratio: f32) -> Self {
         let fovy: f32 = PI / 2.;
         let mut c = Camera {
             pos: Point3::new(0., 0., 0.),
@@ -94,7 +94,7 @@ impl Camera<PerspectiveProjection> {
             proj: Matrix4::identity(),
             projection: PerspectiveProjection {
                 fovy: fovy,
-                aspect_ratio: 1.0,
+                aspect_ratio: aspect_ratio,
             },
             znear: 0.1,
             zfar: 1000.,

@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
 use std::time::Instant;
 
 use pbr::ProgressBar;
@@ -33,7 +35,7 @@ fn main() {
     let opt = Opt::from_args();
     let filename = opt.input.as_os_str().to_str().unwrap();
 
-    let octree = {
+    let octree: Octree<f32, f32> = {
         let in_file = File::open(filename).unwrap();
 
         let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
@@ -49,8 +51,9 @@ fn main() {
 
         pb.finish_println("done!");
 
-        octree
+        octree.into()
     };
+    let octree = Arc::new(octree);
 
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(InstanceCreateInfo {
@@ -111,17 +114,25 @@ fn main() {
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let mut renderer = OctreeRenderer::new(
+    let renderer = Arc::new(OctreeRenderer::new(
         device.clone(),
         queue.clone(),
         scene_subpass,
         viewport.clone(),
-        octree.into(),
-    );
+        octree.clone(),
+    ));
 
     renderer.set_point_size(1);
 
-    let mut camera = PerspectiveCamera::new();
+    let window_size = surface.window().inner_size();
+    let mut camera = PerspectiveCamera::new(window_size.width as f32 / window_size.height as f32);
+    renderer.set_camera(&camera);
+    renderer.frustum_culling();
+
+    let renderer_clone = renderer.clone();
+    thread::spawn(move || loop {
+        renderer_clone.frustum_culling();
+    });
 
     let mut camera_controller = CameraController::new(50., 1.);
 

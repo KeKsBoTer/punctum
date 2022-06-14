@@ -1,10 +1,10 @@
 use crate::{
     camera::{Camera, Projection},
     vertex::Vertex,
-    Octree, PerspectiveCamera, Viewport,
+    Octree, Viewport,
 };
-use nalgebra::{vector, Matrix4, Vector3};
-use std::sync::Arc;
+use nalgebra::{matrix, Vector3};
+use std::sync::{Arc, RwLock};
 use vulkano::{
     buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
@@ -70,7 +70,7 @@ mod fs {
     }
 }
 
-struct OctantBuffer<const T: usize> {
+pub struct OctantBuffer<const T: usize> {
     length: u32,
     points: Arc<CpuBufferPoolSubbuffer<[Vertex<f32, f32>; T], Arc<StdMemoryPool>>>,
 }
@@ -79,15 +79,15 @@ pub struct OctreeRenderer {
     device: Arc<Device>,
     queue: Arc<Queue>,
 
-    pipeline: Arc<GraphicsPipeline>,
-    set: Arc<PersistentDescriptorSet>,
+    pipeline: RwLock<Arc<GraphicsPipeline>>,
 
-    uniforms: UniformBuffer<vs::UniformData>,
+    uniforms: RwLock<UniformBuffer<vs::UniformData>>,
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
 
-    octree: Octree<f32, f32>,
-    octants: Vec<OctantBuffer<512>>,
+    octree: Arc<Octree<f32, f32>>,
+    octants: RwLock<Vec<OctantBuffer<8192>>>,
+    octants_pool: CpuBufferPool<[Vertex<f32, f32>; 8192]>,
 }
 
 impl OctreeRenderer {
@@ -96,7 +96,7 @@ impl OctreeRenderer {
         queue: Arc<Queue>,
         subpass: Subpass,
         viewport: Viewport,
-        octree: Octree<f32, f32>,
+        octree: Arc<Octree<f32, f32>>,
     ) -> Self {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
@@ -106,64 +106,39 @@ impl OctreeRenderer {
 
         let max_size = octree.size();
         let center = octree.center();
-        let scale_size = 1000.;
 
-        let world =
-            Matrix4::new_scaling(scale_size / max_size) * Matrix4::new_translation(&-center.coords);
-        // let world = Matrix4::identity();
+        let scale_size = 100.;
+        let scale = scale_size / max_size;
+        let world = matrix![
+            scale, 0., 0., -scale * center.x;
+            0., scale, 0., -scale * center.y;
+            0., 0., scale, -scale * center.z;
+            0., 0., 0.   , 1.
+        ];
 
-        let uniforms = UniformBuffer::new(
+        let uniforms = RwLock::new(UniformBuffer::new(
             device.clone(),
             Some(vs::UniformData {
                 world: world.into(),
                 ..vs::UniformData::default()
             }),
-        );
+        ));
 
-        let layout = pipeline.layout().set_layouts().get(0).unwrap();
-
-        let set = PersistentDescriptorSet::new(
-            layout.clone(),
-            [WriteDescriptorSet::buffer(0, uniforms.buffer().clone())],
-        )
-        .unwrap();
-
-        let pool: CpuBufferPool<[Vertex<f32, f32>; 512]> =
+        let pool: CpuBufferPool<[Vertex<f32, f32>; 8192]> =
             CpuBufferPool::new(device.clone(), BufferUsage::vertex_buffer());
 
-        println!("center: {:?}, size: {}", center, max_size);
+        println!("center: {:?}, size: {}", center, scale_size / max_size);
 
-        let octants = octree
-            .into_iter()
-            .map(|octant| {
-                let mut data = [Vertex::<f32, f32>::default(); 512];
-                for (i, p) in octant.data.iter().enumerate() {
-                    data[i] = Vertex {
-                        // TODO move this operation to the world matrix
-                        position: p.position.into(), //((p.position - center) / max_size * scale_size).into(),
-                        color: p.color,
-                    };
-                }
-                OctantBuffer {
-                    length: octant.data.len() as u32,
-                    points: pool.next(data).unwrap(),
-                }
-            })
-            .collect::<Vec<OctantBuffer<512>>>();
-
-        // let indirect_args_pool = CpuBufferPool::new(device.clone(), BufferUsage::all());
-
-        println!("num octants: {:}", octants.len());
         OctreeRenderer {
             device,
             queue,
-            pipeline,
-            set,
+            pipeline: RwLock::new(pipeline),
             uniforms,
             vs,
             fs,
             octree,
-            octants,
+            octants: RwLock::new(Vec::new()),
+            octants_pool: pool,
         }
     }
 
@@ -191,26 +166,79 @@ impl OctreeRenderer {
             .unwrap()
     }
 
-    pub fn frustum_culling(&mut self, camera: &PerspectiveCamera) {}
+    pub fn frustum_culling(&self) {
+        let u = {
+            let uniforms = self.uniforms.read().unwrap();
+            uniforms.data().clone()
+        };
+        let view_transform = u.proj * u.view * u.world;
 
-    pub fn set_viewport(&mut self, viewport: Viewport) {
-        self.pipeline = Self::build_pipeline(
+        let visible = self
+            .octree
+            .into_iter()
+            .filter(|octant| {
+                let size = octant.size / 2.;
+                let points = [
+                    octant.center - Vector3::new(-size, -size, -size),
+                    octant.center - Vector3::new(size, -size, -size),
+                    octant.center - Vector3::new(-size, size, -size),
+                    octant.center - Vector3::new(size, size, -size),
+                    octant.center - Vector3::new(-size, -size, size),
+                    octant.center - Vector3::new(size, -size, size),
+                    octant.center - Vector3::new(-size, size, size),
+                    octant.center - Vector3::new(size, size, size),
+                ];
+
+                points
+                    .map(|p| {
+                        let screen_space = view_transform * p.to_homogeneous();
+                        let n_pos = screen_space.xyz() / screen_space.w;
+                        n_pos.abs() <= Vector3::new(1., 1., 1.)
+                    })
+                    .contains(&true)
+            })
+            .map(|octant| {
+                let mut data = [Vertex::<f32, f32>::default(); 8192];
+                for (i, p) in octant.data.iter().enumerate() {
+                    data[i] = Vertex {
+                        position: p.position.into(),
+                        color: p.color,
+                    };
+                }
+                OctantBuffer {
+                    length: octant.data.len() as u32,
+                    points: self.octants_pool.next(data).unwrap(),
+                }
+            })
+            .collect::<Vec<OctantBuffer<8192>>>();
+
+        println!("visible octants: {}", visible.len());
+        let mut octants = self.octants.write().unwrap();
+        *octants = visible;
+    }
+
+    pub fn set_viewport(&self, viewport: Viewport) {
+        let mut pipeline = self.pipeline.write().unwrap();
+        *pipeline = Self::build_pipeline(
             self.vs.clone(),
             self.fs.clone(),
-            self.pipeline.subpass().clone(),
+            pipeline.subpass().clone(),
             viewport,
-            self.pipeline.device().clone(),
+            pipeline.device().clone(),
         );
     }
 
     pub fn render(&self) -> Arc<SecondaryAutoCommandBuffer> {
-        let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
+        let pipeline = self.pipeline.read().unwrap();
+
+        let layout = pipeline.layout().set_layouts().get(0).unwrap();
+        let uniform_buffer = {
+            let uniforms = self.uniforms.read().unwrap();
+            uniforms.pool_chunk().clone()
+        };
         let set = PersistentDescriptorSet::new(
             layout.clone(),
-            [WriteDescriptorSet::buffer(
-                0,
-                self.uniforms.pool_chunk().clone(),
-            )],
+            [WriteDescriptorSet::buffer(0, uniform_buffer)],
         )
         .unwrap();
 
@@ -218,20 +246,20 @@ impl OctreeRenderer {
             self.device.clone(),
             self.queue.family(),
             CommandBufferUsage::OneTimeSubmit,
-            self.pipeline.subpass().clone(),
+            pipeline.subpass().clone(),
         )
         .unwrap();
 
         builder
-            .bind_pipeline_graphics(self.pipeline.clone())
+            .bind_pipeline_graphics(pipeline.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                self.pipeline.layout().clone(),
+                pipeline.layout().clone(),
                 0,
                 set.clone(),
             );
 
-        for octant in self.octants.iter() {
+        for octant in self.octants.read().unwrap().iter() {
             builder
                 .bind_vertex_buffers(0, octant.points.clone())
                 .draw(octant.length, 1, 0, 0)
@@ -240,20 +268,24 @@ impl OctreeRenderer {
         Arc::new(builder.build().unwrap())
     }
 
-    pub fn set_point_size(&mut self, point_size: u32) {
-        self.uniforms.update(vs::UniformData {
+    pub fn set_point_size(&self, point_size: u32) {
+        let mut uniforms = self.uniforms.write().unwrap();
+        let current = *uniforms.data();
+        uniforms.update(vs::UniformData {
             point_size,
-            ..*self.uniforms.data()
+            ..current
         });
     }
 
-    pub fn set_camera(&mut self, camera: &Camera<impl Projection>) {
-        self.uniforms.update(vs::UniformData {
+    pub fn set_camera(&self, camera: &Camera<impl Projection>) {
+        let mut uniforms = self.uniforms.write().unwrap();
+        let current = *uniforms.data();
+        uniforms.update(vs::UniformData {
             view: camera.view().clone().into(),
             proj: camera.projection().clone().into(),
             znear: *camera.znear(),
             zfar: *camera.zfar(),
-            ..*self.uniforms.data()
+            ..current
         });
     }
 }
