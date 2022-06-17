@@ -69,7 +69,7 @@ fn main() {
                 })
                 .collect::<Vec<Vertex<f32, u8>>>(),
         );
-        bboxes.push(CubeBoundingBox::from_points(octant.data).size());
+        bboxes.push(CubeBoundingBox::from_points(octant.data).size);
         pb.inc();
     }
     println!("num_points: {}", points.len());

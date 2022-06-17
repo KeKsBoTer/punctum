@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use nalgebra::{center, distance_squared, Point3, RealField, Vector3};
+use nalgebra::{center, distance_squared, Matrix4, Point3, RealField, Vector3};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::Device,
@@ -87,8 +87,8 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
     }
 
     pub fn scale_to_size(&mut self, size: F) {
-        let center = self.bbox.center();
-        let mut max_size = self.bbox.size();
+        let center = self.bbox.center;
+        let mut max_size = self.bbox.size;
 
         // if we have only one point in the pointcloud we would divide by 0 later
         // so just set it to 1
@@ -142,21 +142,13 @@ impl PointCloudGPU {
 
 #[derive(Debug, Clone, Copy)]
 pub struct CubeBoundingBox<F: BaseFloat> {
-    center: Point3<F>,
-    size: F,
+    pub center: Point3<F>,
+    pub size: F,
 }
 
 impl<F: BaseFloat> CubeBoundingBox<F> {
     pub fn new(center: Point3<F>, size: F) -> Self {
         Self { center, size }
-    }
-
-    pub fn center(&self) -> &Point3<F> {
-        &self.center
-    }
-
-    pub fn size(&self) -> F {
-        self.size
     }
 
     pub fn contains(&self, p: Point3<F>) -> bool {
@@ -199,23 +191,34 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
         }
     }
 
-    // pub fn corners(&self) -> [Vector3<F>; 8] {
-    //     let size = self.size();
-    //     [self.min,
-    //     self.min + Vector3::new(size.x,0,0),
-    //     self.min + Vector3::new(size.x,size.y,0),
-    //     ]
-    // }
+    pub fn corners(&self) -> [Point3<F>; 8] {
+        let size = self.size * F::from_subset(&0.5);
+        [
+            self.center - Vector3::new(-size, -size, -size),
+            self.center - Vector3::new(size, -size, -size),
+            self.center - Vector3::new(-size, size, -size),
+            self.center - Vector3::new(size, size, -size),
+            self.center - Vector3::new(-size, -size, size),
+            self.center - Vector3::new(size, -size, size),
+            self.center - Vector3::new(-size, size, size),
+            self.center - Vector3::new(size, size, size),
+        ]
+    }
 
-    // pub fn points_visible(&self, projection: Matrix4<f32>) -> bool {
-    //     let points = [];
-
-    //     points
-    //         .map(|p| {
-    //             let screen_space = view_transform * p.to_homogeneous();
-    //             let n_pos = screen_space.xyz() / screen_space.w;
-    //             n_pos.abs() <= Vector3::new(1., 1., 1.)
-    //         })
-    //         .contains(&true)
-    // }
+    /// checks if all 8 points that define the bounding box
+    /// can be seen by the given projection matrix
+    /// IMPORTANT: this does not cover the case where the box is so big,
+    /// that none of the points are seen
+    pub fn at_least_one_point_visible(&self, projection: &Matrix4<F>) -> bool {
+        let one = F::from_subset(&1.);
+        let points = self.corners();
+        let ones = Vector3::new(one, one, one);
+        points
+            .map(|p| {
+                let screen_space = projection * p.to_homogeneous();
+                let n_pos = screen_space.xyz() / screen_space.w;
+                n_pos.abs() <= ones
+            })
+            .contains(&true)
+    }
 }

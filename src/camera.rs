@@ -114,8 +114,8 @@ impl Camera<PerspectiveProjection> {
     // creates a camera that looks at the bounding box (move in z)
     // ensures that the y of the bounding box fits to screen
     pub fn look_at(bbox: CubeBoundingBox<f32>) -> Self {
-        let center = bbox.center();
-        let size = bbox.size();
+        let center = bbox.center;
+        let size = bbox.size;
 
         let fovy: f32 = PI / 2.;
 
@@ -155,8 +155,8 @@ impl Camera<OrthographicProjection> {
     }
 
     pub fn look_at_ortho_bbox(bbox: CubeBoundingBox<f32>) -> Self {
-        let size = bbox.size();
-        let center = bbox.center();
+        let size = bbox.size;
+        let center = bbox.center;
         let mut c = Camera {
             pos: Point3::new(center.x, center.y, center.z - size),
             rot: vector!(0., 0., 0.),

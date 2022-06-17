@@ -3,7 +3,7 @@ use crate::{
     vertex::Vertex,
     Octree, Viewport,
 };
-use nalgebra::{matrix, Vector3};
+use nalgebra::matrix;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -191,27 +191,7 @@ impl OctreeRenderer {
         let mut new_octants = HashMap::new();
         self.octree
             .into_iter()
-            .filter(|octant| {
-                let size = octant.size / 2.;
-                let points = [
-                    octant.center - Vector3::new(-size, -size, -size),
-                    octant.center - Vector3::new(size, -size, -size),
-                    octant.center - Vector3::new(-size, size, -size),
-                    octant.center - Vector3::new(size, size, -size),
-                    octant.center - Vector3::new(-size, -size, size),
-                    octant.center - Vector3::new(size, -size, size),
-                    octant.center - Vector3::new(-size, size, size),
-                    octant.center - Vector3::new(size, size, size),
-                ];
-
-                points
-                    .map(|p| {
-                        let screen_space = view_transform * p.to_homogeneous();
-                        let n_pos = screen_space.xyz() / screen_space.w;
-                        n_pos.abs() <= Vector3::new(1., 1., 1.)
-                    })
-                    .contains(&true)
-            })
+            .filter(|octant| octant.bbox.at_least_one_point_visible(&view_transform))
             .for_each(|octant| {
                 if let Some(o) = octants.get(&octant.id) {
                     new_octants.insert(octant.id, o.clone());

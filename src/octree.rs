@@ -4,7 +4,7 @@ use nalgebra::{convert, Point3, Vector3};
 
 use crate::{
     vertex::{BaseColor, BaseFloat},
-    Vertex,
+    CubeBoundingBox, Vertex,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -299,8 +299,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
 #[derive(Clone, Copy)]
 pub struct OctreeIter<'a, F: BaseFloat, C: BaseColor> {
     pub data: &'a Vec<Vertex<F, C>>,
-    pub center: Point3<F>,
-    pub size: F,
+    pub bbox: CubeBoundingBox<F>,
     pub id: u64,
 }
 
@@ -311,12 +310,8 @@ impl<'a, F: BaseFloat, C: BaseColor> IntoIterator for &'a Octree<F, C> {
     fn into_iter(self) -> Self::IntoIter {
         let mut result = vec![];
         self.traverse(|id, data, center, size| {
-            result.push(OctreeIter {
-                data,
-                center,
-                size,
-                id,
-            })
+            let bbox = CubeBoundingBox::new(center, size);
+            result.push(OctreeIter { data, bbox, id })
         });
 
         result.into_iter()

@@ -159,7 +159,7 @@ fn main() {
                 .data
                 .iter()
                 .map(|v| punctum::Vertex::<f32, f32> {
-                    position: ((v.position - node.center.coords) * 2. / node.size).cast(),
+                    position: ((v.position - node.bbox.center.coords) * 2. / node.bbox.size).cast(),
                     color: v.color.cast() / 255.,
                 })
                 .collect();
