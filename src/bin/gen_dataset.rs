@@ -66,26 +66,33 @@ impl RenderPool {
 fn export_ply(
     output_file: &PathBuf,
     pc: Arc<PointCloud<f32, f32>>,
-    observed_colors: &Vec<Vertex<f32, f32>>,
+    observed_colors: &Vec<Vertex<f32, u8>>,
 ) {
     let mut file = BufWriter::new(File::create(output_file).unwrap());
 
-    let mut ply = Ply::<punctum::Vertex<f32, f32>>::new();
-    ply.header.encoding = Encoding::BinaryLittleEndian;
+    let mut ply = Ply::<punctum::Vertex<f32, u8>>::new();
+    ply.header.encoding = Encoding::Ascii;
 
-    let mut elm_def_vertex = punctum::Vertex::<f32, f32>::element_def("vertex".to_string());
+    let mut elm_def_vertex = punctum::Vertex::<f32, u8>::element_def("vertex".to_string());
     elm_def_vertex.count = pc.points().len();
     ply.header.elements.add(elm_def_vertex.clone());
 
-    let mut elm_def_camera = Vertex::<f32, f32>::element_def("camera".to_string());
+    let mut elm_def_camera = Vertex::<f32, u8>::element_def("camera".to_string());
     elm_def_camera.count = observed_colors.len();
     ply.header.elements.add(elm_def_camera.clone());
 
-    let w = Writer::<punctum::Vertex<f32, f32>>::new();
+    let w = Writer::<punctum::Vertex<f32, u8>>::new();
     w.write_header(&mut file, &ply.header).unwrap();
-    w.write_payload_of_element(&mut file, pc.points(), &elm_def_vertex, &ply.header)
+
+    let points_u8 = pc
+        .points()
+        .iter()
+        .map(|p| (*p).into())
+        .collect::<Vec<Vertex<f32, u8>>>();
+
+    w.write_payload_of_element(&mut file, &points_u8, &elm_def_vertex, &ply.header)
         .unwrap();
-    w.write_payload_of_element(&mut file, observed_colors, &elm_def_camera, &ply.header)
+    w.write_payload_of_element(&mut file, &observed_colors, &elm_def_camera, &ply.header)
         .unwrap();
 }
 
@@ -146,8 +153,6 @@ fn main() {
     let render_pool = RenderPool::new(num_workers);
     let render_pool = Arc::new(Mutex::new(render_pool));
 
-    // let pc_pool = Arc::new(CpuBufferPool::vertex_buffer(device));
-
     let pb_clone = pb.clone();
     octree
         .into_iter()
@@ -187,12 +192,12 @@ fn main() {
                 renders
             };
 
-            let cam_colors: Vec<Vertex<f32, f32>> = renders
+            let cam_colors: Vec<Vertex<f32, u8>> = renders
                 .iter()
                 .zip(cameras.clone())
                 .map(|(color, cam)| Vertex {
                     position: *cam.position(),
-                    color: Vector4::from(color.0).cast() / 255.,
+                    color: Vector4::from(color.0),
                 })
                 .collect();
 

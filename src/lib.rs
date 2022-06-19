@@ -2,8 +2,6 @@ use std::sync::Arc;
 
 use camera::Projection;
 use image::Rgba;
-use nalgebra::{vector, Vector4};
-use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::{
@@ -34,7 +32,7 @@ pub use octree::{Node, Octree};
 pub use pointcloud::{CubeBoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{OctreeRenderer, PointCloudRenderer, SurfaceFrame, Viewport};
 pub use tee::{TeeReader, TeeWriter};
-pub use vertex::Vertex;
+pub use vertex::{BaseColor, BaseFloat, Vertex};
 
 use renderer::Frame;
 
@@ -213,26 +211,4 @@ unsafe impl DeviceOwned for OfflineRenderer {
     fn device(&self) -> &Arc<Device> {
         &self.queue.device()
     }
-}
-
-pub fn calc_average_color(data: &[[u8; 4]]) -> Rgba<u8> {
-    let start = vector!(0., 0., 0., 0.);
-    let mean = data
-        .par_chunks_exact(1024)
-        .fold(
-            || start,
-            |acc, chunk| {
-                acc + chunk.iter().fold(start, |acc, item| {
-                    let rgba: Vector4<f32> = Vector4::from(*item).cast();
-                    let a = rgba.w / 255.;
-                    let rgb = rgba.xyz() / 255. * a;
-                    acc + Vector4::new(rgb.x, rgb.y, rgb.z, a)
-                })
-            },
-        )
-        .reduce(|| start, |acc, item| acc + item);
-    Rgba(
-        mean.map(|v| (v * 255. / (data.len() as f32)).round() as u8)
-            .into(),
-    )
 }

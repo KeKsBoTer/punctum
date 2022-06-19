@@ -100,6 +100,7 @@ impl ImageAvgColor {
         .unwrap();
 
         let size = start_size as i32;
+        // convert image type from rgba8 to rgba32f by using blit command
         builder
             .blit_image(
                 src_img.image(),
@@ -172,7 +173,7 @@ impl ImageAvgColor {
         let future = sync::now(self.device.clone())
             .then_execute(self.queue.clone(), cb_before)
             .unwrap()
-            .then_execute(self.queue.clone(), self.command_buffer.clone())
+            .then_execute_same_queue(self.command_buffer.clone())
             .unwrap()
             .then_signal_fence_and_flush()
             .unwrap();
@@ -188,5 +189,134 @@ impl ImageAvgColor {
             (rgba[2] * 255.) as u8,
             (rgba[3] * 255.) as u8,
         ]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{io::Reader as ImageReader, Rgba};
+    use nalgebra::{vector, Vector4};
+    use rayon::{iter::ParallelIterator, slice::ParallelSlice};
+    use vulkano::{
+        buffer::{BufferUsage, CpuAccessibleBuffer},
+        command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
+        device::{Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo},
+        format::Format,
+        image::{view::ImageView, ImageDimensions, StorageImage},
+        instance::{Instance, InstanceCreateInfo},
+    };
+
+    use crate::{select_physical_device, ImageAvgColor};
+
+    #[test]
+    fn cpu_eq_gpu() {
+        let instance = Instance::new(InstanceCreateInfo {
+            ..Default::default()
+        })
+        .unwrap();
+
+        let device_extensions = DeviceExtensions::none();
+
+        let (physical_device, queue_family) =
+            select_physical_device(&instance, &device_extensions, None);
+
+        let (device, mut queues) = Device::new(
+            // Which physical device to connect to.
+            physical_device,
+            DeviceCreateInfo {
+                enabled_extensions: physical_device
+                    .required_extensions()
+                    .union(&device_extensions),
+
+                queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
+
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let queue = queues.next().unwrap();
+
+        let img = ImageReader::open("chrome1x.png").unwrap().decode().unwrap();
+        let dimensions = ImageDimensions::Dim2d {
+            width: img.width(),
+            height: img.height(),
+            array_layers: 1,
+        };
+
+        let buffer = CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage::transfer_source(),
+            false,
+            img.to_rgba8()
+                .pixels()
+                .map(|p| p.0)
+                .collect::<Vec<[u8; 4]>>(),
+        )
+        .unwrap();
+
+        let src_img = StorageImage::new(
+            device.clone(),
+            dimensions,
+            Format::R8G8B8A8_UNORM,
+            Some(queue.family()),
+        )
+        .unwrap();
+
+        let src_img_view = ImageView::new_default(src_img.clone()).unwrap();
+
+        let mut builder = AutoCommandBufferBuilder::primary(
+            device.clone(),
+            queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        builder
+            .copy_buffer_to_image(buffer.clone(), src_img.clone())
+            .unwrap();
+
+        let command_buffer = builder.build().unwrap();
+
+        let avg_color_calc =
+            ImageAvgColor::new(device.clone(), queue.clone(), src_img_view.clone(), 256);
+
+        let result = avg_color_calc.calc_average_color(command_buffer);
+
+        let src_buffer_content = buffer.read().unwrap();
+
+        let baseline = calc_average_color_cpu(&src_buffer_content);
+
+        // allow for a difference of one to account for rounding errors
+        let diff =
+            (Vector4::from(result.0).cast::<i32>() - Vector4::from(baseline.0).cast::<i32>()).abs();
+        assert!(
+            diff.amax() <= 1,
+            "cpu ({:?}) != gpu ({:?})",
+            result,
+            baseline
+        );
+    }
+
+    pub fn calc_average_color_cpu(data: &[[u8; 4]]) -> Rgba<u8> {
+        let start = vector!(0., 0., 0., 0.);
+        let mean = data
+            .par_chunks_exact(1024)
+            .fold(
+                || start,
+                |acc, chunk| {
+                    acc + chunk.iter().fold(start, |acc, item| {
+                        let rgba: Vector4<f32> = Vector4::from(*item).cast();
+                        let a = rgba.w / 255.;
+                        let rgb = rgba.xyz() / 255. * a;
+                        acc + Vector4::new(rgb.x, rgb.y, rgb.z, a)
+                    })
+                },
+            )
+            .reduce(|| start, |acc, item| acc + item);
+        Rgba(
+            mean.map(|v| (v * 255. / (data.len() as f32)).round() as u8)
+                .into(),
+        )
     }
 }
