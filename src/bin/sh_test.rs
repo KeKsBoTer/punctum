@@ -17,7 +17,7 @@ use vulkano::{
     sync::{self, GpuFuture},
 };
 
-fn main2() {
+fn main() {
     let l_max = 5;
 
     let res = 1024;
@@ -56,7 +56,7 @@ fn read_coefs() -> Vec<[f32; 4]> {
     coefs
 }
 
-fn main() {
+fn main2() {
     let instance = Instance::new(InstanceCreateInfo {
         ..Default::default()
     })
@@ -166,7 +166,7 @@ fn main() {
     let target_img_view = ImageView::new_default(target_image.clone()).unwrap();
 
     for l in 0..(lmax + 1) {
-        let coefs = &read_coefs()[0..lm2flat_index(l, l) + 1];
+        let coefs = &read_coefs()[0..lm2flat_index(l, l as i64) + 1];
 
         let coef_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),

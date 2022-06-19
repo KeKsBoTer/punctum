@@ -78,7 +78,7 @@ fn get_spherical_harmonics_element(l: u64, m: i64, phi: f32, p: f32) -> f32 {
 }
 
 #[inline]
-pub fn lm2flat_index(l: u64, m: u64) -> usize {
+pub fn lm2flat_index(l: u64, m: i64) -> usize {
     ((l * (l + 1)) as i64 + m as i64) as usize
 }
 
@@ -92,7 +92,7 @@ pub fn flat2lm_index(i: usize) -> (u64, i64) {
 pub fn calc_sh_grid(l_max: u64, resolution: u32) -> Vec<Vec<f32>> {
     let res = resolution;
 
-    let images = (0..lm2flat_index(l_max, l_max) + 1)
+    let images = (0..lm2flat_index(l_max, l_max as i64) + 1)
         .into_par_iter()
         .map(|i| {
             let (l, m) = flat2lm_index(i as usize);
@@ -118,7 +118,7 @@ pub fn calc_sh_grid(l_max: u64, resolution: u32) -> Vec<Vec<f32>> {
 }
 
 pub fn calc_sh_sparse(l_max: u64, coords: Vec<Vector2<f32>>) -> Vec<Vec<f32>> {
-    (0..lm2flat_index(l_max, l_max) + 1)
+    (0..lm2flat_index(l_max, l_max as i64) + 1)
         .into_par_iter()
         .map(|i| {
             let (l, m) = flat2lm_index(i as usize);
@@ -135,4 +135,97 @@ pub fn calc_sh_sparse(l_max: u64, coords: Vec<Vector2<f32>>) -> Vec<Vec<f32>> {
                 .collect::<Vec<f32>>()
         })
         .collect::<Vec<Vec<f32>>>()
+}
+#[cfg(test)]
+mod tests {
+    use image::{io::Reader as ImageReader, ImageBuffer, Luma};
+    use std::{
+        fs::{self},
+        path::{Path, PathBuf},
+    };
+
+    use super::{calc_sh_grid, lm2flat_index};
+
+    fn u8_diff(a: u8, b: u8) -> u8 {
+        (a as i32 - b as i32) as u8
+    }
+
+    #[test]
+    fn python_eq_rust() {
+        let files = fs::read_dir("tests/shs").unwrap();
+        let res = 256;
+        let images = files
+            .filter_map(|f| f.ok())
+            .filter(|f| f.file_type().unwrap().is_file())
+            .filter(|f| f.file_name().to_str().unwrap().ends_with(".png"))
+            .map(|img| {
+                let mut path = PathBuf::from(img.file_name());
+                path.set_extension("");
+                let filename = path.file_name().unwrap().to_str().unwrap();
+                let parts: Vec<_> = filename.split("_").collect();
+
+                let l: u64 = parts[1].parse().unwrap();
+                let m: i64 = parts[3].parse().unwrap();
+                let img = ImageReader::open(img.path()).unwrap().decode().unwrap();
+                if img.width() != res || img.height() != res {
+                    panic!(
+                        "expected a resolution of {}, got {}x{}",
+                        res,
+                        img.width(),
+                        img.height()
+                    );
+                }
+                let img_grey = img.to_luma8();
+                (l, m, img_grey)
+            })
+            .collect::<Vec<(u64, i64, ImageBuffer<Luma<u8>, Vec<u8>>)>>();
+
+        let l_max = images.iter().max_by_key(|(l, _, _)| *l).unwrap().0;
+
+        let rust_sh = calc_sh_grid(l_max, res);
+
+        for (l, m, py_img) in images {
+            let rust_values = rust_sh.get(lm2flat_index(l, m)).unwrap();
+            let rust_img: ImageBuffer<Luma<u8>, Vec<_>> = ImageBuffer::from_fn(res, res, |x, y| {
+                Luma::from([
+                    ((rust_values[(y * res + x) as usize].clamp(-1., 1.) + 1.) / 2. * 255.) as u8,
+                ])
+            });
+
+            let mut eq = true;
+            'y: for i in 0..res {
+                for j in 0..res {
+                    let py_value = py_img.get_pixel(j, i).0[0];
+                    let rust_value = rust_img.get_pixel(j, i).0[0];
+                    let diff = u8_diff(py_value, rust_value);
+                    if diff > 1 {
+                        eq = false;
+                        println!("different: l={},m={} (abs_diff: {})", l, m, diff);
+                        break 'y;
+                    }
+                }
+            }
+            if !eq {
+                if !Path::new("tests/sh_errors").exists() {
+                    fs::create_dir("tests/sh_errors").unwrap();
+                }
+                let error: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::from_vec(
+                    res,
+                    res,
+                    rust_img
+                        .iter()
+                        .zip(py_img.iter())
+                        .map(|(a, b)| u8_diff(*a, *b))
+                        .collect::<Vec<u8>>(),
+                )
+                .unwrap();
+                error
+                    .save(format!("tests/sh_errors/error_l_{}_m_{}.png", l, m))
+                    .unwrap();
+                rust_img
+                    .save(format!("tests/sh_errors/img_l_{}_m_{}.png", l, m))
+                    .unwrap();
+            }
+        }
+    }
 }

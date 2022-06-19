@@ -18,6 +18,7 @@ render.png
 test.*
 
 datasets/*
+datasets_old/*
 
 graphs/
 logs*/
