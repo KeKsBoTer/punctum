@@ -32,8 +32,8 @@ void main() {
         + c2.rgb * alphas.y 
         + c3.rgb * alphas.z 
         + c4.rgb * alphas.w
-    ) / 4;
-    float avg_alpha = (c1.a + c2.a + c3.a + c4.a) / 4;
+    ) ;
+    float avg_alpha = (c1.a + c2.a + c3.a + c4.a);
 
     imageStore(img_out, idx, vec4(color, avg_alpha));
 }

@@ -65,6 +65,7 @@ impl RenderPool {
                         point_size: 32,
                         ..RenderSettings::default()
                     },
+                    false,
                 )))
             })
             .collect::<Vec<Arc<Mutex<OfflineRenderer>>>>();

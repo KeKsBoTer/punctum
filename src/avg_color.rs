@@ -25,6 +25,7 @@ pub struct ImageAvgColor {
     queue: Arc<Queue>,
     command_buffer: Arc<PrimaryAutoCommandBuffer>,
     target_buffer: Arc<CpuAccessibleBuffer<[[f32; 4]]>>,
+    img_size: u32,
 }
 
 const IMG_SIZES: [u32; 11] = [1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1];
@@ -166,6 +167,7 @@ impl ImageAvgColor {
             queue,
             command_buffer,
             target_buffer,
+            img_size: start_size,
         }
     }
 
@@ -183,11 +185,17 @@ impl ImageAvgColor {
         let buffer_content = self.target_buffer.read().unwrap();
 
         let rgba = buffer_content[0];
+
+        let red = rgba[0] / rgba[3];
+        let green = rgba[1] / rgba[3];
+        let blue = rgba[2] / rgba[3];
+        let alpha = rgba[3] / (self.img_size * self.img_size) as f32;
+
         return Rgba([
-            (rgba[0] * 255.) as u8,
-            (rgba[1] * 255.) as u8,
-            (rgba[2] * 255.) as u8,
-            (rgba[3] * 255.) as u8,
+            (red * 255.) as u8,
+            (green * 255.) as u8,
+            (blue * 255.) as u8,
+            (alpha * 255.) as u8,
         ]);
     }
 }
@@ -293,14 +301,14 @@ mod tests {
         assert!(
             diff.amax() <= 1,
             "cpu ({:?}) != gpu ({:?})",
+            baseline,
             result,
-            baseline
         );
     }
 
     pub fn calc_average_color_cpu(data: &[[u8; 4]]) -> Rgba<u8> {
         let start = vector!(0., 0., 0., 0.);
-        let mean = data
+        let rgba_sum = data
             .par_chunks_exact(1024)
             .fold(
                 || start,
@@ -314,9 +322,17 @@ mod tests {
                 },
             )
             .reduce(|| start, |acc, item| acc + item);
-        Rgba(
-            mean.map(|v| (v * 255. / (data.len() as f32)).round() as u8)
-                .into(),
-        )
+
+        let red = rgba_sum.x / rgba_sum.w;
+        let green = rgba_sum.y / rgba_sum.w;
+        let blue = rgba_sum.z / rgba_sum.w;
+        let alpha = rgba_sum.w / (data.len()) as f32;
+
+        return Rgba([
+            (red * 255.) as u8,
+            (green * 255.) as u8,
+            (blue * 255.) as u8,
+            (alpha * 255.) as u8,
+        ]);
     }
 }

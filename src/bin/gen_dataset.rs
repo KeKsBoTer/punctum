@@ -1,5 +1,5 @@
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{BufReader, BufWriter},
     sync::{Arc, Mutex},
 };
@@ -28,6 +28,11 @@ struct Opt {
 
     #[structopt(name = "output", parse(from_os_str))]
     output_folder: PathBuf,
+
+    /// saves the individually rendered images as pngs
+    /// WARNING: this createa A LOT of images  (162 per octant)
+    #[structopt(long)]
+    export_images: bool,
 }
 
 struct RenderPool {
@@ -46,6 +51,7 @@ impl RenderPool {
                         point_size: 10,
                         ..RenderSettings::default()
                     },
+                    true,
                 )))
             })
             .collect::<Vec<Arc<Mutex<OfflineRenderer>>>>();
@@ -156,10 +162,9 @@ fn main() {
     let pb_clone = pb.clone();
     octree
         .into_iter()
-        .enumerate()
         .par_bridge()
         .into_par_iter()
-        .for_each(|(i, node)| {
+        .for_each(|node| {
             let data_32 = node
                 .data
                 .iter()
@@ -185,10 +190,33 @@ fn main() {
 
                 let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
 
+                let img_folder = opt.output_folder.join(format!("octant_{}", node.id));
+                if opt.export_images && !img_folder.exists() {
+                    fs::create_dir(img_folder.clone()).unwrap();
+                }
+
                 let renders = cameras
                     .iter()
-                    .map(|c| renderer.render(c.clone(), &pc_gpu))
+                    .enumerate()
+                    .map(|(view_idx, c)| {
+                        let avg_color = renderer.render(c.clone(), &pc_gpu);
+                        if opt.export_images {
+                            let img = renderer.last_image();
+
+                            img.save(img_folder.join(format!(
+                                "view_{}-{}r_{}g_{}b_{}a.png",
+                                view_idx,
+                                avg_color.0[0],
+                                avg_color.0[1],
+                                avg_color.0[2],
+                                avg_color.0[3],
+                            )))
+                            .unwrap();
+                        }
+                        return avg_color;
+                    })
                     .collect();
+
                 renders
             };
 
@@ -201,7 +229,7 @@ fn main() {
                 })
                 .collect();
 
-            let out_file = opt.output_folder.join(format!("octant_{}.ply", i));
+            let out_file = opt.output_folder.join(format!("octant_{}.ply", node.id));
             export_ply(&out_file, pc, &cam_colors);
             pb_clone.lock().unwrap().inc();
         });

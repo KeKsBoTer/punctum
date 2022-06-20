@@ -144,7 +144,8 @@ where
 #[derive(StructOpt, Debug)]
 #[structopt(name = "Octree Builder")]
 struct Opt {
-    #[structopt(name = "input_las", parse(from_os_str))]
+    /// .las or .ply input file
+    #[structopt(name = "input_file", parse(from_os_str))]
     input: PathBuf,
 
     #[structopt(name = "output", parse(from_os_str))]
@@ -156,6 +157,7 @@ struct Opt {
     #[structopt(long)]
     sample_rate: Option<usize>,
 
+    /// flip y and z values
     #[structopt(long)]
     flip_yz: bool,
 }

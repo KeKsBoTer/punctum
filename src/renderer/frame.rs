@@ -55,7 +55,7 @@ impl Frame {
         &mut self,
         queue: Arc<Queue>,
         cb: Arc<SecondaryAutoCommandBuffer>,
-        target_buffer: Arc<CpuAccessibleBuffer<[[u8; 4]]>>,
+        target_buffer: Option<Arc<CpuAccessibleBuffer<[u8]>>>,
     ) -> PrimaryAutoCommandBuffer {
         let fb = &self.buffer;
 
@@ -78,9 +78,11 @@ impl Frame {
 
         builder.execute_commands(cb).unwrap();
         builder.end_render_pass().unwrap();
-        builder
-            .copy_image_to_buffer(fb.image().clone(), target_buffer.clone())
-            .unwrap();
+        if let Some(buffer) = target_buffer {
+            builder
+                .copy_image_to_buffer(fb.image().clone(), buffer.clone())
+                .unwrap();
+        }
         return builder.build().unwrap();
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use camera::Projection;
-use image::Rgba;
+use image::{ImageBuffer, Rgba};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::{
@@ -114,12 +114,13 @@ pub struct OfflineRenderer {
     frame: Frame,
     queue: Arc<Queue>,
     calc_img_average: ImageAvgColor,
+    img_size: u32,
 
-    buffer: Arc<CpuAccessibleBuffer<[[u8; 4]]>>,
+    cpu_buffer: Option<Arc<CpuAccessibleBuffer<[u8]>>>,
 }
 
 impl OfflineRenderer {
-    pub fn new(img_size: u32, render_settings: RenderSettings) -> Self {
+    pub fn new(img_size: u32, render_settings: RenderSettings, save_renders: bool) -> Self {
         let required_extensions = vulkano_win::required_extensions();
         let instance = Instance::new(InstanceCreateInfo {
             enabled_extensions: required_extensions,
@@ -169,13 +170,19 @@ impl OfflineRenderer {
         let mut renderer =
             PointCloudRenderer::new(device.clone(), queue.clone(), scene_subpass, viewport);
 
-        let target_buffer = CpuAccessibleBuffer::from_iter(
-            device.clone(),
-            BufferUsage::transfer_destination(),
-            false,
-            (0..img_size * img_size).map(|_| [0u8; 4]),
-        )
-        .expect("failed to create buffer");
+        let cpu_buffer = if save_renders {
+            Some(
+                CpuAccessibleBuffer::from_iter(
+                    device.clone(),
+                    BufferUsage::transfer_destination(),
+                    false,
+                    (0..img_size * img_size * 4).map(|_| 0u8),
+                )
+                .unwrap(),
+            )
+        } else {
+            None
+        };
 
         renderer.set_point_size(render_settings.point_size);
         frame.set_background(render_settings.background_color);
@@ -188,9 +195,10 @@ impl OfflineRenderer {
         OfflineRenderer {
             renderer,
             frame,
-            queue: queue,
-            calc_img_average: calc_img_average,
-            buffer: target_buffer,
+            queue,
+            calc_img_average,
+            img_size,
+            cpu_buffer,
         }
     }
 
@@ -200,10 +208,19 @@ impl OfflineRenderer {
 
         let cb_render = self
             .frame
-            .render(self.queue.clone(), cb, self.buffer.clone());
+            .render(self.queue.clone(), cb, self.cpu_buffer.clone());
 
         let avg_color = self.calc_img_average.calc_average_color(cb_render);
         return avg_color;
+    }
+
+    pub fn last_image(&self) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+        if let Some(buffer) = &self.cpu_buffer {
+            let img_data = buffer.read().unwrap();
+            ImageBuffer::from_raw(self.img_size, self.img_size, img_data[..].to_vec()).unwrap()
+        } else {
+            panic!("save_renders is false so the image is not stored");
+        }
     }
 }
 

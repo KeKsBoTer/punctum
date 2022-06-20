@@ -3,6 +3,7 @@ from plyfile import PlyData, PlyElement
 import numpy as np
 import glob
 from os.path import join, basename
+import os
 from sh import to_spherical, calc_coeficients, lm2flat_index
 from tqdm import tqdm
 
@@ -33,6 +34,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    os.makedirs(args.out_folder, exist_ok=True)
+
     device = "cuda" if args.cuda else "cpu"
 
     for filename in tqdm(
@@ -49,7 +52,9 @@ if __name__ == "__main__":
 
         cameras = unpack_data(vertex_data, ["x", "y", "z"]).to(device)
         perceived_colors = (
-            unpack_data(vertex_data, ["red", "green", "blue"]).float().to(device)
+            unpack_data(vertex_data, ["red", "green", "blue", "alpha"])
+            .float()
+            .to(device)
             / 255.0
         )
 
@@ -67,7 +72,7 @@ if __name__ == "__main__":
                 coef_data.append((l, -l + m, list(sh.numpy())))
 
         ply_sh_data = np.array(
-            coef_data, dtype=[("l", "u1"), ("m", "i1"), ("coefficients", "f4", (3,))]
+            coef_data, dtype=[("l", "u1"), ("m", "i1"), ("coefficients", "f4", (4,))]
         )
 
         sh_elm = PlyElement.describe(ply_sh_data, "sh_coefficients")

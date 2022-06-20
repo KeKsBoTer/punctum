@@ -23,9 +23,7 @@ out gl_PerVertex
 
 
 layout(location = 0) out vec4 vertex_color;
-// layout(location = 1) out float zNear;
-// layout(location = 2) out float zFar;
-// layout(location = 3) out float pointSize;
+layout(location = 1) out float pointSize;
 
 void main() {
     vec3 pos = position;
@@ -36,7 +34,7 @@ void main() {
 
     vertex_color = color;
 
-    // pointSize = gl_PointSize;
+    pointSize = gl_PointSize;
     // zNear = uniforms.zNear;
     // zFar = uniforms.zFar;
 }
