@@ -23,3 +23,4 @@ datasets_old/*
 graphs/
 logs*/
 sh_tests/
+tests/sh_errors

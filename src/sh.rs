@@ -223,7 +223,10 @@ mod tests {
                     .save(format!("tests/sh_errors/error_l_{}_m_{}.png", l, m))
                     .unwrap();
                 rust_img
-                    .save(format!("tests/sh_errors/img_l_{}_m_{}.png", l, m))
+                    .save(format!("tests/sh_errors/rust_l_{}_m_{}.png", l, m))
+                    .unwrap();
+                py_img
+                    .save(format!("tests/sh_errors/py_l_{}_m_{}.png", l, m))
                     .unwrap();
             }
         }

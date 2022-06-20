@@ -17,7 +17,7 @@ l = 10
 shs = calc_sh(l, coords).reshape((res, res, (l + 1) ** 2)).permute(2, 0, 1)
 for i, sh in enumerate(shs):
     l, m = flat2lm_index(i)
-    sh = (sh + 1) / 2
+    sh = (sh.clip(-1, 1) + 1) / 2
     img = sh.unsqueeze(-1).repeat(1, 1, 4)
     img[:, :, 3] = 1
     img_byte = (img * 255).byte()
