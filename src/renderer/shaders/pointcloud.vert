@@ -1,12 +1,12 @@
-#version 450
+#version 460
 #extension GL_EXT_scalar_block_layout : enable
 #extension GL_EXT_buffer_reference2 : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 struct Vertex 
 {
-  vec4 pos;
-//   vec4 color;
+  vec3 pos;
+  vec4 color;
 };
 
 
@@ -27,7 +27,7 @@ layout(set = 0, binding = 0) uniform UniformData {
 } uniforms;
 
 
-layout(set = 0, binding = 1, scalar) buffer ObjDesc { uint64_t vertexAddress; } objDesc;
+layout(set = 0, binding = 1, scalar) uniform ObjDesc { uint64_t vertexAddress; } objDesc;
 
 
 out gl_PerVertex
@@ -44,9 +44,9 @@ void main() {
 
     Vertices vertices = Vertices(objDesc.vertexAddress);
 
-    vec4 pos = vertices.v[0].pos;
+    vec4 pos = vec4(vertices.v[gl_VertexIndex].pos,1);
     mat4 worldview = uniforms.view * uniforms.world;
-    gl_Position = uniforms.proj * worldview * pos;
+    gl_Position = pos;//uniforms.proj * worldview * pos;
     
     gl_PointSize = uniforms.point_size;
 

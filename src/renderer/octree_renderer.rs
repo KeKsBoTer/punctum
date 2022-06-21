@@ -3,12 +3,10 @@ use crate::{
     vertex::Vertex,
     Octree, Viewport,
 };
-use ash::vk::{BufferDeviceAddressInfo, StructureType};
-use nalgebra::{matrix, DimAdd, Point3, Vector4};
+use nalgebra::matrix;
 use std::{
     collections::HashMap,
     num::NonZeroU64,
-    ptr,
     sync::{Arc, RwLock},
 };
 use vulkano::{
@@ -111,7 +109,7 @@ pub struct OctreeRenderer {
 
     reference_buffer: Arc<CpuAccessibleBuffer<vs::ty::ObjDesc>>,
 
-    vertex_buffer: Arc<CpuAccessibleBuffer<[Vector4<f32>]>>,
+    vertex_buffer: Arc<CpuAccessibleBuffer<i32>>,
     phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>>,
 
     indirect_draw_cmd: Arc<CpuBufferPoolChunk<DrawIndirectCommand, Arc<StdMemoryPool>>>,
@@ -164,7 +162,7 @@ impl OctreeRenderer {
         }];
         let indirect_draw_cmd = indirect_args_pool.chunk(indirect_commands).unwrap();
 
-        let vertex_buffer = CpuAccessibleBuffer::from_iter(
+        let vertex_buffer = CpuAccessibleBuffer::from_data(
             device.clone(),
             BufferUsage {
                 device_address: true,
@@ -173,37 +171,15 @@ impl OctreeRenderer {
                 ..BufferUsage::none()
             },
             false,
-            (0..10).map(|i| Vector4::new(1., 0., 0., 1.)),
+            -7,
         )
         .unwrap();
 
-        let phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>> = DeviceLocalBuffer::array(
-            device.clone(),
-            1,
-            BufferUsage::vertex_buffer(),
-            [queue.family()],
-        )
-        .unwrap();
+        let phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>> =
+            DeviceLocalBuffer::array(device.clone(), 1, BufferUsage::all(), [queue.family()])
+                .unwrap();
 
-        // let raw_buffer: ash::vk::Buffer = vertex_buffer.inner().buffer.internal_object();
-        // println!("{:#?}", vertex_buffer.inner().offset);
-
-        // let vk_device = device.internal_object();
-
-        // let buffer_device_address_info = BufferDeviceAddressInfo {
-        //     s_type: StructureType::BUFFER_DEVICE_ADDRESS_INFO,
-        //     p_next: ptr::null(),
-        //     buffer: raw_buffer,
-        // };
-
-        // let addr = unsafe {
-        //     device
-        //         .fns()
-        //         .ext_buffer_device_address
-        //         .get_buffer_device_address_ext(vk_device, ptr::addr_of!(buffer_device_address_info))
-        // };
-
-        let addr = raw_device_address(&vertex_buffer).unwrap();
+        let addr = raw_device_address(&phantom_buffer).unwrap();
 
         let reference_buffer = CpuAccessibleBuffer::from_data(
             device.clone(),
