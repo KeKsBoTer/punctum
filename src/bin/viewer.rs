@@ -5,6 +5,7 @@ use std::sync::mpsc::TryRecvError;
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Instant;
+use vulkano::device::Features;
 
 use pbr::ProgressBar;
 use structopt::StructOpt;
@@ -73,6 +74,7 @@ fn main() {
 
     let device_extensions = DeviceExtensions {
         khr_swapchain: true,
+        ext_buffer_device_address: true,
         ..DeviceExtensions::none()
     };
 
@@ -89,7 +91,11 @@ fn main() {
                 .union(&device_extensions),
 
             queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
-
+            enabled_features: Features {
+                buffer_device_address: true,
+                shader_int64: true,
+                ..Features::none()
+            },
             ..Default::default()
         },
     )
@@ -133,16 +139,16 @@ fn main() {
 
     let renderer_clone = renderer.clone();
 
-    let (tx, rx) = mpsc::channel();
-    let frustum_culling_thread = thread::spawn(move || loop {
-        renderer_clone.frustum_culling();
-        match rx.try_recv() {
-            Ok(_) | Err(TryRecvError::Disconnected) => {
-                break;
-            }
-            Err(TryRecvError::Empty) => {}
-        }
-    });
+    // let (tx, rx) = mpsc::channel();
+    // let frustum_culling_thread = thread::spawn(move || loop {
+    //     renderer_clone.frustum_culling();
+    //     match rx.try_recv() {
+    //         Ok(_) | Err(TryRecvError::Disconnected) => {
+    //             break;
+    //         }
+    //         Err(TryRecvError::Empty) => {}
+    //     }
+    // });
 
     let mut camera_controller = CameraController::new(50., 1.);
 
@@ -246,10 +252,10 @@ fn main() {
             frame.render(queue.clone(), pc_cb.clone());
         }
         Event::LoopDestroyed => {
-            let _ = tx.send(());
+            // let _ = tx.send(());
         }
         _ => (),
     });
 
-    frustum_culling_thread.join().unwrap();
+    // frustum_culling_thread.join().unwrap();
 }

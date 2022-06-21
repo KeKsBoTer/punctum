@@ -3,14 +3,24 @@ use crate::{
     vertex::Vertex,
     Octree, Viewport,
 };
-use nalgebra::matrix;
+use ash::vk::{BufferDeviceAddressInfo, StructureType};
+use nalgebra::{matrix, DimAdd, Point3, Vector4};
 use std::{
     collections::HashMap,
+    num::NonZeroU64,
+    ptr,
     sync::{Arc, RwLock},
 };
 use vulkano::{
-    buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool},
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
+    buffer::{
+        cpu_pool::{CpuBufferPoolChunk, CpuBufferPoolSubbuffer},
+        BufferAccess, BufferDeviceAddressError, BufferUsage, CpuAccessibleBuffer, CpuBufferPool,
+        DeviceLocalBuffer,
+    },
+    command_buffer::{
+        AutoCommandBufferBuilder, CommandBufferUsage, DrawIndirectCommand,
+        SecondaryAutoCommandBuffer,
+    },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, Queue},
     memory::pool::StdMemoryPool,
@@ -25,6 +35,7 @@ use vulkano::{
     },
     render_pass::Subpass,
     shader::ShaderModule,
+    VulkanObject,
 };
 
 use super::UniformBuffer;
@@ -36,6 +47,11 @@ mod vs {
     vulkano_shaders::shader! {
         ty: "vertex",
         path: "src/renderer/shaders/pointcloud.vert",
+
+        types_meta: {
+            use bytemuck::{Pod, Zeroable};
+            #[derive(Clone, Copy,Pod, Zeroable)]
+        }
     }
 
     #[derive(Clone, Copy)]
@@ -92,6 +108,13 @@ pub struct OctreeRenderer {
     octree: Arc<Octree<f32, f32>>,
     loaded_octants: RwLock<HashMap<u64, OctantBuffer<8192>>>,
     octants_pool: CpuBufferPool<[Vertex<f32, f32>; 8192]>,
+
+    reference_buffer: Arc<CpuAccessibleBuffer<vs::ty::ObjDesc>>,
+
+    vertex_buffer: Arc<CpuAccessibleBuffer<[Vector4<f32>]>>,
+    phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>>,
+
+    indirect_draw_cmd: Arc<CpuBufferPoolChunk<DrawIndirectCommand, Arc<StdMemoryPool>>>,
 }
 
 impl OctreeRenderer {
@@ -120,13 +143,8 @@ impl OctreeRenderer {
             0., 0., 0.   , 1.
         ];
 
-        // let test_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>> = DeviceLocalBuffer::array(
-        //     device.clone(),
-        //     100,
-        //     BufferUsage::vertex_buffer(),
-        //     [queue.family()],
-        // )
-        // .unwrap();
+        // let reference_buffer =
+        //     CpuAccessibleBuffer::from_data(device.clone(), BufferUsage::uniform_buffer(), false);
 
         let uniforms = RwLock::new(UniformBuffer::new(
             device.clone(),
@@ -135,6 +153,71 @@ impl OctreeRenderer {
                 ..vs::UniformData::default()
             }),
         ));
+
+        let indirect_args_pool: CpuBufferPool<DrawIndirectCommand> =
+            CpuBufferPool::new(device.clone(), BufferUsage::indirect_buffer());
+        let indirect_commands = [DrawIndirectCommand {
+            vertex_count: 10,
+            instance_count: 1,
+            first_vertex: 0,
+            first_instance: 0,
+        }];
+        let indirect_draw_cmd = indirect_args_pool.chunk(indirect_commands).unwrap();
+
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage {
+                device_address: true,
+                storage_buffer: true,
+                vertex_buffer: true,
+                ..BufferUsage::none()
+            },
+            false,
+            (0..10).map(|i| Vector4::new(1., 0., 0., 1.)),
+        )
+        .unwrap();
+
+        let phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>> = DeviceLocalBuffer::array(
+            device.clone(),
+            1,
+            BufferUsage::vertex_buffer(),
+            [queue.family()],
+        )
+        .unwrap();
+
+        // let raw_buffer: ash::vk::Buffer = vertex_buffer.inner().buffer.internal_object();
+        // println!("{:#?}", vertex_buffer.inner().offset);
+
+        // let vk_device = device.internal_object();
+
+        // let buffer_device_address_info = BufferDeviceAddressInfo {
+        //     s_type: StructureType::BUFFER_DEVICE_ADDRESS_INFO,
+        //     p_next: ptr::null(),
+        //     buffer: raw_buffer,
+        // };
+
+        // let addr = unsafe {
+        //     device
+        //         .fns()
+        //         .ext_buffer_device_address
+        //         .get_buffer_device_address_ext(vk_device, ptr::addr_of!(buffer_device_address_info))
+        // };
+
+        let addr = raw_device_address(&vertex_buffer).unwrap();
+
+        let reference_buffer = CpuAccessibleBuffer::from_data(
+            device.clone(),
+            BufferUsage {
+                uniform_buffer: true,
+                storage_buffer: true,
+                ..BufferUsage::default()
+            },
+            false,
+            vs::ty::ObjDesc {
+                vertexAddress: addr.into(),
+            },
+        )
+        .unwrap();
 
         let pool: CpuBufferPool<[Vertex<f32, f32>; 8192]> =
             CpuBufferPool::new(device.clone(), BufferUsage::vertex_buffer());
@@ -151,6 +234,10 @@ impl OctreeRenderer {
             octree,
             loaded_octants: RwLock::new(HashMap::new()),
             octants_pool: pool,
+            reference_buffer,
+            vertex_buffer,
+            phantom_buffer,
+            indirect_draw_cmd,
         }
     }
 
@@ -242,9 +329,14 @@ impl OctreeRenderer {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.pool_chunk().clone()
         };
+
+        // TODO maybe pass chunks as buffer_array ?
         let set = PersistentDescriptorSet::new(
             layout.clone(),
-            [WriteDescriptorSet::buffer(0, uniform_buffer)],
+            [
+                WriteDescriptorSet::buffer(0, uniform_buffer),
+                WriteDescriptorSet::buffer(1, self.reference_buffer.clone()),
+            ],
         )
         .unwrap();
 
@@ -265,12 +357,23 @@ impl OctreeRenderer {
                 set.clone(),
             );
 
-        for (_, octant) in self.loaded_octants.read().unwrap().iter() {
-            builder
-                .bind_vertex_buffers(0, octant.points.clone())
-                .draw(octant.length, 1, 0, 0)
-                .unwrap();
-        }
+        // for (_, octant) in self.loaded_octants.read().unwrap().iter() {
+        //     builder
+        //         .bind_vertex_buffers(0, octant.points.clone())
+        //         .draw(octant.length, 1, 0, 0)
+        //         .unwrap();
+        // }
+
+        // builder
+        //     .bind_vertex_buffers(0, self.phantom_buffer.clone())
+        //     .draw(10, 1, 0, 0)
+        //     .unwrap();
+
+        builder
+            .bind_vertex_buffers(0, self.phantom_buffer.clone())
+            .draw_indirect(self.indirect_draw_cmd.clone())
+            .unwrap();
+
         Arc::new(builder.build().unwrap())
     }
 
@@ -293,5 +396,37 @@ impl OctreeRenderer {
             zfar: *camera.zfar(),
             ..current
         });
+    }
+}
+
+fn raw_device_address(buffer: impl BufferAccess) -> Result<NonZeroU64, BufferDeviceAddressError> {
+    let inner = buffer.inner();
+    let device = buffer.device();
+
+    // VUID-vkGetBufferDeviceAddress-bufferDeviceAddress-03324
+    if !device.enabled_features().buffer_device_address {
+        return Err(BufferDeviceAddressError::FeatureNotEnabled);
+    }
+
+    // VUID-VkBufferDeviceAddressInfo-buffer-02601
+    if !inner.buffer.usage().device_address {
+        return Err(BufferDeviceAddressError::BufferMissingUsage);
+    }
+
+    unsafe {
+        let info = ash::vk::BufferDeviceAddressInfo {
+            buffer: inner.buffer.internal_object(),
+            ..Default::default()
+        };
+        let ptr = device
+            .fns()
+            .ext_buffer_device_address
+            .get_buffer_device_address_ext(device.internal_object(), &info);
+
+        if ptr == 0 {
+            panic!("got null ptr from a valid GetBufferDeviceAddressEXT call");
+        }
+
+        Ok(NonZeroU64::new_unchecked(ptr + inner.offset))
     }
 }

@@ -1394,6 +1394,7 @@ name = "punctum"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "ash",
  "bincode",
  "bytemuck",
  "image",
