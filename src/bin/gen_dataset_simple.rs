@@ -85,7 +85,7 @@ impl RenderPool {
 
 fn export_ply(
     output_file: &PathBuf,
-    pc: Arc<PointCloud<f32, f32>>,
+    pc: &PointCloud<f32, f32>,
     observed_colors: &Vec<Vertex<f32, f32>>,
 ) {
     let mut file = BufWriter::new(File::create(output_file).unwrap());
@@ -183,7 +183,7 @@ fn main() {
         let octant_size: usize =
             ((dist.sample(&mut rand_gen) + 1) * opt.max_octant_size) / OCTREE_SIZE_DIST.len();
 
-        let points = (0..octant_size)
+        let points: Vec<Vertex<f32, f32>> = (0..octant_size)
             .map(|j| {
                 let angle = j as f32 / octant_size as f32 * 2. * PI;
                 Vertex {
@@ -193,8 +193,7 @@ fn main() {
             })
             .collect();
 
-        let pc = PointCloud::from_vec(&points);
-        let pc = Arc::new(pc);
+        let pc: PointCloud<f32, f32> = points.into();
 
         let renders: Vec<Rgba<u8>> = {
             let renderer = {
@@ -225,7 +224,7 @@ fn main() {
             .collect();
 
         let out_file = opt.output_folder.join(format!("octant_{}.ply", i));
-        export_ply(&out_file, pc, &cam_colors);
+        export_ply(&out_file, &pc, &cam_colors);
         pb_clone.lock().unwrap().inc();
     });
     pb.lock().unwrap().finish();

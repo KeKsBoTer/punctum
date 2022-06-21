@@ -1,7 +1,7 @@
 use std::{fs::File, io::BufReader, path::PathBuf, sync::Arc};
 
 use pbr::ProgressBar;
-use punctum::{export_ply, Octree, PointCloud, TeeReader, Vertex};
+use punctum::{export_ply, Octree, TeeReader, Vertex};
 use rand::prelude::IteratorRandom;
 use structopt::StructOpt;
 
@@ -45,7 +45,5 @@ fn main() {
     let export_points: Vec<Vertex<f64, u8>> =
         points.into_iter().choose_multiple(&mut rng, opt.max_points);
 
-    let pc = PointCloud::from_vec(&export_points);
-
-    export_ply(&opt.output, &pc);
+    export_ply(&opt.output, &export_points.into());
 }

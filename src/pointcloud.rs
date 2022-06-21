@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{mem, sync::Arc};
 
 use nalgebra::{center, distance_squared, Matrix4, Point3, RealField, Vector3};
 use vulkano::{
@@ -8,66 +8,48 @@ use vulkano::{
 
 use crate::vertex::{BaseColor, BaseFloat, Vertex};
 
-pub struct PointCloud<F: BaseFloat, C: BaseColor> {
-    data: Vec<Vertex<F, C>>,
-    bbox: CubeBoundingBox<F>,
-}
-
-impl PointCloud<f32, f32> {
-    pub fn from_ply_file(filename: &str) -> Self {
-        let mut f = std::fs::File::open(filename).unwrap();
-
-        // create a parser
-        let p = ply_rs::parser::Parser::<Vertex<f32, f32>>::new();
-
-        // use the parser: read the entire file
-        let ply = p.read_ply(&mut f);
-
-        // make sure it did work
-        assert!(ply.is_ok());
-        let ply = ply.unwrap();
-
-        let points = ply.payload.get("vertex").unwrap().clone();
-        let bbox = CubeBoundingBox::from_points(&points);
-
-        PointCloud {
-            data: points,
-            bbox: bbox,
-        }
-    }
-}
+#[derive(Debug, Clone)]
+#[repr(transparent)]
+pub struct PointCloud<F: BaseFloat, C: BaseColor>(Vec<Vertex<F, C>>);
 
 impl Into<PointCloud<f32, u8>> for &PointCloud<f32, f32> {
     fn into(self) -> PointCloud<f32, u8> {
-        PointCloud {
-            data: self
-                .data
-                .iter()
-                .map(|p| (*p).into())
-                .collect::<Vec<Vertex<f32, u8>>>(),
-            bbox: self.bbox.clone(),
-        }
+        self.0
+            .iter()
+            .map(|p| (*p).into())
+            .collect::<Vec<Vertex<f32, u8>>>()
+            .into()
+    }
+}
+
+impl<F: BaseFloat, C: BaseColor> Into<PointCloud<F, C>> for Vec<Vertex<F, C>> {
+    fn into(self) -> PointCloud<F, C> {
+        PointCloud(self)
+    }
+}
+
+impl<'a, F: BaseFloat, C: BaseColor> Into<&'a PointCloud<F, C>> for &'a Vec<Vertex<F, C>> {
+    fn into(self) -> &'a PointCloud<F, C> {
+        unsafe { mem::transmute::<&Vec<Vertex<F, C>>, &PointCloud<F, C>>(self) }
+    }
+}
+
+impl<F: BaseFloat, C: BaseColor> Into<Vec<Vertex<F, C>>> for PointCloud<F, C> {
+    fn into(self) -> Vec<Vertex<F, C>> {
+        self.0
     }
 }
 
 impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
-    pub fn from_vec(points: &Vec<Vertex<F, C>>) -> Self {
-        let bbox = CubeBoundingBox::from_points(points);
-        PointCloud {
-            data: points.clone(),
-            bbox: bbox,
-        }
-    }
-
     // scales all points to fix into a sphere with radius 1 and center at 0.0;
     pub fn scale_to_unit_sphere(&mut self) {
         let center = self
-            .data
+            .0
             .iter()
             .fold(Point3::origin(), |acc, v| acc + &v.position.coords)
-            / F::from_usize(self.data.len()).unwrap();
+            / F::from_usize(self.0.len()).unwrap();
         let mut max_size = self
-            .data
+            .0
             .iter()
             .map(|p| distance_squared(&p.position, &center))
             .reduce(|acum, item| F::max(acum, item))
@@ -80,15 +62,15 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
             max_size = F::from_subset(&1.);
         }
 
-        self.data.iter_mut().for_each(|p| {
+        self.0.iter_mut().for_each(|p| {
             p.position = (&p.position - &center.coords) / max_size.clone();
         });
-        self.bbox = CubeBoundingBox::from_points(&self.data);
     }
 
     pub fn scale_to_size(&mut self, size: F) {
-        let center = self.bbox.center;
-        let mut max_size = self.bbox.size;
+        let bbox = CubeBoundingBox::from_points(&self.0);
+        let center = bbox.center;
+        let mut max_size = bbox.size;
 
         // if we have only one point in the pointcloud we would divide by 0 later
         // so just set it to 1
@@ -96,45 +78,47 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
             max_size = F::from_subset(&1.);
         }
 
-        self.data.iter_mut().for_each(|p| {
+        self.0.iter_mut().for_each(|p| {
             p.position = (&p.position - &center.coords) / max_size.clone() * size;
         });
-        self.bbox = CubeBoundingBox::from_points(&self.data);
-    }
-
-    pub fn bounding_box(&self) -> &CubeBoundingBox<F> {
-        &self.bbox
     }
 
     pub fn points(&self) -> &Vec<Vertex<F, C>> {
-        &self.data
+        &self.0
+    }
+}
+
+impl<F: BaseFloat> PointCloud<F, f32> {
+    pub fn mean(&self) -> Vertex<F, f32> {
+        let mut mean = Vertex::default();
+        for v in self.0.iter() {
+            mean.position += v.position.coords;
+            mean.color += v.color;
+        }
+        let length = self.0.len() as f64;
+        mean.position /= F::from_subset(&length);
+        mean.color /= length as f32;
+
+        return mean;
     }
 }
 
 pub struct PointCloudGPU {
-    cpu: Arc<PointCloud<f32, f32>>,
     gpu_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>>,
 }
 
 impl PointCloudGPU {
-    pub fn from_point_cloud(device: Arc<Device>, pc: Arc<PointCloud<f32, f32>>) -> Self {
-        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            device,
-            BufferUsage::vertex_buffer(),
-            false,
-            pc.data.clone(),
-        )
-        .unwrap();
+    pub fn from_point_cloud(device: Arc<Device>, pc: PointCloud<f32, f32>) -> Self {
+        let points: Vec<Vertex<f32, f32>> = pc.into();
+        let vertex_buffer =
+            CpuAccessibleBuffer::from_iter(device, BufferUsage::vertex_buffer(), false, points)
+                .unwrap();
 
         PointCloudGPU {
             gpu_buffer: vertex_buffer,
-            cpu: pc.clone(),
         }
     }
 
-    pub fn cpu(&self) -> &Arc<PointCloud<f32, f32>> {
-        &self.cpu
-    }
     pub fn gpu_buffer(&self) -> &Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>> {
         &self.gpu_buffer
     }
@@ -208,7 +192,7 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
     /// checks if all 8 points that define the bounding box
     /// can be seen by the given projection matrix
     /// IMPORTANT: this does not cover the case where the box is so big,
-    /// that none of the points are seen
+    /// that none of the points are within the frustum
     pub fn at_least_one_point_visible(&self, projection: &Matrix4<F>) -> bool {
         let one = F::from_subset(&1.);
         let points = self.corners();

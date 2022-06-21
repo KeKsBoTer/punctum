@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use nalgebra::{convert, Point3, Vector3};
+use nalgebra::{convert, Point3, Vector3, Vector4};
+use serde_big_array::BigArray;
 
 use crate::{
     vertex::{BaseColor, BaseFloat},
@@ -8,14 +9,35 @@ use crate::{
 };
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct SphericalHarmonicsApproximation<F: BaseFloat, const T: usize> {
+    pub position: Point3<F>,
+    #[serde(with = "BigArray")]
+    pub coefficients: [Vector4<f32>; T],
+}
+
+impl<F: BaseFloat, const T: usize> Default for SphericalHarmonicsApproximation<F, T> {
+    fn default() -> Self {
+        Self {
+            position: Point3::origin(),
+            coefficients: [Vector4::zeros(); T],
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Octant<F: BaseFloat, C: BaseColor> {
     id: u64,
     data: Vec<Vertex<F, C>>,
+    pub sh_approximation: Option<SphericalHarmonicsApproximation<F, 121>>,
 }
 
 impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
     fn new(id: u64, data: Vec<Vertex<F, C>>) -> Self {
-        Self { id, data }
+        Self {
+            id,
+            data,
+            sh_approximation: None,
+        }
     }
 
     fn split(
@@ -39,7 +61,7 @@ impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
             let (octant_i, _, _) = Node::child_octant(v, center, size);
             match &mut new_data[octant_i] {
                 Node::Group(_) => panic!("unreachable"),
-                Node::Filled(Octant { id: _, data }) => data.push(*v),
+                Node::Filled(Octant { id: _, data, .. }) => data.push(*v),
                 Node::Empty => {
                     let mut new_vec = Vec::with_capacity(max_node_size);
                     new_vec.push(*v);
@@ -49,6 +71,10 @@ impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
             }
         }
         return new_data;
+    }
+
+    pub fn points(&self) -> &Vec<Vertex<F, C>> {
+        &self.data
     }
 }
 
@@ -135,7 +161,19 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
                     node.traverse(f, center_new, size_new);
                 }
             }
-            Node::Filled(Octant { id, data }) => f(*id, data, center, size),
+            Node::Filled(Octant { id, data, .. }) => f(*id, data, center, size),
+            Node::Empty => {}
+        }
+    }
+
+    fn traverse_mut<'a, A: Fn(&'a mut Octant<F, C>)>(&'a mut self, f: &A) {
+        match self {
+            Node::Group(group) => {
+                for node in group.iter_mut() {
+                    node.traverse_mut(&f);
+                }
+            }
+            Node::Filled(octant) => f(octant),
             Node::Empty => {}
         }
     }
@@ -264,6 +302,10 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         self.root.traverse(&mut f, self.center, self.size)
     }
 
+    pub fn traverse_mut<'a, A: Fn(&'a mut Octant<F, C>)>(&'a mut self, f: &A) {
+        self.root.traverse_mut(&f)
+    }
+
     pub fn depth(&self) -> usize {
         self.root.depth()
     }
@@ -336,7 +378,9 @@ impl Into<Node<f32, f32>> for Node<f64, u8> {
     fn into(self) -> Node<f32, f32> {
         match self {
             Node::Group(octants) => Node::Group(Box::new(octants.map(|octant| octant.into()))),
-            Node::Filled(Octant { id, data: points }) => Node::Filled(Octant::new(
+            Node::Filled(Octant {
+                id, data: points, ..
+            }) => Node::Filled(Octant::new(
                 id,
                 points
                     .iter()
@@ -358,5 +402,44 @@ impl Into<Octree<f32, f32>> for Octree<f64, u8> {
             depth: self.depth,
             num_points: self.num_points,
         }
+    }
+}
+
+pub struct OctreeIteratorMut<'a, F: BaseFloat, C: BaseColor> {
+    stack: Vec<&'a mut Node<F, C>>,
+}
+
+impl<'a, F: BaseFloat, C: BaseColor> IntoIterator for &'a mut Octree<F, C> {
+    type Item = &'a mut Octant<F, C>;
+    type IntoIter = OctreeIteratorMut<'a, F, C>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let mut stack = Vec::new();
+        stack.push(&mut self.root);
+        OctreeIteratorMut { stack: stack }
+    }
+}
+
+impl<'a, F: BaseFloat, C: BaseColor> Iterator for OctreeIteratorMut<'a, F, C> {
+    type Item = &'a mut Octant<F, C>;
+
+    fn next(&mut self) -> Option<&'a mut Octant<F, C>> {
+        while let Some(node) = self.stack.pop() {
+            match node {
+                Node::Group(octants) => {
+                    for o in octants.iter_mut() {
+                        if let Node::Empty = o {
+                        } else {
+                            self.stack.push(o);
+                        }
+                    }
+                }
+                Node::Filled(octant) => return Some(octant),
+                Node::Empty => {
+                    panic!("unreachable")
+                }
+            }
+        }
+        None
     }
 }

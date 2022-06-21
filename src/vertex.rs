@@ -1,29 +1,40 @@
+use std::ops::AddAssign;
+
 use bytemuck::{Pod, Zeroable};
 use nalgebra::{Point3, RealField, Scalar, Vector4};
 use num_traits::{ToPrimitive, Zero};
 use ply_rs::ply::{self, Addable, ElementDef, PropertyDef, PropertyType, ScalarType};
 use serde::{Deserialize, Serialize};
 
-pub trait BaseFloat: Scalar + ToPrimitive + RealField + PlyType + Copy {}
-impl<T: Scalar + ToPrimitive + RealField + PlyType + Copy> BaseFloat for T {}
+pub trait BaseFloat:
+    Scalar + ToPrimitive + Default + RealField + PlyType + Copy + Zeroable + AddAssign
+{
+}
+impl<T: Scalar + ToPrimitive + Default + RealField + PlyType + Copy + Zeroable + AddAssign>
+    BaseFloat for T
+{
+}
 
-pub trait BaseColor: Scalar + Color + Zero + PlyType + Copy {}
-impl<T: Scalar + Zero + Color + PlyType + Copy> BaseColor for T {}
+pub trait BaseColor:
+    Scalar + Default + Color + Zero + PlyType + Copy + Zeroable + AddAssign
+{
+}
+impl<T: Scalar + Zero + Color + Default + PlyType + Copy + Zeroable + AddAssign> BaseColor for T {}
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Zeroable)]
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Vertex<F: BaseFloat, C: BaseColor> {
     pub position: Point3<F>,
     // pub normal: Vector3<f32>,
     pub color: Vector4<C>,
 }
 
-unsafe impl Zeroable for Vertex<f32, f32> {}
+// unsafe impl Zeroable for Vertex<f32, f32> {}
 unsafe impl Pod for Vertex<f32, f32> {}
 
-unsafe impl Zeroable for Vertex<f32, u8> {}
+// unsafe impl Zeroable for Vertex<f32, u8> {}
 unsafe impl Pod for Vertex<f32, u8> {}
-unsafe impl Zeroable for Vertex<f64, u8> {}
+// unsafe impl Zeroable for Vertex<f64, u8> {}
 unsafe impl Pod for Vertex<f64, u8> {}
 
 vulkano::impl_vertex!(Vertex<f32,f32>, position, color);

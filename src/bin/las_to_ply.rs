@@ -1,7 +1,7 @@
 use las::{Read as LasRead, Reader};
 use nalgebra::{center, Point3, Vector4};
 use pbr::ProgressBar;
-use punctum::{export_ply, PointCloud, Vertex};
+use punctum::{export_ply, Vertex};
 use std::path::PathBuf;
 use structopt::StructOpt;
 
@@ -60,7 +60,5 @@ fn main() {
     }
     pb.add(counter);
 
-    let pc = PointCloud::from_vec(&points);
-
-    export_ply(&opt.output, &pc);
+    export_ply(&opt.output, &points.into());
 }

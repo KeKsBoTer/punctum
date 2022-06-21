@@ -71,7 +71,7 @@ impl RenderPool {
 
 fn export_ply(
     output_file: &PathBuf,
-    pc: Arc<PointCloud<f32, f32>>,
+    pc: PointCloud<f32, f32>,
     observed_colors: &Vec<Vertex<f32, u8>>,
 ) {
     let mut file = BufWriter::new(File::create(output_file).unwrap());
@@ -165,18 +165,11 @@ fn main() {
         .par_bridge()
         .into_par_iter()
         .for_each(|node| {
-            let data_32 = node
-                .data
-                .iter()
-                .map(|v| punctum::Vertex::<f32, f32> {
-                    position: ((v.position - node.bbox.center.coords) * 2. / node.bbox.size).cast(),
-                    color: v.color.cast() / 255.,
-                })
-                .collect();
+            let data_32: Vec<Vertex<f32, f32>> =
+                node.data.iter().map(|v| v.clone().into()).collect();
 
-            let mut pc = PointCloud::from_vec(&data_32);
+            let mut pc: PointCloud<f32, f32> = data_32.into();
             pc.scale_to_unit_sphere();
-            let pc = Arc::new(pc);
 
             let renders: Vec<Rgba<u8>> = {
                 let renderer = {

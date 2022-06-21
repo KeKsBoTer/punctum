@@ -27,7 +27,7 @@ layout(set = 0, binding = 0) uniform UniformData {
 } uniforms;
 
 
-layout(set = 0, binding = 1, scalar) uniform ObjDesc { uint64_t vertexAddress; } objDesc;
+// layout(set = 0, binding = 1, scalar) uniform ObjDesc { uint64_t vertexAddress; } objDesc;
 
 
 out gl_PerVertex
@@ -42,15 +42,15 @@ layout(location = 1) out float pointSize;
 
 void main() {
 
-    Vertices vertices = Vertices(objDesc.vertexAddress);
+    // Vertices vertices = Vertices(objDesc.vertexAddress);
 
-    vec4 pos = vec4(vertices.v[gl_VertexIndex].pos,1);
+    vec4 pos = vec4(position,1);
     mat4 worldview = uniforms.view * uniforms.world;
-    gl_Position = pos;//uniforms.proj * worldview * pos;
+    gl_Position = uniforms.proj * worldview * pos;
     
     gl_PointSize = uniforms.point_size;
 
-    vertex_color = vec4(1,1,0,1);//vertices.v[gl_VertexIndex].color;
+    vertex_color = color;//vertices.v[gl_VertexIndex].color;
 
     pointSize = gl_PointSize;
     // zNear = uniforms.zNear;

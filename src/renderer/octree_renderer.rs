@@ -11,14 +11,10 @@ use std::{
 };
 use vulkano::{
     buffer::{
-        cpu_pool::{CpuBufferPoolChunk, CpuBufferPoolSubbuffer},
-        BufferAccess, BufferDeviceAddressError, BufferUsage, CpuAccessibleBuffer, CpuBufferPool,
-        DeviceLocalBuffer,
+        cpu_pool::CpuBufferPoolSubbuffer, BufferAccess, BufferDeviceAddressError, BufferUsage,
+        CpuBufferPool,
     },
-    command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, DrawIndirectCommand,
-        SecondaryAutoCommandBuffer,
-    },
+    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, Queue},
     memory::pool::StdMemoryPool,
@@ -40,7 +36,7 @@ use super::UniformBuffer;
 
 mod vs {
     use bytemuck::{Pod, Zeroable};
-    use nalgebra::Matrix4;
+    use nalgebra::{Matrix4, Point3};
 
     vulkano_shaders::shader! {
         ty: "vertex",
@@ -58,6 +54,7 @@ mod vs {
         pub world: Matrix4<f32>,
         pub view: Matrix4<f32>,
         pub proj: Matrix4<f32>,
+        pub camera_pos: Point3<f32>,
         pub point_size: u32,
         pub znear: f32,
         pub zfar: f32,
@@ -72,6 +69,7 @@ mod vs {
                 world: Matrix4::identity().into(),
                 view: Matrix4::identity().into(),
                 proj: Matrix4::identity().into(),
+                camera_pos: Point3::origin(),
                 point_size: 1,
                 znear: 0.01,
                 zfar: 100.,
@@ -106,13 +104,12 @@ pub struct OctreeRenderer {
     octree: Arc<Octree<f32, f32>>,
     loaded_octants: RwLock<HashMap<u64, OctantBuffer<8192>>>,
     octants_pool: CpuBufferPool<[Vertex<f32, f32>; 8192]>,
+    // reference_buffer: Arc<CpuAccessibleBuffer<vs::ty::ObjDesc>>,
 
-    reference_buffer: Arc<CpuAccessibleBuffer<vs::ty::ObjDesc>>,
+    // vertex_buffer: Arc<CpuAccessibleBuffer<i32>>,
+    // phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>>,
 
-    vertex_buffer: Arc<CpuAccessibleBuffer<i32>>,
-    phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>>,
-
-    indirect_draw_cmd: Arc<CpuBufferPoolChunk<DrawIndirectCommand, Arc<StdMemoryPool>>>,
+    // indirect_draw_cmd: Arc<CpuBufferPoolChunk<DrawIndirectCommand, Arc<StdMemoryPool>>>,
 }
 
 impl OctreeRenderer {
@@ -152,48 +149,48 @@ impl OctreeRenderer {
             }),
         ));
 
-        let indirect_args_pool: CpuBufferPool<DrawIndirectCommand> =
-            CpuBufferPool::new(device.clone(), BufferUsage::indirect_buffer());
-        let indirect_commands = [DrawIndirectCommand {
-            vertex_count: 10,
-            instance_count: 1,
-            first_vertex: 0,
-            first_instance: 0,
-        }];
-        let indirect_draw_cmd = indirect_args_pool.chunk(indirect_commands).unwrap();
+        // let indirect_args_pool: CpuBufferPool<DrawIndirectCommand> =
+        //     CpuBufferPool::new(device.clone(), BufferUsage::indirect_buffer());
+        // let indirect_commands = [DrawIndirectCommand {
+        //     vertex_count: 10,
+        //     instance_count: 1,
+        //     first_vertex: 0,
+        //     first_instance: 0,
+        // }];
+        // let indirect_draw_cmd = indirect_args_pool.chunk(indirect_commands).unwrap();
 
-        let vertex_buffer = CpuAccessibleBuffer::from_data(
-            device.clone(),
-            BufferUsage {
-                device_address: true,
-                storage_buffer: true,
-                vertex_buffer: true,
-                ..BufferUsage::none()
-            },
-            false,
-            -7,
-        )
-        .unwrap();
+        // let vertex_buffer = CpuAccessibleBuffer::from_data(
+        //     device.clone(),
+        //     BufferUsage {
+        //         device_address: true,
+        //         storage_buffer: true,
+        //         vertex_buffer: true,
+        //         ..BufferUsage::none()
+        //     },
+        //     false,
+        //     -7,
+        // )
+        // .unwrap();
 
-        let phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>> =
-            DeviceLocalBuffer::array(device.clone(), 1, BufferUsage::all(), [queue.family()])
-                .unwrap();
+        // let phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>> =
+        //     DeviceLocalBuffer::array(device.clone(), 1, BufferUsage::all(), [queue.family()])
+        //         .unwrap();
 
-        let addr = raw_device_address(&phantom_buffer).unwrap();
+        // let addr = raw_device_address(&phantom_buffer).unwrap();
 
-        let reference_buffer = CpuAccessibleBuffer::from_data(
-            device.clone(),
-            BufferUsage {
-                uniform_buffer: true,
-                storage_buffer: true,
-                ..BufferUsage::default()
-            },
-            false,
-            vs::ty::ObjDesc {
-                vertexAddress: addr.into(),
-            },
-        )
-        .unwrap();
+        // let reference_buffer = CpuAccessibleBuffer::from_data(
+        //     device.clone(),
+        //     BufferUsage {
+        //         uniform_buffer: true,
+        //         storage_buffer: true,
+        //         ..BufferUsage::default()
+        //     },
+        //     false,
+        //     vs::ty::ObjDesc {
+        //         vertexAddress: addr.into(),
+        //     },
+        // )
+        // .unwrap();
 
         let pool: CpuBufferPool<[Vertex<f32, f32>; 8192]> =
             CpuBufferPool::new(device.clone(), BufferUsage::vertex_buffer());
@@ -210,10 +207,10 @@ impl OctreeRenderer {
             octree,
             loaded_octants: RwLock::new(HashMap::new()),
             octants_pool: pool,
-            reference_buffer,
-            vertex_buffer,
-            phantom_buffer,
-            indirect_draw_cmd,
+            // reference_buffer,
+            // vertex_buffer,
+            // phantom_buffer,
+            // indirect_draw_cmd,
         }
     }
 
@@ -311,7 +308,7 @@ impl OctreeRenderer {
             layout.clone(),
             [
                 WriteDescriptorSet::buffer(0, uniform_buffer),
-                WriteDescriptorSet::buffer(1, self.reference_buffer.clone()),
+                // WriteDescriptorSet::buffer(1, self.reference_buffer.clone()),
             ],
         )
         .unwrap();
@@ -342,13 +339,8 @@ impl OctreeRenderer {
 
         // builder
         //     .bind_vertex_buffers(0, self.phantom_buffer.clone())
-        //     .draw(10, 1, 0, 0)
+        //     .draw_indirect(self.indirect_draw_cmd.clone())
         //     .unwrap();
-
-        builder
-            .bind_vertex_buffers(0, self.phantom_buffer.clone())
-            .draw_indirect(self.indirect_draw_cmd.clone())
-            .unwrap();
 
         Arc::new(builder.build().unwrap())
     }
@@ -368,6 +360,7 @@ impl OctreeRenderer {
         uniforms.update(vs::UniformData {
             view: camera.view().clone().into(),
             proj: camera.projection().clone().into(),
+            camera_pos: camera.position().clone(),
             znear: *camera.znear(),
             zfar: *camera.zfar(),
             ..current

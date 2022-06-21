@@ -2,7 +2,7 @@ use std::{f32::consts::PI, fs::File, io::BufReader, path::PathBuf, sync::Arc};
 
 use nalgebra::Vector4;
 use pbr::ProgressBar;
-use punctum::{export_ply, CubeBoundingBox, Octree, PointCloud, TeeReader, Vertex};
+use punctum::{export_ply, CubeBoundingBox, Octree, TeeReader, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use structopt::StructOpt;
 
@@ -73,7 +73,6 @@ fn main() {
         pb.inc();
     }
     println!("num_points: {}", points.len());
-    let pc = PointCloud::from_vec(&points);
 
-    export_ply(&opt.output, &pc);
+    export_ply(&opt.output, &points.into());
 }

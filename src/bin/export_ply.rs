@@ -1,7 +1,7 @@
 use std::{fs::File, io::BufReader, path::PathBuf, sync::Arc};
 
 use pbr::ProgressBar;
-use punctum::{export_ply, Octree, PointCloud, TeeReader, Vertex};
+use punctum::{export_ply, Octree, TeeReader, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use structopt::StructOpt;
 
@@ -62,7 +62,6 @@ fn main() {
         .collect();
 
     println!("num_points: {}", points.len());
-    let pc = PointCloud::from_vec(&points);
 
-    export_ply(&opt.output, &pc);
+    export_ply(&opt.output, &points.into());
 }

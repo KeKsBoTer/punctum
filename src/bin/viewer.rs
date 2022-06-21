@@ -1,3 +1,6 @@
+use nalgebra::Vector4;
+use std::borrow::BorrowMut;
+use std::f32::consts::PI;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -24,7 +27,8 @@ use winit::event_loop::ControlFlow;
 
 use punctum::{
     get_render_pass, select_physical_device, CameraController, Octree, OctreeRenderer,
-    PerspectiveCamera, SurfaceFrame, TeeReader, Viewport,
+    PerspectiveCamera, PointCloud, SphericalHarmonicsApproximation, SurfaceFrame, TeeReader,
+    Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -38,7 +42,7 @@ fn main() {
     let opt = Opt::from_args();
     let filename = opt.input.as_os_str().to_str().unwrap();
 
-    let octree: Octree<f32, f32> = {
+    let mut octree: Octree<f32, f32> = {
         let in_file = File::open(filename).unwrap();
 
         let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
@@ -56,6 +60,20 @@ fn main() {
 
         octree.into()
     };
+
+    let mut octants = 0;
+    for octant in octree.borrow_mut().into_iter() {
+        let pc: &PointCloud<f32, f32> = octant.points().into();
+        let mean = pc.mean();
+        let mut coefs = [Vector4::<f32>::zeros(); 121];
+        coefs[0] = mean.color / (0.5 * (1. / PI).sqrt());
+        octant.sh_approximation = Some(SphericalHarmonicsApproximation {
+            position: mean.position,
+            coefficients: coefs,
+        });
+        octants += 1;
+    }
+
     let octree = Arc::new(octree);
 
     let required_extensions = vulkano_win::required_extensions();
@@ -139,16 +157,16 @@ fn main() {
 
     let renderer_clone = renderer.clone();
 
-    // let (tx, rx) = mpsc::channel();
-    // let frustum_culling_thread = thread::spawn(move || loop {
-    //     renderer_clone.frustum_culling();
-    //     match rx.try_recv() {
-    //         Ok(_) | Err(TryRecvError::Disconnected) => {
-    //             break;
-    //         }
-    //         Err(TryRecvError::Empty) => {}
-    //     }
-    // });
+    let (tx, rx) = mpsc::channel();
+    let frustum_culling_thread = thread::spawn(move || loop {
+        renderer_clone.frustum_culling();
+        match rx.try_recv() {
+            Ok(_) | Err(TryRecvError::Disconnected) => {
+                break;
+            }
+            Err(TryRecvError::Empty) => {}
+        }
+    });
 
     let mut camera_controller = CameraController::new(50., 1.);
 
@@ -252,10 +270,10 @@ fn main() {
             frame.render(queue.clone(), pc_cb.clone());
         }
         Event::LoopDestroyed => {
-            // let _ = tx.send(());
+            let _ = tx.send(());
         }
         _ => (),
     });
 
-    // frustum_culling_thread.join().unwrap();
+    frustum_culling_thread.join().unwrap();
 }
