@@ -166,7 +166,7 @@ fn main() {
         .into_par_iter()
         .for_each(|node| {
             let data_32: Vec<Vertex<f32, f32>> =
-                node.data.iter().map(|v| v.clone().into()).collect();
+                node.points().iter().map(|v| v.clone().into()).collect();
 
             let mut pc: PointCloud<f32, f32> = data_32.into();
             pc.scale_to_unit_sphere();
@@ -183,7 +183,7 @@ fn main() {
 
                 let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
 
-                let img_folder = opt.output_folder.join(format!("octant_{}", node.id));
+                let img_folder = opt.output_folder.join(format!("octant_{}", node.id()));
                 if opt.export_images && !img_folder.exists() {
                     fs::create_dir(img_folder.clone()).unwrap();
                 }
@@ -222,7 +222,7 @@ fn main() {
                 })
                 .collect();
 
-            let out_file = opt.output_folder.join(format!("octant_{}.ply", node.id));
+            let out_file = opt.output_folder.join(format!("octant_{}.ply", node.id()));
             export_ply(&out_file, pc, &cam_colors);
             pb_clone.lock().unwrap().inc();
         });

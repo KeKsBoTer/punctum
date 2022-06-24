@@ -1,34 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-use nalgebra::{convert, Point3, Vector3, Vector4};
-use serde_big_array::BigArray;
+use nalgebra::{convert, Point3, Vector3};
 
 use crate::{
     vertex::{BaseColor, BaseFloat},
-    CubeBoundingBox, Vertex,
+    CubeBoundingBox, SHVertex, Vertex,
 };
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SphericalHarmonicsApproximation<F: BaseFloat, const T: usize> {
-    pub position: Point3<F>,
-    #[serde(with = "BigArray")]
-    pub coefficients: [Vector4<f32>; T],
-}
-
-impl<F: BaseFloat, const T: usize> Default for SphericalHarmonicsApproximation<F, T> {
-    fn default() -> Self {
-        Self {
-            position: Point3::origin(),
-            coefficients: [Vector4::zeros(); T],
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Octant<F: BaseFloat, C: BaseColor> {
     id: u64,
     data: Vec<Vertex<F, C>>,
-    pub sh_approximation: Option<SphericalHarmonicsApproximation<F, 121>>,
+    pub sh_approximation: Option<SHVertex<F, 121>>,
 }
 
 impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
@@ -75,6 +58,10 @@ impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
 
     pub fn points(&self) -> &Vec<Vertex<F, C>> {
         &self.data
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
     }
 }
 
@@ -148,7 +135,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         }
     }
 
-    fn traverse<'a, A: FnMut(u64, &'a Vec<Vertex<F, C>>, Point3<F>, F)>(
+    fn traverse<'a, A: FnMut(&'a Octant<F, C>, Point3<F>, F)>(
         &'a self,
         f: &mut A,
         center: Point3<F>,
@@ -161,7 +148,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
                     node.traverse(f, center_new, size_new);
                 }
             }
-            Node::Filled(Octant { id, data, .. }) => f(*id, data, center, size),
+            Node::Filled(octant) => f(octant, center, size),
             Node::Empty => {}
         }
     }
@@ -298,7 +285,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         }
     }
 
-    pub fn traverse<'a, A: FnMut(u64, &'a Vec<Vertex<F, C>>, Point3<F>, F)>(&'a self, mut f: A) {
+    pub fn traverse<'a, A: FnMut(&'a Octant<F, C>, Point3<F>, F)>(&'a self, mut f: A) {
         self.root.traverse(&mut f, self.center, self.size)
     }
 
@@ -322,9 +309,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
     }
 
     pub fn num_octants(&self) -> u64 {
-        let mut num_octants = 0;
-        self.traverse(|_, _, _, _| num_octants += 1);
-        return num_octants;
+        return self.into_iter().count() as u64;
     }
 
     pub fn flat_points(&self) -> Vec<Vertex<F, C>> {
@@ -336,28 +321,22 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
     pub fn max_node_size(&self) -> usize {
         self.max_node_size
     }
-}
 
-#[derive(Clone, Copy)]
-pub struct OctreeIter<'a, F: BaseFloat, C: BaseColor> {
-    pub data: &'a Vec<Vertex<F, C>>,
-    pub bbox: CubeBoundingBox<F>,
-    pub id: u64,
-}
-
-impl<'a, F: BaseFloat, C: BaseColor> IntoIterator for &'a Octree<F, C> {
-    type Item = OctreeIter<'a, F, C>;
-    type IntoIter = std::vec::IntoIter<OctreeIter<'a, F, C>>;
-
-    fn into_iter(self) -> Self::IntoIter {
+    pub fn into_octant_iterator<'a>(&'a self) -> std::vec::IntoIter<OctreeIter<'a, F, C>> {
         let mut result = vec![];
-        self.traverse(|id, data, center, size| {
+        self.traverse(|octant, center, size| {
             let bbox = CubeBoundingBox::new(center, size);
-            result.push(OctreeIter { data, bbox, id })
+            result.push(OctreeIter { octant, bbox })
         });
 
         result.into_iter()
     }
+}
+
+#[derive(Clone, Copy)]
+pub struct OctreeIter<'a, F: BaseFloat, C: BaseColor> {
+    pub octant: &'a Octant<F, C>,
+    pub bbox: CubeBoundingBox<F>,
 }
 
 impl Into<Vec<Vertex<f32, f32>>> for Octree<f64, u8> {
@@ -428,6 +407,45 @@ impl<'a, F: BaseFloat, C: BaseColor> Iterator for OctreeIteratorMut<'a, F, C> {
             match node {
                 Node::Group(octants) => {
                     for o in octants.iter_mut() {
+                        if let Node::Empty = o {
+                        } else {
+                            self.stack.push(o);
+                        }
+                    }
+                }
+                Node::Filled(octant) => return Some(octant),
+                Node::Empty => {
+                    panic!("unreachable")
+                }
+            }
+        }
+        None
+    }
+}
+
+pub struct OctreeIterator<'a, F: BaseFloat, C: BaseColor> {
+    stack: Vec<&'a Node<F, C>>,
+}
+
+impl<'a, F: BaseFloat, C: BaseColor> IntoIterator for &'a Octree<F, C> {
+    type Item = &'a Octant<F, C>;
+    type IntoIter = OctreeIterator<'a, F, C>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let mut stack = Vec::new();
+        stack.push(&self.root);
+        OctreeIterator { stack: stack }
+    }
+}
+
+impl<'a, F: BaseFloat, C: BaseColor> Iterator for OctreeIterator<'a, F, C> {
+    type Item = &'a Octant<F, C>;
+
+    fn next(&mut self) -> Option<&'a Octant<F, C>> {
+        while let Some(node) = self.stack.pop() {
+            match node {
+                Node::Group(octants) => {
+                    for o in octants.iter() {
                         if let Node::Empty = o {
                         } else {
                             self.stack.push(o);

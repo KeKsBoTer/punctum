@@ -27,8 +27,7 @@ use winit::event_loop::ControlFlow;
 
 use punctum::{
     get_render_pass, select_physical_device, CameraController, Octree, OctreeRenderer,
-    PerspectiveCamera, PointCloud, SphericalHarmonicsApproximation, SurfaceFrame, TeeReader,
-    Viewport,
+    PerspectiveCamera, PointCloud, SHVertex, SurfaceFrame, TeeReader, Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -61,17 +60,12 @@ fn main() {
         octree.into()
     };
 
-    let mut octants = 0;
     for octant in octree.borrow_mut().into_iter() {
         let pc: &PointCloud<f32, f32> = octant.points().into();
         let mean = pc.mean();
         let mut coefs = [Vector4::<f32>::zeros(); 121];
-        coefs[0] = mean.color / (0.5 * (1. / PI).sqrt());
-        octant.sh_approximation = Some(SphericalHarmonicsApproximation {
-            position: mean.position,
-            coefficients: coefs,
-        });
-        octants += 1;
+        coefs[0] = mean.color / 0.28209478;
+        octant.sh_approximation = Some(SHVertex::new(mean.position, coefs.into()));
     }
 
     let octree = Arc::new(octree);

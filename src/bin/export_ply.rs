@@ -44,7 +44,7 @@ fn main() {
     let center = *octree.center();
 
     let points: Vec<Vertex<f64, u8>> = octree
-        .into_iter()
+        .into_octant_iterator()
         .flat_map(|octant| {
             octant
                 .data

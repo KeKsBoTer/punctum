@@ -19,6 +19,7 @@ mod avg_color;
 mod camera;
 mod io;
 mod octree;
+mod ply;
 mod pointcloud;
 mod renderer;
 pub mod sh;
@@ -28,11 +29,11 @@ mod vertex;
 pub use avg_color::ImageAvgColor;
 pub use camera::{Camera, CameraController, OrthographicCamera, PerspectiveCamera};
 pub use io::export_ply;
-pub use octree::{Node, Octree, SphericalHarmonicsApproximation};
+pub use octree::{Node, Octree};
 pub use pointcloud::{CubeBoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{OctreeRenderer, PointCloudRenderer, SurfaceFrame, Viewport};
 pub use tee::{TeeReader, TeeWriter};
-pub use vertex::{BaseColor, BaseFloat, Vertex};
+pub use vertex::{BaseColor, BaseFloat, SHCoefficients, SHVertex, Vertex};
 
 use renderer::Frame;
 

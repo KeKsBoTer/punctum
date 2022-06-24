@@ -61,7 +61,7 @@ fn main() {
         let color = angle_to_rgba(color_id as f32 / num_octants as f32 * 2. * PI);
         points.extend(
             octant
-                .data
+                .points()
                 .iter()
                 .map(|p| Vertex {
                     position: p.position.cast(),
@@ -69,7 +69,7 @@ fn main() {
                 })
                 .collect::<Vec<Vertex<f32, u8>>>(),
         );
-        bboxes.push(CubeBoundingBox::from_points(octant.data).size);
+        bboxes.push(CubeBoundingBox::from_points(octant.points()).size);
         pb.inc();
     }
     println!("num_points: {}", points.len());

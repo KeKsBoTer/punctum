@@ -209,7 +209,7 @@ fn main() {
     // if not the three is to deep (or something is wrong in the code :P)
     let mut ids = octree
         .into_iter()
-        .map(|octant| octant.id)
+        .map(|octant| octant.id())
         .collect::<Vec<u64>>();
     ids.sort_unstable();
 

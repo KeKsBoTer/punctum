@@ -1,22 +1,28 @@
 use crate::{
     camera::{Camera, Projection},
+    octree::OctreeIter,
+    sh::calc_sh_grid,
     vertex::Vertex,
-    Octree, Viewport,
+    Octree, SHVertex, Viewport,
 };
 use nalgebra::matrix;
 use std::{
     collections::HashMap,
     num::NonZeroU64,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 use vulkano::{
     buffer::{
         cpu_pool::CpuBufferPoolSubbuffer, BufferAccess, BufferDeviceAddressError, BufferUsage,
-        CpuBufferPool,
+        CpuAccessibleBuffer, CpuBufferPool,
     },
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
-    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
+    descriptor_set::{
+        pool::standard::StdDescriptorPoolAlloc, PersistentDescriptorSet, WriteDescriptorSet,
+    },
     device::{Device, Queue},
+    format::Format,
+    image::{view::ImageView, ImageDimensions, ImmutableImage},
     memory::pool::StdMemoryPool,
     pipeline::{
         graphics::{
@@ -28,7 +34,9 @@ use vulkano::{
         GraphicsPipeline, PartialStateMode, Pipeline, PipelineBindPoint, StateMode,
     },
     render_pass::Subpass,
+    sampler::{Sampler, SamplerCreateInfo},
     shader::ShaderModule,
+    sync::{self, GpuFuture},
     VulkanObject,
 };
 
@@ -40,7 +48,7 @@ mod vs {
 
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "src/renderer/shaders/pointcloud.vert",
+        path: "src/renderer/shaders/pointcloud_sh.vert",
 
         types_meta: {
             use bytemuck::{Pod, Zeroable};
@@ -48,7 +56,7 @@ mod vs {
         }
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Zeroable)]
     #[repr(C)]
     pub struct UniformData {
         pub world: Matrix4<f32>,
@@ -60,7 +68,6 @@ mod vs {
         pub zfar: f32,
     }
 
-    unsafe impl Zeroable for UniformData {}
     unsafe impl Pod for UniformData {}
 
     impl Default for UniformData {
@@ -110,6 +117,9 @@ pub struct OctreeRenderer {
     // phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>>,
 
     // indirect_draw_cmd: Arc<CpuBufferPoolChunk<DrawIndirectCommand, Arc<StdMemoryPool>>>,
+    sh_vertex_buffer: Arc<CpuAccessibleBuffer<[SHVertex<f32, 121>]>>,
+    sh_vertex_buffer_len: RwLock<u32>,
+    sh_set: Arc<PersistentDescriptorSet<StdDescriptorPoolAlloc>>,
 }
 
 impl OctreeRenderer {
@@ -195,7 +205,35 @@ impl OctreeRenderer {
         let pool: CpuBufferPool<[Vertex<f32, f32>; 8192]> =
             CpuBufferPool::new(device.clone(), BufferUsage::vertex_buffer());
 
-        println!("center: {:?}, size: {}", center, scale_size / max_size);
+        let (sh_images, sh_sampler) = calc_sh_images(device.clone(), queue.clone(), 128, 10);
+
+        let layout = pipeline.layout().set_layouts().get(1).unwrap();
+
+        let empty_sh_vertices = (0..octree.num_octants())
+            .into_iter()
+            .map(|_| SHVertex::default())
+            .collect::<Vec<SHVertex<f32, 121>>>();
+        let num_empty_sh_vertices = empty_sh_vertices.len() as u32;
+        let sh_vertex_buffer = CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage {
+                vertex_buffer: true,
+                storage_buffer: true,
+                ..BufferUsage::default()
+            },
+            false,
+            empty_sh_vertices,
+        )
+        .unwrap();
+
+        let sh_set = PersistentDescriptorSet::new(
+            layout.clone(),
+            [
+                WriteDescriptorSet::image_view_sampler(0, sh_images.clone(), sh_sampler.clone()),
+                WriteDescriptorSet::buffer(1, sh_vertex_buffer.clone()),
+            ],
+        )
+        .unwrap();
 
         OctreeRenderer {
             device,
@@ -211,6 +249,9 @@ impl OctreeRenderer {
             // vertex_buffer,
             // phantom_buffer,
             // indirect_draw_cmd,
+            sh_vertex_buffer: sh_vertex_buffer,
+            sh_vertex_buffer_len: RwLock::new(num_empty_sh_vertices),
+            sh_set,
         }
     }
 
@@ -222,7 +263,7 @@ impl OctreeRenderer {
         device: Arc<Device>,
     ) -> Arc<GraphicsPipeline> {
         GraphicsPipeline::start()
-            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex<f32, f32>>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<SHVertex<f32, 121>>())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState {
                 topology: PartialStateMode::Fixed(PrimitiveTopology::PointList),
@@ -247,17 +288,19 @@ impl OctreeRenderer {
 
         let octants = self.loaded_octants.read().unwrap();
 
+        let mut sh_vertices = Vec::new();
+
         let mut new = 0;
         let mut new_octants = HashMap::new();
-        self.octree
-            .into_iter()
-            .filter(|octant| octant.bbox.at_least_one_point_visible(&view_transform))
-            .for_each(|octant| {
-                if let Some(o) = octants.get(&octant.id) {
-                    new_octants.insert(octant.id, o.clone());
+
+        for OctreeIter { octant, bbox } in self.octree.into_octant_iterator() {
+            if bbox.at_least_one_point_visible(&view_transform) {
+                let id = octant.id();
+                if let Some(o) = octants.get(&id) {
+                    new_octants.insert(id, o.clone());
                 } else {
                     let mut data = [Vertex::<f32, f32>::default(); 8192];
-                    for (i, p) in octant.data.iter().enumerate() {
+                    for (i, p) in octant.points().iter().enumerate() {
                         data[i] = Vertex {
                             position: p.position.into(),
                             color: p.color,
@@ -265,15 +308,19 @@ impl OctreeRenderer {
                     }
                     new += 1;
                     new_octants.insert(
-                        octant.id,
+                        id,
                         OctantBuffer {
-                            length: octant.data.len() as u32,
+                            length: octant.points().len() as u32,
                             points: self.octants_pool.next(data).unwrap(),
                         },
                     );
-                }
-            });
 
+                    if let Some(sh) = octant.sh_approximation {
+                        sh_vertices.push(sh);
+                    }
+                }
+            }
+        }
         if new > 0 {
             println!("new octants: {}", new);
         }
@@ -281,6 +328,16 @@ impl OctreeRenderer {
 
         let mut octants = self.loaded_octants.write().unwrap();
         *octants = new_octants;
+
+        {
+            let mut vertex_buffer = self.sh_vertex_buffer.write().unwrap();
+            for (i, sh) in sh_vertices.iter().enumerate() {
+                vertex_buffer[i] = *sh;
+            }
+            let mut size = self.sh_vertex_buffer_len.write().unwrap();
+            *size = sh_vertices.len() as u32;
+            println!("update!");
+        }
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
@@ -306,10 +363,7 @@ impl OctreeRenderer {
         // TODO maybe pass chunks as buffer_array ?
         let set = PersistentDescriptorSet::new(
             layout.clone(),
-            [
-                WriteDescriptorSet::buffer(0, uniform_buffer),
-                // WriteDescriptorSet::buffer(1, self.reference_buffer.clone()),
-            ],
+            [WriteDescriptorSet::buffer(0, uniform_buffer)],
         )
         .unwrap();
 
@@ -327,7 +381,7 @@ impl OctreeRenderer {
                 PipelineBindPoint::Graphics,
                 pipeline.layout().clone(),
                 0,
-                set.clone(),
+                [set.clone(), self.sh_set.clone()].to_vec(),
             );
 
         // for (_, octant) in self.loaded_octants.read().unwrap().iter() {
@@ -341,6 +395,11 @@ impl OctreeRenderer {
         //     .bind_vertex_buffers(0, self.phantom_buffer.clone())
         //     .draw_indirect(self.indirect_draw_cmd.clone())
         //     .unwrap();
+
+        builder
+            .bind_vertex_buffers(0, self.sh_vertex_buffer.clone())
+            .draw(*self.sh_vertex_buffer_len.read().unwrap(), 1, 0, 0)
+            .unwrap();
 
         Arc::new(builder.build().unwrap())
     }
@@ -398,4 +457,40 @@ fn raw_device_address(buffer: impl BufferAccess) -> Result<NonZeroU64, BufferDev
 
         Ok(NonZeroU64::new_unchecked(ptr + inner.offset))
     }
+}
+
+fn calc_sh_images(
+    device: Arc<Device>,
+    queue: Arc<Queue>,
+    img_size: u32,
+    lmax: u64,
+) -> (Arc<ImageView<ImmutableImage>>, Arc<Sampler>) {
+    let images = calc_sh_grid(lmax, img_size);
+    let dimensions = ImageDimensions::Dim2d {
+        width: img_size,
+        height: img_size,
+        array_layers: images.len() as u32,
+    };
+
+    let (sh_images, future) = ImmutableImage::from_iter(
+        images.into_iter().flatten().collect::<Vec<f32>>(),
+        dimensions,
+        vulkano::image::MipmapsCount::One,
+        Format::R32_SFLOAT,
+        queue.clone(),
+    )
+    .unwrap();
+
+    sync::now(device.clone())
+        .join(future)
+        .then_signal_fence_and_flush()
+        .unwrap()
+        .wait(None)
+        .unwrap();
+
+    let sh_images_view = ImageView::new_default(sh_images.clone()).unwrap();
+
+    let sampler = Sampler::new(device.clone(), SamplerCreateInfo::simple_repeat_linear()).unwrap();
+
+    return (sh_images_view, sampler);
 }
