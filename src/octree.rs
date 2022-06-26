@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use nalgebra::{convert, Point3, Vector3};
+use nalgebra::{convert, Matrix4, Point3, Vector3};
 
 use crate::{
     vertex::{BaseColor, BaseFloat},
@@ -25,8 +25,7 @@ impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
 
     fn split(
         &self,
-        center: Point3<F>,
-        size: F,
+        bbox: &CubeBoundingBox<F>,
         level: u32,
         max_node_size: usize,
     ) -> Box<[Node<F, C>; 8]> {
@@ -41,7 +40,7 @@ impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
             Node::Empty,
         ]);
         for v in self.data.iter() {
-            let (octant_i, _, _) = Node::child_octant(v, center, size);
+            let (octant_i, _) = Node::child_octant(v, bbox);
             match &mut new_data[octant_i] {
                 Node::Group(_) => panic!("unreachable"),
                 Node::Filled(Octant { id: _, data, .. }) => data.push(*v),
@@ -90,15 +89,13 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
     fn insert(
         &mut self,
         point: Vertex<F, C>,
-        center: Point3<F>,
-        size: F,
+        bbox: CubeBoundingBox<F>,
         id: u64,
         level: u32,
         max_node_size: usize,
     ) -> usize {
         let mut node = self;
-        let mut center = center;
-        let mut size = size;
+        let mut bbox = bbox;
         let mut octants_created = 0;
 
         let mut level = level;
@@ -106,9 +103,8 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         loop {
             match node {
                 Node::Group(group) => {
-                    let (octant_i, new_size, new_center) = Node::child_octant(&point, center, size);
-                    center = new_center;
-                    size = new_size;
+                    let (octant_i, new_bbox) = Node::child_octant(&point, &bbox);
+                    bbox = new_bbox;
                     node = &mut group[octant_i];
 
                     id = next_id(id, level, octant_i);
@@ -117,7 +113,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
                 Node::Filled(octant) => {
                     if octant.data.len() == max_node_size {
                         // split octant and insert in next loop iteration
-                        let new_octants = octant.split(center, size, level, max_node_size);
+                        let new_octants = octant.split(&bbox, level, max_node_size);
                         octants_created += Node::filled_octants(&new_octants) - 1;
                         *node = Node::Group(new_octants);
                     } else {
@@ -135,32 +131,19 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         }
     }
 
-    fn traverse<'a, A: FnMut(&'a Octant<F, C>, Point3<F>, F)>(
+    fn traverse<'a, A: FnMut(&'a Octant<F, C>, CubeBoundingBox<F>)>(
         &'a self,
         f: &mut A,
-        center: Point3<F>,
-        size: F,
+        bbox: CubeBoundingBox<F>,
     ) {
         match self {
             Node::Group(group) => {
                 for (i, node) in group.iter().enumerate() {
-                    let (center_new, size_new) = Self::octant_box(i, center, size);
-                    node.traverse(f, center_new, size_new);
+                    let bbox_new = Self::octant_box(i, &bbox);
+                    node.traverse(f, bbox_new);
                 }
             }
-            Node::Filled(octant) => f(octant, center, size),
-            Node::Empty => {}
-        }
-    }
-
-    fn traverse_mut<'a, A: Fn(&'a mut Octant<F, C>)>(&'a mut self, f: &A) {
-        match self {
-            Node::Group(group) => {
-                for node in group.iter_mut() {
-                    node.traverse_mut(&f);
-                }
-            }
-            Node::Filled(octant) => f(octant),
+            Node::Filled(octant) => f(octant, bbox),
             Node::Empty => {}
         }
     }
@@ -186,39 +169,51 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         return max_depth;
     }
 
-    fn child_octant(point: &Vertex<F, C>, center: Point3<F>, size: F) -> (usize, F, Point3<F>) {
-        let z = (point.position.z > center.z) as usize; // 1 if true
-        let y = (point.position.y > center.y) as usize;
-        let x = (point.position.x > center.x) as usize;
+    fn child_octant(
+        point: &Vertex<F, C>,
+        bbox: &CubeBoundingBox<F>,
+    ) -> (usize, CubeBoundingBox<F>) {
+        let z = (point.position.z > bbox.center.z) as usize; // 1 if true
+        let y = (point.position.y > bbox.center.y) as usize;
+        let x = (point.position.x > bbox.center.x) as usize;
         let octant_i = 4 * z + 2 * y + x;
 
-        let new_size = size / convert(2.);
+        let new_size = bbox.size / convert(2.);
         let offset = Vector3::new(
             convert::<_, F>(x as f64 - 0.5),
             convert::<_, F>(y as f64 - 0.5),
             convert::<_, F>(z as f64 - 0.5),
         );
         let sqrt3: F = convert::<_, F>(3.).sqrt();
-        let new_center: Point3<F> = center + offset * new_size * sqrt3;
-        return (octant_i, new_size, new_center);
+        let new_center: Point3<F> = bbox.center + offset * new_size * sqrt3;
+        return (
+            octant_i,
+            CubeBoundingBox {
+                size: new_size,
+                center: new_center,
+            },
+        );
     }
 
     /// calculates the center and size of the i-th octant
     /// based on the current center and size of an octant
-    fn octant_box(i: usize, center: Point3<F>, size: F) -> (Point3<F>, F) {
+    fn octant_box(i: usize, bbox: &CubeBoundingBox<F>) -> CubeBoundingBox<F> {
         let z = i / 4;
         let y = (i - 4 * z) / 2;
         let x = i % 2;
 
-        let new_size = size / convert(2.);
+        let new_size = bbox.size / convert(2.);
         let offset = Vector3::new(
             convert::<_, F>(x as f64 - 0.5),
             convert::<_, F>(y as f64 - 0.5),
             convert::<_, F>(z as f64 - 0.5),
         );
         let sqrt3: F = convert::<_, F>(3.).sqrt();
-        let new_center: Point3<F> = center + offset * new_size * sqrt3;
-        return (new_center, new_size);
+        let new_center: Point3<F> = bbox.center + offset * new_size * sqrt3;
+        return CubeBoundingBox {
+            center: new_center,
+            size: new_size,
+        };
     }
 
     fn filled_octants(octants: &Box<[Node<F, C>; 8]>) -> usize {
@@ -232,8 +227,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Octree<F: BaseFloat, C: BaseColor> {
     pub root: Node<F, C>,
-    center: Point3<F>,
-    size: F,
+    bbox: CubeBoundingBox<F>,
     max_node_size: usize,
 
     depth: usize,
@@ -245,8 +239,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         Octree {
             root: Node::Empty,
             max_node_size,
-            center,
-            size,
+            bbox: CubeBoundingBox::new(center, size),
             depth: 0,
             num_points: 0,
         }
@@ -256,19 +249,15 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         self.num_points += 1;
         match &mut self.root {
             Node::Group(_) => {
-                return self
-                    .root
-                    .insert(point, self.center, self.size, 0, 0, self.max_node_size);
+                return self.root.insert(point, self.bbox, 0, 0, self.max_node_size);
             }
             Node::Filled(octant) => {
                 if octant.data.len() >= self.max_node_size {
-                    let group = octant.split(self.center, self.size, 0, self.max_node_size);
+                    let group = octant.split(&self.bbox, 0, self.max_node_size);
                     let mut new_octants = Node::filled_octants(&group) - 1;
                     self.root = Node::Group(group);
 
-                    new_octants +=
-                        self.root
-                            .insert(point, self.center, self.size, 0, 0, self.max_node_size);
+                    new_octants += self.root.insert(point, self.bbox, 0, 0, self.max_node_size);
 
                     return new_octants;
                 } else {
@@ -285,12 +274,8 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         }
     }
 
-    pub fn traverse<'a, A: FnMut(&'a Octant<F, C>, Point3<F>, F)>(&'a self, mut f: A) {
-        self.root.traverse(&mut f, self.center, self.size)
-    }
-
-    pub fn traverse_mut<'a, A: Fn(&'a mut Octant<F, C>)>(&'a mut self, f: &A) {
-        self.root.traverse_mut(&f)
+    pub fn traverse<'a, A: FnMut(&'a Octant<F, C>, CubeBoundingBox<F>)>(&'a self, mut f: A) {
+        self.root.traverse(&mut f, self.bbox);
     }
 
     pub fn depth(&self) -> usize {
@@ -301,11 +286,8 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         self.num_points
     }
 
-    pub fn size(&self) -> F {
-        self.size
-    }
-    pub fn center(&self) -> &Point3<F> {
-        &self.center
+    pub fn bbox(&self) -> &CubeBoundingBox<F> {
+        &self.bbox
     }
 
     pub fn num_octants(&self) -> u64 {
@@ -324,12 +306,52 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
 
     pub fn into_octant_iterator<'a>(&'a self) -> std::vec::IntoIter<OctreeIter<'a, F, C>> {
         let mut result = vec![];
-        self.traverse(|octant, center, size| {
-            let bbox = CubeBoundingBox::new(center, size);
-            result.push(OctreeIter { octant, bbox })
-        });
+        self.traverse(|octant, bbox| result.push(OctreeIter { octant, bbox }));
 
         result.into_iter()
+    }
+
+    pub fn visible_octants<'a>(&'a self, view_transform: Matrix4<F>) -> Vec<OctreeIter<'a, F, C>> {
+        match &self.root {
+            Node::Group(root) => {
+                let mut visible_octants = Vec::new();
+                let mut queue = vec![(root, self.bbox)];
+                while let Some((node, bbox)) = queue.pop() {
+                    if bbox.at_least_one_point_visible(&view_transform) {
+                        for (i, child) in node.iter().enumerate() {
+                            match child {
+                                Node::Group(children) => {
+                                    let bbox_child = Node::<F, C>::octant_box(i, &bbox);
+                                    queue.push((children, bbox_child));
+                                }
+                                Node::Filled(child) => {
+                                    let bbox_child = Node::<F, C>::octant_box(i, &bbox);
+                                    if bbox_child.at_least_one_point_visible(&view_transform) {
+                                        visible_octants.push(OctreeIter {
+                                            octant: child,
+                                            bbox: bbox_child,
+                                        })
+                                    }
+                                }
+                                Node::Empty => {}
+                            }
+                        }
+                    }
+                }
+                return visible_octants;
+            }
+            Node::Filled(octant) => {
+                if self.bbox.at_least_one_point_visible(&view_transform) {
+                    vec![OctreeIter {
+                        octant,
+                        bbox: self.bbox,
+                    }]
+                } else {
+                    Vec::new()
+                }
+            }
+            Node::Empty => Vec::new(),
+        }
     }
 }
 
@@ -375,8 +397,10 @@ impl Into<Octree<f32, f32>> for Octree<f64, u8> {
     fn into(self) -> Octree<f32, f32> {
         Octree {
             root: self.root.into(),
-            center: self.center.cast(),
-            size: self.size as f32,
+            bbox: CubeBoundingBox {
+                center: self.bbox.center.cast(),
+                size: self.bbox.size as f32,
+            },
             max_node_size: self.max_node_size,
             depth: self.depth,
             num_points: self.num_points,

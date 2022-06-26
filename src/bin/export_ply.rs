@@ -40,14 +40,14 @@ fn main() {
     });
     let mut rand_gen = StdRng::seed_from_u64(42);
 
-    let size = octree.size();
-    let center = *octree.center();
+    let size = octree.bbox().size;
+    let center = octree.bbox().center;
 
     let points: Vec<Vertex<f64, u8>> = octree
-        .into_octant_iterator()
+        .into_iter()
         .flat_map(|octant| {
             octant
-                .data
+                .points()
                 .iter()
                 .filter(|v| {
                     if let Some(sample_rate) = opt.sample_rate {

@@ -1,6 +1,5 @@
 use nalgebra::Vector4;
 use std::borrow::BorrowMut;
-use std::f32::consts::PI;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;

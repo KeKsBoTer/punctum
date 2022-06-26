@@ -8,18 +8,12 @@ use crate::{
 use nalgebra::matrix;
 use std::{
     collections::HashMap,
-    num::NonZeroU64,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
 };
 use vulkano::{
-    buffer::{
-        cpu_pool::CpuBufferPoolSubbuffer, BufferAccess, BufferDeviceAddressError, BufferUsage,
-        CpuAccessibleBuffer, CpuBufferPool,
-    },
+    buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuAccessibleBuffer, CpuBufferPool},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
-    descriptor_set::{
-        pool::standard::StdDescriptorPoolAlloc, PersistentDescriptorSet, WriteDescriptorSet,
-    },
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, Queue},
     format::Format,
     image::{view::ImageView, ImageDimensions, ImmutableImage},
@@ -37,7 +31,6 @@ use vulkano::{
     sampler::{Sampler, SamplerCreateInfo},
     shader::ShaderModule,
     sync::{self, GpuFuture},
-    VulkanObject,
 };
 
 use super::UniformBuffer;
@@ -117,9 +110,11 @@ pub struct OctreeRenderer {
     // phantom_buffer: Arc<DeviceLocalBuffer<[Vertex<f32, f32>]>>,
 
     // indirect_draw_cmd: Arc<CpuBufferPoolChunk<DrawIndirectCommand, Arc<StdMemoryPool>>>,
-    sh_vertex_buffer: Arc<CpuAccessibleBuffer<[SHVertex<f32, 121>]>>,
+    sh_vertex_buffer: RwLock<Arc<CpuAccessibleBuffer<[SHVertex<f32, 121>]>>>,
     sh_vertex_buffer_len: RwLock<u32>,
-    sh_set: Arc<PersistentDescriptorSet<StdDescriptorPoolAlloc>>,
+
+    sh_images: Arc<ImageView<ImmutableImage>>,
+    sh_sampler: Arc<Sampler>,
 }
 
 impl OctreeRenderer {
@@ -136,8 +131,8 @@ impl OctreeRenderer {
         let pipeline =
             Self::build_pipeline(vs.clone(), fs.clone(), subpass, viewport, device.clone());
 
-        let max_size = octree.size();
-        let center = octree.center();
+        let max_size = octree.bbox().size;
+        let center = octree.bbox().center;
 
         let scale_size = 100.;
         let scale = scale_size / max_size;
@@ -207,33 +202,20 @@ impl OctreeRenderer {
 
         let (sh_images, sh_sampler) = calc_sh_images(device.clone(), queue.clone(), 128, 10);
 
-        let layout = pipeline.layout().set_layouts().get(1).unwrap();
-
-        let empty_sh_vertices = (0..octree.num_octants())
-            .into_iter()
-            .map(|_| SHVertex::default())
-            .collect::<Vec<SHVertex<f32, 121>>>();
-        let num_empty_sh_vertices = empty_sh_vertices.len() as u32;
-        let sh_vertex_buffer = CpuAccessibleBuffer::from_iter(
-            device.clone(),
-            BufferUsage {
-                vertex_buffer: true,
-                storage_buffer: true,
-                ..BufferUsage::default()
-            },
-            false,
-            empty_sh_vertices,
-        )
-        .unwrap();
-
-        let sh_set = PersistentDescriptorSet::new(
-            layout.clone(),
-            [
-                WriteDescriptorSet::image_view_sampler(0, sh_images.clone(), sh_sampler.clone()),
-                WriteDescriptorSet::buffer(1, sh_vertex_buffer.clone()),
-            ],
-        )
-        .unwrap();
+        let num_empty_sh_vertices = 1;
+        let sh_vertex_buffer = RwLock::new(
+            CpuAccessibleBuffer::from_iter(
+                device.clone(),
+                BufferUsage {
+                    vertex_buffer: true,
+                    storage_buffer: true,
+                    ..BufferUsage::default()
+                },
+                false,
+                (0..1).map(|_| SHVertex::<f32, 121>::default()),
+            )
+            .unwrap(),
+        );
 
         OctreeRenderer {
             device,
@@ -251,7 +233,8 @@ impl OctreeRenderer {
             // indirect_draw_cmd,
             sh_vertex_buffer: sh_vertex_buffer,
             sh_vertex_buffer_len: RwLock::new(num_empty_sh_vertices),
-            sh_set,
+            sh_images,
+            sh_sampler,
         }
     }
 
@@ -286,57 +269,66 @@ impl OctreeRenderer {
         };
         let view_transform = u.proj * u.view * u.world;
 
-        let octants = self.loaded_octants.read().unwrap();
+        // let octants = self.loaded_octants.read().unwrap();
 
         let mut sh_vertices = Vec::new();
 
-        let mut new = 0;
-        let mut new_octants = HashMap::new();
+        // let mut new = 0;
+        // let mut new_octants = HashMap::new();
 
-        for OctreeIter { octant, bbox } in self.octree.into_octant_iterator() {
-            if bbox.at_least_one_point_visible(&view_transform) {
-                let id = octant.id();
-                if let Some(o) = octants.get(&id) {
-                    new_octants.insert(id, o.clone());
-                } else {
-                    let mut data = [Vertex::<f32, f32>::default(); 8192];
-                    for (i, p) in octant.points().iter().enumerate() {
-                        data[i] = Vertex {
-                            position: p.position.into(),
-                            color: p.color,
-                        };
-                    }
-                    new += 1;
-                    new_octants.insert(
-                        id,
-                        OctantBuffer {
-                            length: octant.points().len() as u32,
-                            points: self.octants_pool.next(data).unwrap(),
-                        },
-                    );
+        for OctreeIter { octant, .. } in self.octree.visible_octants(view_transform) {
+            // let id = octant.id();
+            // if let Some(o) = octants.get(&id) {
+            //     new_octants.insert(id, o.clone());
+            // } else {
+            //     let mut data = [Vertex::<f32, f32>::default(); 8192];
+            //     for (i, p) in octant.points().iter().enumerate() {
+            //         data[i] = Vertex {
+            //             position: p.position.into(),
+            //             color: p.color,
+            //         };
+            //     }
+            //     new += 1;
+            //     new_octants.insert(
+            //         id,
+            //         OctantBuffer {
+            //             length: octant.points().len() as u32,
+            //             points: self.octants_pool.next(data).unwrap(),
+            //         },
+            //     );
 
-                    if let Some(sh) = octant.sh_approximation {
-                        sh_vertices.push(sh);
-                    }
-                }
+            // }
+
+            if let Some(sh) = octant.sh_approximation {
+                sh_vertices.push(sh);
             }
         }
-        if new > 0 {
-            println!("new octants: {}", new);
-        }
-        drop(octants);
+        // drop(octants);
 
-        let mut octants = self.loaded_octants.write().unwrap();
-        *octants = new_octants;
+        // let mut octants = self.loaded_octants.write().unwrap();
+        // *octants = new_octants;
 
         {
-            let mut vertex_buffer = self.sh_vertex_buffer.write().unwrap();
-            for (i, sh) in sh_vertices.iter().enumerate() {
-                vertex_buffer[i] = *sh;
+            // TODO write to buffer instead of creating a new one
+            // maybe use CPU pool?
+            let new_len = sh_vertices.len() as u32;
+            if new_len > 0 {
+                let mut vertex_buffer = self.sh_vertex_buffer.write().unwrap();
+                *vertex_buffer = CpuAccessibleBuffer::from_iter(
+                    self.device.clone(),
+                    BufferUsage {
+                        vertex_buffer: true,
+                        storage_buffer: true,
+                        ..BufferUsage::default()
+                    },
+                    false,
+                    sh_vertices,
+                )
+                .unwrap();
             }
             let mut size = self.sh_vertex_buffer_len.write().unwrap();
-            *size = sh_vertices.len() as u32;
-            println!("update!");
+            *size = new_len;
+            // println!("update!");
         }
     }
 
@@ -354,7 +346,8 @@ impl OctreeRenderer {
     pub fn render(&self) -> Arc<SecondaryAutoCommandBuffer> {
         let pipeline = self.pipeline.read().unwrap();
 
-        let layout = pipeline.layout().set_layouts().get(0).unwrap();
+        let set_layouts = pipeline.layout().set_layouts();
+
         let uniform_buffer = {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.pool_chunk().clone()
@@ -362,8 +355,23 @@ impl OctreeRenderer {
 
         // TODO maybe pass chunks as buffer_array ?
         let set = PersistentDescriptorSet::new(
-            layout.clone(),
+            set_layouts.get(0).unwrap().clone(),
             [WriteDescriptorSet::buffer(0, uniform_buffer)],
+        )
+        .unwrap();
+
+        let sh_vertex_buffer = self.sh_vertex_buffer.read().unwrap();
+
+        let sh_set = PersistentDescriptorSet::new(
+            set_layouts.get(1).unwrap().clone(),
+            [
+                WriteDescriptorSet::image_view_sampler(
+                    0,
+                    self.sh_images.clone(),
+                    self.sh_sampler.clone(),
+                ),
+                WriteDescriptorSet::buffer(1, sh_vertex_buffer.clone()),
+            ],
         )
         .unwrap();
 
@@ -381,7 +389,7 @@ impl OctreeRenderer {
                 PipelineBindPoint::Graphics,
                 pipeline.layout().clone(),
                 0,
-                [set.clone(), self.sh_set.clone()].to_vec(),
+                [set.clone(), sh_set.clone()].to_vec(),
             );
 
         // for (_, octant) in self.loaded_octants.read().unwrap().iter() {
@@ -397,7 +405,7 @@ impl OctreeRenderer {
         //     .unwrap();
 
         builder
-            .bind_vertex_buffers(0, self.sh_vertex_buffer.clone())
+            .bind_vertex_buffers(0, sh_vertex_buffer.clone())
             .draw(*self.sh_vertex_buffer_len.read().unwrap(), 1, 0, 0)
             .unwrap();
 
@@ -424,38 +432,6 @@ impl OctreeRenderer {
             zfar: *camera.zfar(),
             ..current
         });
-    }
-}
-
-fn raw_device_address(buffer: impl BufferAccess) -> Result<NonZeroU64, BufferDeviceAddressError> {
-    let inner = buffer.inner();
-    let device = buffer.device();
-
-    // VUID-vkGetBufferDeviceAddress-bufferDeviceAddress-03324
-    if !device.enabled_features().buffer_device_address {
-        return Err(BufferDeviceAddressError::FeatureNotEnabled);
-    }
-
-    // VUID-VkBufferDeviceAddressInfo-buffer-02601
-    if !inner.buffer.usage().device_address {
-        return Err(BufferDeviceAddressError::BufferMissingUsage);
-    }
-
-    unsafe {
-        let info = ash::vk::BufferDeviceAddressInfo {
-            buffer: inner.buffer.internal_object(),
-            ..Default::default()
-        };
-        let ptr = device
-            .fns()
-            .ext_buffer_device_address
-            .get_buffer_device_address_ext(device.internal_object(), &info);
-
-        if ptr == 0 {
-            panic!("got null ptr from a valid GetBufferDeviceAddressEXT call");
-        }
-
-        Ok(NonZeroU64::new_unchecked(ptr + inner.offset))
     }
 }
 
@@ -494,3 +470,35 @@ fn calc_sh_images(
 
     return (sh_images_view, sampler);
 }
+
+// fn raw_device_address(buffer: impl BufferAccess) -> Result<NonZeroU64, BufferDeviceAddressError> {
+//     let inner = buffer.inner();
+//     let device = buffer.device();
+
+//     // VUID-vkGetBufferDeviceAddress-bufferDeviceAddress-03324
+//     if !device.enabled_features().buffer_device_address {
+//         return Err(BufferDeviceAddressError::FeatureNotEnabled);
+//     }
+
+//     // VUID-VkBufferDeviceAddressInfo-buffer-02601
+//     if !inner.buffer.usage().device_address {
+//         return Err(BufferDeviceAddressError::BufferMissingUsage);
+//     }
+
+//     unsafe {
+//         let info = ash::vk::BufferDeviceAddressInfo {
+//             buffer: inner.buffer.internal_object(),
+//             ..Default::default()
+//         };
+//         let ptr = device
+//             .fns()
+//             .ext_buffer_device_address
+//             .get_buffer_device_address_ext(device.internal_object(), &info);
+
+//         if ptr == 0 {
+//             panic!("got null ptr from a valid GetBufferDeviceAddressEXT call");
+//         }
+
+//         Ok(NonZeroU64::new_unchecked(ptr + inner.offset))
+//     }
+// }

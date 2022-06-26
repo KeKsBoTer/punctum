@@ -1,6 +1,7 @@
 use std::{mem, sync::Arc};
 
 use nalgebra::{center, distance_squared, Matrix4, Point3, RealField, Vector3};
+use serde::{Serialize, Deserialize};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::Device,
@@ -124,7 +125,7 @@ impl PointCloudGPU {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct CubeBoundingBox<F: BaseFloat> {
     pub center: Point3<F>,
     pub size: F,
