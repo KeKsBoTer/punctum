@@ -116,13 +116,6 @@ where
     F: BaseFloat,
     C: BaseColor,
 {
-    let mut bbox = bbox;
-    if flip_yz {
-        let tmp = bbox.center.y;
-        bbox.center.y = bbox.center.z;
-        bbox.center.z = tmp;
-    }
-
     let mut point_iter: Box<dyn Iterator<Item = Vertex<F, C>>> = Box::new(
         points
             .map(normalize_point(bbox, cube_size))

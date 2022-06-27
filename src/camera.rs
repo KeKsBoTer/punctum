@@ -1,9 +1,9 @@
 use approx::assert_ulps_eq;
-use nalgebra::{vector, Matrix4, Point3, Vector3};
+use nalgebra::{vector, Matrix4, Point3, Vector3, Vector4};
 use std::{f32::consts::PI, time::Duration};
 use winit::{dpi::PhysicalPosition, event::*};
 
-use crate::pointcloud::CubeBoundingBox;
+use crate::{pointcloud::CubeBoundingBox, BaseFloat};
 
 pub trait Projection {
     fn projection_matrix(&self, znear: f32, zfar: f32) -> Matrix4<f32>;
@@ -69,6 +69,9 @@ impl<P: Projection> Camera<P> {
     pub fn position(&self) -> &Point3<f32> {
         &self.pos
     }
+    pub fn rotation(&self) -> &Vector3<f32> {
+        &self.rot
+    }
 
     pub fn znear(&self) -> &f32 {
         &self.znear
@@ -81,14 +84,136 @@ impl<P: Projection> Camera<P> {
     fn rot_mat(&self) -> Matrix4<f32> {
         Matrix4::from_euler_angles(self.rot.x, self.rot.y, self.rot.z)
     }
+
+    /// fast frustum plane extraction with Gribb/Hartmann method
+    /// see https://www8.cs.umu.se/kurser/5DV051/HT12/lab/plane_extraction.pdf
+    pub fn extract_planes_from_projmat(
+        &self,
+        world: Matrix4<f32>,
+        normalize: bool,
+    ) -> ViewFrustum<f32> {
+        let mat = self.proj * self.view * world;
+
+        let mut left = Vector4::zeros();
+        let mut right = Vector4::zeros();
+        let mut bottom = Vector4::zeros();
+        let mut top = Vector4::zeros();
+        let mut near = Vector4::zeros();
+        let mut far = Vector4::zeros();
+
+        // Left clipping plane
+        left.x = mat[(3, 0)] + mat[(0, 0)];
+        left.y = mat[(3, 1)] + mat[(0, 1)];
+        left.z = mat[(3, 2)] + mat[(0, 2)];
+        left.w = mat[(3, 3)] + mat[(0, 3)];
+        // Right clipping plane
+        right.x = mat[(3, 0)] - mat[(0, 0)];
+        right.y = mat[(3, 1)] - mat[(0, 1)];
+        right.z = mat[(3, 2)] - mat[(0, 2)];
+        right.w = mat[(3, 3)] - mat[(0, 3)];
+        // Top clipping plane
+        top.x = mat[(3, 0)] - mat[(1, 0)];
+        top.y = mat[(3, 1)] - mat[(1, 1)];
+        top.z = mat[(3, 2)] - mat[(1, 2)];
+        top.w = mat[(3, 3)] - mat[(1, 3)];
+        // Bottom clipping plane
+        bottom.x = mat[(3, 0)] + mat[(1, 0)];
+        bottom.y = mat[(3, 1)] + mat[(1, 1)];
+        bottom.z = mat[(3, 2)] + mat[(1, 2)];
+        bottom.w = mat[(3, 3)] + mat[(1, 3)];
+        // Near clipping plane
+        near.x = mat[(3, 0)] + mat[(2, 0)];
+        near.y = mat[(3, 1)] + mat[(2, 1)];
+        near.z = mat[(3, 2)] + mat[(2, 2)];
+        near.w = mat[(3, 3)] + mat[(2, 3)];
+        // Far clipping plane
+        far.x = mat[(3, 0)] - mat[(2, 0)];
+        far.y = mat[(3, 1)] - mat[(2, 1)];
+        far.z = mat[(3, 2)] - mat[(2, 2)];
+        far.w = mat[(3, 3)] - mat[(2, 3)];
+
+        if normalize {
+            let mag = left.xzy().norm();
+            left /= mag;
+            let mag = right.xzy().norm();
+            right /= mag;
+            let mag = top.xzy().norm();
+            top /= mag;
+            let mag = bottom.xzy().norm();
+            bottom /= mag;
+            let mag = far.xzy().norm();
+            far /= mag;
+            let mag = near.xzy().norm();
+            near /= mag;
+        }
+
+        return ViewFrustum {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        };
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ViewFrustum<F: BaseFloat> {
+    pub left: Vector4<F>,
+    pub right: Vector4<F>,
+    pub bottom: Vector4<F>,
+    pub top: Vector4<F>,
+    pub near: Vector4<F>,
+    pub far: Vector4<F>,
+}
+
+impl<F: BaseFloat> ViewFrustum<F> {
+    // check if point is within frustum
+    pub fn point_visible(&self, point: &Point3<F>) -> bool {
+        let planes = [
+            self.left,
+            self.right,
+            self.bottom,
+            self.top,
+            self.near,
+            self.far,
+        ];
+        for p in planes {
+            if p.dot(&point.to_homogeneous()) <= F::zero() {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// checks if sphere is intersecting frustum
+    /// Important: Frustum planes need to be normed
+    pub fn sphere_visible(&self, center: Point3<F>, radius: F) -> bool {
+        let planes = [
+            self.left,
+            self.right,
+            self.bottom,
+            self.top,
+            self.near,
+            self.far,
+        ];
+        for p in planes {
+            let d = p.dot(&center.to_homogeneous());
+            if d + radius <= F::zero() {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 impl Camera<PerspectiveProjection> {
-    pub fn new(aspect_ratio: f32) -> Self {
+    pub fn new(pos: Point3<f32>, rot: Vector3<f32>, aspect_ratio: f32) -> Self {
         let fovy: f32 = PI / 2.;
         let mut c = Camera {
-            pos: Point3::new(0., 0., 0.),
-            rot: vector!(0., 0., 0.),
+            pos: pos,
+            rot: rot,
 
             view: Matrix4::identity(),
             proj: Matrix4::identity(),
@@ -287,16 +412,17 @@ impl CameraController {
     pub fn update_camera(&mut self, camera: &mut PerspectiveCamera, dt: Duration) {
         let dt = dt.as_secs_f32();
 
-        let cam_front = Vector3::new(
-            camera.rot.x.cos() * camera.rot.y.sin(),
-            camera.rot.x.sin(),
-            camera.rot.x.cos() * camera.rot.y.cos(),
-        )
-        .normalize();
+        // let cam_front = Vector3::new(
+        //     camera.rot.x.cos() * camera.rot.y.sin(),
+        //     camera.rot.x.sin(),
+        //     camera.rot.x.cos() * camera.rot.y.cos(),
+        // )
+        // .normalize();
+        let cam_front = Vector3::new(0., 0., 1.);
 
         let move_speed = dt * self.speed;
 
-        let cam_left = cam_front.cross(&Vector3::new(0., 1., 0.)).normalize();
+        let cam_left = Vector3::new(-1., 0., 0.); //cam_front.cross(&Vector3::new(0., 1., 0.)).normalize();
 
         camera.pos += cam_front * self.amount_forward * move_speed;
         camera.pos -= cam_front * self.amount_backward * move_speed;

@@ -1,13 +1,16 @@
 use std::{mem, sync::Arc};
 
 use nalgebra::{center, distance_squared, Matrix4, Point3, RealField, Vector3};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     device::Device,
 };
 
-use crate::vertex::{BaseColor, BaseFloat, Vertex};
+use crate::{
+    camera::ViewFrustum,
+    vertex::{BaseColor, BaseFloat, Vertex},
+};
 
 #[derive(Debug, Clone)]
 #[repr(transparent)]
@@ -127,7 +130,10 @@ impl PointCloudGPU {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct CubeBoundingBox<F: BaseFloat> {
+    /// the bouding box center
     pub center: Point3<F>,
+
+    /// bounding box size (length of cube edge)
     pub size: F,
 }
 
@@ -205,5 +211,19 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
                 n_pos.abs() <= ones
             })
             .contains(&true)
+    }
+
+    // TODO something here is not working correctly!
+    pub fn within_frustum(&self, frustum: &ViewFrustum<F>) -> bool {
+        let radius = self.outer_radius();
+
+        return frustum.sphere_visible(self.center, radius);
+    }
+
+    pub fn outer_radius(&self) -> F {
+        let two = F::from_subset(&2.);
+        let three = F::from_subset(&3.);
+        let radius = (self.size / two) * three.sqrt();
+        return radius;
     }
 }

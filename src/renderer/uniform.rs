@@ -48,7 +48,7 @@ where
     // pub fn buffer(&self) -> &Arc<DeviceLocalBuffer<T>> {
     //     &self.buffer
     // }
-    pub fn pool_chunk(&self) -> &Arc<CpuBufferPoolSubbuffer<T, Arc<StdMemoryPool>>> {
+    pub fn buffer(&self) -> &Arc<CpuBufferPoolSubbuffer<T, Arc<StdMemoryPool>>> {
         &self.pool_chunk
     }
 

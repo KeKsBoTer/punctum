@@ -1,16 +1,16 @@
 #version 460
-#extension GL_EXT_scalar_block_layout : enable
-#extension GL_EXT_buffer_reference2 : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
-
-struct Vertex 
-{
-  vec3 pos;
-  vec4 color;
-};
-
-
-layout(buffer_reference, scalar, buffer_reference_align = 16) readonly buffer Vertices {Vertex v[]; }; // Positions of an object
+// #extension GL_EXT_scalar_block_layout : enable
+// #extension GL_EXT_buffer_reference2 : require
+// #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+// 
+// struct Vertex 
+// {
+//  vec3 pos;
+//  vec4 color;
+// };
+// 
+// 
+// layout(buffer_reference, scalar, buffer_reference_align = 16) readonly buffer Vertices {Vertex v[]; }; // Positions of an object
 
 layout(location = 0) in vec3 position;
 // layout(location = 1) in vec3 normal;
@@ -21,9 +21,8 @@ layout(set = 0, binding = 0) uniform UniformData {
     mat4 world;
     mat4 view;
     mat4 proj;
+    vec3 camera_pos;
     uint point_size;
-    float zNear;
-    float zFar;
 } uniforms;
 
 
@@ -53,6 +52,4 @@ void main() {
     vertex_color = color;//vertices.v[gl_VertexIndex].color;
 
     pointSize = gl_PointSize;
-    // zNear = uniforms.zNear;
-    // zFar = uniforms.zFar;
 }

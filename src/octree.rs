@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use nalgebra::{convert, Matrix4, Point3, Vector3};
+use nalgebra::{convert, Point3, Vector3};
 
 use crate::{
+    camera::ViewFrustum,
     vertex::{BaseColor, BaseFloat},
     CubeBoundingBox, SHVertex, Vertex,
 };
@@ -311,13 +312,13 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         result.into_iter()
     }
 
-    pub fn visible_octants<'a>(&'a self, view_transform: Matrix4<F>) -> Vec<OctreeIter<'a, F, C>> {
+    pub fn visible_octants<'a>(&'a self, frustum: &ViewFrustum<F>) -> Vec<OctreeIter<'a, F, C>> {
         match &self.root {
             Node::Group(root) => {
                 let mut visible_octants = Vec::new();
                 let mut queue = vec![(root, self.bbox)];
                 while let Some((node, bbox)) = queue.pop() {
-                    if bbox.at_least_one_point_visible(&view_transform) {
+                    if bbox.within_frustum(&frustum) {
                         for (i, child) in node.iter().enumerate() {
                             match child {
                                 Node::Group(children) => {
@@ -326,7 +327,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
                                 }
                                 Node::Filled(child) => {
                                     let bbox_child = Node::<F, C>::octant_box(i, &bbox);
-                                    if bbox_child.at_least_one_point_visible(&view_transform) {
+                                    if bbox_child.within_frustum(&frustum) {
                                         visible_octants.push(OctreeIter {
                                             octant: child,
                                             bbox: bbox_child,
@@ -341,7 +342,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
                 return visible_octants;
             }
             Node::Filled(octant) => {
-                if self.bbox.at_least_one_point_visible(&view_transform) {
+                if self.bbox.within_frustum(&frustum) {
                     vec![OctreeIter {
                         octant,
                         bbox: self.bbox,
