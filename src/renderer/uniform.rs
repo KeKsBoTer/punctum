@@ -14,7 +14,6 @@ where
     data: T,
     buffer_pool: CpuBufferPool<T, Arc<StdMemoryPool>>,
     pool_chunk: Arc<CpuBufferPoolSubbuffer<T, Arc<StdMemoryPool>>>,
-    // buffer: Arc<DeviceLocalBuffer<T>>,
 }
 
 impl<T> UniformBuffer<T>
@@ -26,17 +25,10 @@ where
         let pool = CpuBufferPool::new(device.clone(), BufferUsage::all());
         let pool_chunk = pool.next(data.unwrap_or_default()).unwrap();
 
-        // let uniform_buffer: Arc<DeviceLocalBuffer<T>> = DeviceLocalBuffer::new(
-        //     device.clone(),
-        //     BufferUsage::uniform_buffer_transfer_destination(),
-        //     None,
-        // )
-        // .unwrap();
         UniformBuffer {
             data: data.unwrap_or_default(),
             buffer_pool: pool,
             pool_chunk: pool_chunk,
-            // buffer: uniform_buffer,
         }
     }
 
@@ -45,9 +37,6 @@ where
         self.pool_chunk = self.buffer_pool.next(self.data).unwrap();
     }
 
-    // pub fn buffer(&self) -> &Arc<DeviceLocalBuffer<T>> {
-    //     &self.buffer
-    // }
     pub fn buffer(&self) -> &Arc<CpuBufferPoolSubbuffer<T, Arc<StdMemoryPool>>> {
         &self.pool_chunk
     }

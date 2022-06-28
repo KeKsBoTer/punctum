@@ -3,7 +3,7 @@ use crate::{
     octree::OctreeIter,
     sh::calc_sh_grid,
     vertex::Vertex,
-    Octree, SHVertex, Viewport,
+    CubeBoundingBox, Octree, SHVertex, Viewport,
 };
 use nalgebra::{distance, matrix, Point3};
 use std::{
@@ -57,6 +57,7 @@ pub struct OctreeRenderer {
     subpass: Subpass,
     sh_renderer: SHRenderer,
     octant_renderer: OctantRenderer,
+    screen_height: RwLock<u32>,
 }
 
 impl OctreeRenderer {
@@ -79,6 +80,7 @@ impl OctreeRenderer {
             0., 0., scale, -scale * center.z;
             0., 0., 0.   , 1.
         ];
+        let viewport_height = viewport.size()[1] as u32;
 
         let uniforms = RwLock::new(UniformBuffer::new(
             device.clone(),
@@ -110,6 +112,7 @@ impl OctreeRenderer {
             subpass,
             sh_renderer,
             octant_renderer,
+            screen_height: RwLock::new(viewport_height),
         }
     }
 
@@ -122,14 +125,28 @@ impl OctreeRenderer {
         let frustum = self.frustum.read().unwrap();
         let visible_octants = self.octree.visible_octants(&frustum);
 
+        let camera_fov = PI / 2.;
+        let screen_height = self.screen_height.read().unwrap().clone();
+        let threshold_fn = |bbox: &CubeBoundingBox<f32>| {
+            let d = distance(&bbox.center, &u.camera_pos.into());
+            let radius = bbox.outer_radius();
+            let a = 2. * (radius / d).atan();
+            return a / camera_fov <= 1. / screen_height as f32;
+        };
+
         self.sh_renderer
-            .frustum_culling(&visible_octants, u.camera_pos.into());
-        self.octant_renderer.frustum_culling(&visible_octants);
+            .frustum_culling(&visible_octants, threshold_fn);
+        self.octant_renderer
+            .frustum_culling(&visible_octants, threshold_fn);
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
+        let viewport_height = viewport.size()[1] as u32;
         self.sh_renderer.set_viewport(viewport.clone());
         self.octant_renderer.set_viewport(viewport);
+
+        let mut screen_height = self.screen_height.write().unwrap();
+        *screen_height = viewport_height;
     }
 
     pub fn render(&self) -> Arc<SecondaryAutoCommandBuffer> {
@@ -148,7 +165,7 @@ impl OctreeRenderer {
 
         self.sh_renderer
             .render(uniform_buffer.clone(), &mut builder);
-        // self.octant_renderer.render(uniform_buffer, &mut builder);
+        self.octant_renderer.render(uniform_buffer, &mut builder);
 
         Arc::new(builder.build().unwrap())
     }
@@ -243,8 +260,6 @@ struct SHRenderer {
 
     sh_images: Arc<ImageView<ImmutableImage>>,
     sh_sampler: Arc<Sampler>,
-
-    screen_height: RwLock<u32>,
 }
 
 impl SHRenderer {
@@ -257,7 +272,6 @@ impl SHRenderer {
         let vs = vs_sh::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
-        let viewport_height = viewport.size()[1] as u32;
         let pipeline = build_pipeline::<SHVertex<f32, 121>>(
             vs.clone(),
             fs.clone(),
@@ -293,7 +307,6 @@ impl SHRenderer {
             sh_vertex_buffer_len: RwLock::new(num_empty_sh_vertices),
             sh_images,
             sh_sampler,
-            screen_height: RwLock::new(viewport_height),
         }
     }
 
@@ -342,22 +355,18 @@ impl SHRenderer {
             .unwrap();
     }
 
-    pub fn frustum_culling<'a>(
+    pub fn frustum_culling<'a, F>(
         &self,
         visible_octants: &Vec<OctreeIter<'a, f32, f32>>,
-        camera_pos: Point3<f32>,
-    ) {
+        threshold_fn: F,
+    ) where
+        F: Fn(&CubeBoundingBox<f32>) -> bool,
+    {
         let mut sh_vertices = Vec::new();
 
-        let screen_height = self.screen_height.read().unwrap().clone();
         for OctreeIter { octant, bbox } in visible_octants {
             if let Some(sh) = octant.sh_approximation {
-                // let screen_space = view_transform * bbox.center.to_homogeneous();
-                // let screen_pos = screen_space.xyz() / screen_space.w;
-                let d = distance(&bbox.center, &camera_pos);
-                let radius = bbox.outer_radius();
-                let a = 2. * (radius / d).atan();
-                if a / (PI / 2.) <= 1. / screen_height as f32 {
+                if threshold_fn(bbox) {
                     sh_vertices.push(sh);
                 }
             }
@@ -385,7 +394,6 @@ impl SHRenderer {
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
-        let viewport_height = viewport.size()[1] as u32;
         let mut pipeline = self.pipeline.write().unwrap();
         *pipeline = build_pipeline::<SHVertex<f32, 121>>(
             self.vs.clone(),
@@ -394,10 +402,6 @@ impl SHRenderer {
             viewport,
             pipeline.device().clone(),
         );
-        drop(pipeline);
-
-        let mut screen_height = self.screen_height.write().unwrap();
-        *screen_height = viewport_height;
     }
 
     fn calc_sh_images(
@@ -521,29 +525,38 @@ impl OctantRenderer {
         }
     }
 
-    pub fn frustum_culling<'a>(&self, visible_octants: &Vec<OctreeIter<'a, f32, f32>>) {
+    pub fn frustum_culling<'a, F>(
+        &self,
+        visible_octants: &Vec<OctreeIter<'a, f32, f32>>,
+        threshold_fn: F,
+    ) where
+        F: Fn(&CubeBoundingBox<f32>) -> bool,
+    {
         let octants = self.loaded_octants.read().unwrap();
         let mut new_octants = HashMap::new();
 
-        for OctreeIter { octant, .. } in visible_octants {
-            let id = octant.id();
-            if let Some(o) = octants.get(&id) {
-                new_octants.insert(id, o.clone());
-            } else {
-                let mut data = [Vertex::<f32, f32>::default(); 8192];
-                for (i, p) in octant.points().iter().enumerate() {
-                    data[i] = Vertex {
-                        position: p.position.into(),
-                        color: p.color,
-                    };
+        for OctreeIter { octant, bbox } in visible_octants {
+            // check if octant is larger than one pixel on screen
+            if !threshold_fn(bbox) {
+                let id = octant.id();
+                if let Some(o) = octants.get(&id) {
+                    new_octants.insert(id, o.clone());
+                } else {
+                    let mut data = [Vertex::<f32, f32>::default(); 8192];
+                    for (i, p) in octant.points().iter().enumerate() {
+                        data[i] = Vertex {
+                            position: p.position.into(),
+                            color: p.color,
+                        };
+                    }
+                    new_octants.insert(
+                        id,
+                        OctantBuffer {
+                            length: octant.points().len() as u32,
+                            points: self.octants_pool.next(data).unwrap(),
+                        },
+                    );
                 }
-                new_octants.insert(
-                    id,
-                    OctantBuffer {
-                        length: octant.points().len() as u32,
-                        points: self.octants_pool.next(data).unwrap(),
-                    },
-                );
             }
         }
         drop(octants);
