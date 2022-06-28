@@ -46,6 +46,8 @@ void main() {
     vec4 pos = vec4(position,1);
     mat4 worldview = uniforms.view * uniforms.world;
     gl_Position = uniforms.proj * worldview * pos;
+    // TODO do this in projection matrix
+    gl_Position.z = (gl_Position.z + gl_Position.w) / 2.0;
     
     gl_PointSize = uniforms.point_size;
 

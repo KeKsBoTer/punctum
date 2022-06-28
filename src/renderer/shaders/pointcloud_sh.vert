@@ -61,6 +61,8 @@ void main() {
     // position relative to camera
     vec4 camera_pos = uniforms.view * world_pos;
     gl_Position = uniforms.proj * camera_pos;
+
+    gl_Position.z = (gl_Position.z + gl_Position.w) / 2.0;
     
     gl_PointSize = uniforms.point_size;
     pointSize = gl_PointSize;

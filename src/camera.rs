@@ -1,5 +1,5 @@
 use approx::assert_ulps_eq;
-use nalgebra::{vector, Matrix4, Point3, Vector3, Vector4};
+use nalgebra::{distance, matrix, vector, Matrix4, Point3, Vector3, Vector4};
 use std::{f32::consts::PI, time::Duration};
 use winit::{dpi::PhysicalPosition, event::*};
 
@@ -87,12 +87,8 @@ impl<P: Projection> Camera<P> {
 
     /// fast frustum plane extraction with Gribb/Hartmann method
     /// see https://www8.cs.umu.se/kurser/5DV051/HT12/lab/plane_extraction.pdf
-    pub fn extract_planes_from_projmat(
-        &self,
-        world: Matrix4<f32>,
-        normalize: bool,
-    ) -> ViewFrustum<f32> {
-        let mat = self.proj * self.view * world;
+    pub fn extract_planes_from_projmat(&self, normalize: bool) -> ViewFrustum<f32> {
+        let mat = self.proj * self.view;
 
         let mut left = Vector4::zeros();
         let mut right = Vector4::zeros();
@@ -155,6 +151,29 @@ impl<P: Projection> Camera<P> {
             near,
             far,
         };
+    }
+
+    pub fn adjust_znear_zfar(&mut self, bbox: &CubeBoundingBox<f32>) {
+        let radius = bbox.outer_radius();
+        let frustum = self.extract_planes_from_projmat(false);
+        let sign = frustum.near.dot(&bbox.center.to_homogeneous());
+        let mut d = distance(&bbox.center, &self.pos);
+        if sign < 0. {
+            d *= -1.;
+        }
+
+        let mut zfar = d + radius;
+        let mut znear = zfar - 2. * radius;
+
+        if zfar <= 0. {
+            zfar = 100.;
+        }
+        if znear <= 0. || znear >= zfar {
+            znear = zfar / 1000.;
+        }
+        self.znear = znear;
+        self.zfar = zfar;
+        self.update_proj_matrix();
     }
 }
 
@@ -234,6 +253,12 @@ impl Camera<PerspectiveProjection> {
         let trans = Matrix4::new_translation(&vector!(-self.pos.x, -self.pos.y, self.pos.z));
 
         self.view = rot * trans;
+    }
+
+    pub fn set_near_far(&mut self, znear: f32, zfar: f32) {
+        self.znear = znear;
+        self.zfar = zfar;
+        self.update_proj_matrix();
     }
 
     // creates a camera that looks at the bounding box (move in z)
@@ -409,8 +434,17 @@ impl CameraController {
         };
     }
 
-    pub fn update_camera(&mut self, camera: &mut PerspectiveCamera, dt: Duration) {
+    pub fn update_camera(&mut self, camera: &mut PerspectiveCamera, dt: Duration) -> bool {
         let dt = dt.as_secs_f32();
+
+        let moved = self.amount_forward != 0.
+            || self.amount_backward != 0.
+            || self.amount_right != 0.
+            || self.amount_left != 0.
+            || self.amount_up != 0.
+            || self.amount_down != 0.
+            || self.rotate_horizontal != 0.
+            || self.rotate_vertical != 0.;
 
         // let cam_front = Vector3::new(
         //     camera.rot.x.cos() * camera.rot.y.sin(),
@@ -441,5 +475,6 @@ impl CameraController {
         self.rotate_horizontal = 0.;
         self.rotate_vertical = 0.;
         camera.update_view_matrix();
+        return moved;
     }
 }

@@ -66,7 +66,8 @@ fn normalize_point<F: BaseFloat, C: BaseColor>(
     scale_factor: F,
 ) -> impl Fn(Vertex<F, C>) -> Vertex<F, C> {
     return move |v: Vertex<F, C>| Vertex {
-        position: (&v.position - &bbox.center.coords) * scale_factor / bbox.size,
+        position: (&v.position - &bbox.center.coords) * scale_factor
+            / (F::from_subset(&0.5) * bbox.size),
         color: v.color,
     };
 }

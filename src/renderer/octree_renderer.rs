@@ -5,7 +5,7 @@ use crate::{
     vertex::Vertex,
     CubeBoundingBox, Octree, SHVertex, Viewport,
 };
-use nalgebra::{distance, matrix, Point3};
+use nalgebra::{distance, matrix, Matrix4, Point3};
 use std::{
     collections::HashMap,
     f32::consts::PI,
@@ -72,14 +72,7 @@ impl OctreeRenderer {
         let max_size = octree.bbox().size;
         let center = octree.bbox().center;
 
-        let scale_size = 100.;
-        let scale = scale_size / max_size;
-        let world = matrix![
-            scale, 0., 0., -scale * center.x;
-            0., scale, 0., -scale * center.y;
-            0., 0., scale, -scale * center.z;
-            0., 0., 0.   , 1.
-        ];
+        let world = Matrix4::identity();
         let viewport_height = viewport.size()[1] as u32;
 
         let uniforms = RwLock::new(UniformBuffer::new(
@@ -92,7 +85,7 @@ impl OctreeRenderer {
                 ..vs::ty::UniformData::default()
             }),
         ));
-        let frustum = RwLock::new(camera.extract_planes_from_projmat(world, true));
+        let frustum = RwLock::new(camera.extract_planes_from_projmat(true));
 
         let sh_renderer = SHRenderer::new(
             device.clone(),
@@ -131,7 +124,7 @@ impl OctreeRenderer {
             let d = distance(&bbox.center, &u.camera_pos.into());
             let radius = bbox.outer_radius();
             let a = 2. * (radius / d).atan();
-            return a / camera_fov <= 1. / screen_height as f32;
+            return a / camera_fov <= 2. / screen_height as f32;
         };
 
         self.sh_renderer
@@ -190,7 +183,7 @@ impl OctreeRenderer {
         });
 
         let mut frustum = self.frustum.write().unwrap();
-        *frustum = camera.extract_planes_from_projmat(current.world.into(), true);
+        *frustum = camera.extract_planes_from_projmat(true);
     }
 }
 

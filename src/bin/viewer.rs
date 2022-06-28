@@ -238,10 +238,11 @@ fn main() {
     let window_size = surface.window().inner_size();
     let aspect_ratio = window_size.width as f32 / window_size.height as f32;
     let mut camera = PerspectiveCamera::new(
-        Point3::new(0.0, 19.337029, -47.544266),
+        Point3::new(4.293682, 31.51273, -244.75063),
         Vector3::new(0.4617872, 0.0, 0.0),
         aspect_ratio,
     );
+    camera.adjust_znear_zfar(octree.bbox());
 
     let renderer = Arc::new(OctreeRenderer::new(
         device.clone(),
@@ -361,10 +362,11 @@ fn main() {
 
             let time_since_last_frame = last_update_inst.elapsed();
             let _fps = 1. / time_since_last_frame.as_secs_f32();
-            // if fps < 55. {
-            //     println!("FPS: {:}", fps);
-            // }
-            camera_controller.update_camera(&mut camera, time_since_last_frame);
+            let moved = camera_controller.update_camera(&mut camera, time_since_last_frame);
+
+            if moved {
+                camera.adjust_znear_zfar(octree.bbox());
+            }
 
             last_update_inst = Instant::now();
             surface.window().request_redraw();
