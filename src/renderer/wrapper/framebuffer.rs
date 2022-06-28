@@ -11,6 +11,7 @@ where
 {
     buffer: Arc<vulkano::render_pass::Framebuffer>,
     image: Arc<I>,
+    image_view: Arc<ImageView<I>>,
 }
 
 impl<I> Framebuffer<I>
@@ -38,7 +39,11 @@ where
             },
         )
         .unwrap();
-        Framebuffer { buffer, image }
+        Framebuffer {
+            buffer,
+            image,
+            image_view,
+        }
     }
 
     pub fn vulkan_fb(&self) -> &Arc<vulkano::render_pass::Framebuffer> {
@@ -47,6 +52,9 @@ where
 
     pub fn image(&self) -> &Arc<I> {
         &self.image
+    }
+    pub fn image_view(&self) -> &Arc<ImageView<I>> {
+        &self.image_view
     }
 }
 

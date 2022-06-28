@@ -29,6 +29,8 @@ pbr = { version = "1.0.4" }
 num-traits = "0.2.14"
 structopt = "0.3"
 
+egui_winit_vulkano = "0.17.0"
+
 [profile.release]
 debug = 1
 

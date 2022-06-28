@@ -1,3 +1,5 @@
+use egui_winit_vulkano::egui::{ScrollArea, TextEdit, TextStyle, Visuals};
+use egui_winit_vulkano::{egui, Gui};
 use nalgebra::{Point3, Vector3, Vector4};
 use std::borrow::BorrowMut;
 use std::fs::File;
@@ -128,6 +130,13 @@ const SH_COEFS: [[f32; 4]; 16] = [
     ],
 ];
 
+const CODE: &str = r#"
+# Some markup
+```
+let mut gui = Gui::new(renderer.surface(), renderer.queue());
+```
+"#;
+
 #[derive(StructOpt, Debug)]
 #[structopt(name = "Octree Builder")]
 struct Opt {
@@ -233,6 +242,8 @@ fn main() {
         swapchain_format,
     );
 
+    let mut gui = Gui::new(surface.clone(), queue.clone(), true);
+
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
     let window_size = surface.window().inner_size();
@@ -275,58 +286,47 @@ fn main() {
 
     let mut last_mouse_position: Option<PhysicalPosition<f64>> = None;
     let mut mouse_pressed = false;
-
+    let mut code = CODE.to_owned();
     event_loop.run_return(move |event, _, control_flow| match event {
-        Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            ..
-        } => {
-            *control_flow = ControlFlow::Exit;
-        }
-        Event::WindowEvent {
-            event: WindowEvent::Resized(size),
-            ..
-        } => {
-            viewport.resize(size.into());
-            renderer.set_viewport(viewport.clone());
-            camera.set_aspect_ratio(size.width as f32 / size.height as f32);
-            frame.force_recreate();
-        }
-        Event::WindowEvent {
-            event: WindowEvent::CursorMoved {
-                position: new_pos, ..
-            },
-            ..
-        } => {
-            if mouse_pressed {
-                if let Some(last_pos) = last_mouse_position {
-                    camera_controller.process_mouse(
-                        (-(new_pos.x - last_pos.x) as f32).into(),
-                        (-(new_pos.y - last_pos.y) as f32).into(),
-                    );
+        Event::WindowEvent { event, window_id } if window_id == surface.window().id() => {
+            // Update Egui integration so the UI works!
+            let _pass_events_to_game = !gui.update(&event);
+            match event {
+                WindowEvent::Resized(size) => {
+                    viewport.resize(size.into());
+                    renderer.set_viewport(viewport.clone());
+                    camera.set_aspect_ratio(size.width as f32 / size.height as f32);
+                    frame.force_recreate();
                 }
-                last_mouse_position = Some(new_pos);
-            }
-        }
-        Event::WindowEvent {
-            event:
+                WindowEvent::CloseRequested => {
+                    *control_flow = ControlFlow::Exit;
+                }
+                WindowEvent::CursorMoved {
+                    position: new_pos, ..
+                } => {
+                    if mouse_pressed {
+                        if let Some(last_pos) = last_mouse_position {
+                            camera_controller.process_mouse(
+                                (-(new_pos.x - last_pos.x) as f32).into(),
+                                (-(new_pos.y - last_pos.y) as f32).into(),
+                            );
+                        }
+                        last_mouse_position = Some(new_pos);
+                    }
+                }
                 WindowEvent::MouseInput {
                     state,
                     button: MouseButton::Left,
                     ..
+                } => match state {
+                    ElementState::Pressed => {
+                        mouse_pressed = true;
+                    }
+                    ElementState::Released => {
+                        mouse_pressed = false;
+                        last_mouse_position = None;
+                    }
                 },
-            ..
-        } => match state {
-            ElementState::Pressed => {
-                mouse_pressed = true;
-            }
-            ElementState::Released => {
-                mouse_pressed = false;
-                last_mouse_position = None;
-            }
-        },
-        Event::WindowEvent {
-            event:
                 WindowEvent::KeyboardInput {
                     input:
                         KeyboardInput {
@@ -335,18 +335,20 @@ fn main() {
                             ..
                         },
                     ..
-                },
-            ..
-        } => {
-            if state == ElementState::Released && key == VirtualKeyCode::C {
-                println!(
-                    "camera: pos: {:?}, rot: {:?}",
-                    camera.position(),
-                    camera.rotation()
-                )
+                } => {
+                    if state == ElementState::Released && key == VirtualKeyCode::C {
+                        println!(
+                            "camera: pos: {:?}, rot: {:?}",
+                            camera.position(),
+                            camera.rotation()
+                        )
+                    }
+                    camera_controller.process_keyboard(key, state);
+                }
+                _ => (),
             }
-            camera_controller.process_keyboard(key, state);
         }
+
         // Event::DeviceEvent { event, .. } => match event {
         //     DeviceEvent::Key(KeyboardInput {
         //         virtual_keycode: Some(key),
@@ -372,10 +374,24 @@ fn main() {
             surface.window().request_redraw();
         }
         Event::RedrawRequested(..) => {
-            renderer.set_camera(&camera);
+            gui.immediate_ui(|gui| {
+                let ctx = gui.context();
+                ctx.set_visuals(Visuals::dark());
 
+                let mut show_texture_window1 = true;
+                egui::Window::new("Mah Tree")
+                    .resizable(true)
+                    .vscroll(true)
+                    .open(&mut show_texture_window1)
+                    .show(&ctx, |ui| {
+                        ui.heading("Hello Tree");
+                        ui.separator();
+                    });
+            });
+
+            renderer.set_camera(&camera);
             let pc_cb = renderer.render();
-            frame.render(queue.clone(), pc_cb.clone());
+            frame.render(queue.clone(), pc_cb.clone(), &mut gui);
         }
         Event::LoopDestroyed => {
             let _ = tx.send(());

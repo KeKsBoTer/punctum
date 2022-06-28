@@ -1,16 +1,17 @@
 use std::sync::Arc;
 
+use egui_winit_vulkano::Gui;
 use vulkano::{
     buffer::CpuAccessibleBuffer,
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
-        PrimaryAutoCommandBuffer, SecondaryAutoCommandBuffer, SubpassContents,
+        AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
+        SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
     image::{ImageDimensions, StorageImage},
     render_pass::RenderPass,
-    swapchain::{AcquireError, PresentFuture, Surface, SwapchainAcquireFuture},
-    sync::{self, FenceSignalFuture, FlushError, GpuFuture, JoinFuture},
+    swapchain::{AcquireError, PresentFuture, Surface},
+    sync::{self, FenceSignalFuture, FlushError, GpuFuture},
 };
 use winit::window::Window;
 
@@ -92,22 +93,7 @@ pub struct SurfaceFrame {
 
     recreate_swapchain: bool,
 
-    fences: Vec<
-        Option<
-            Arc<
-                FenceSignalFuture<
-                    PresentFuture<
-                        CommandBufferExecFuture<
-                            JoinFuture<Box<dyn GpuFuture>, SwapchainAcquireFuture<Window>>,
-                            PrimaryAutoCommandBuffer,
-                        >,
-                        Window,
-                    >,
-                >,
-            >,
-        >,
-    >,
-    previous_fence_i: usize,
+    previous_frame_end: Option<Box<dyn GpuFuture>>,
 }
 
 impl SurfaceFrame {
@@ -120,23 +106,20 @@ impl SurfaceFrame {
     ) -> Self {
         let sc = Swapchain::new(
             surface.clone(),
-            device,
+            device.clone(),
             physical_device,
             swapchain_format,
             render_pass,
         );
 
-        let frames_in_flight = sc.num_images();
-        let fences = vec![None; frames_in_flight];
-        let previous_fence_i = 0;
+        let previous_frame_end = Some(sync::now(device.clone()).boxed());
 
         SurfaceFrame {
             swapchain: sc,
             surface: surface,
 
             recreate_swapchain: false,
-            fences,
-            previous_fence_i,
+            previous_frame_end,
         }
     }
 
@@ -152,7 +135,12 @@ impl SurfaceFrame {
         }
     }
 
-    pub fn render(&mut self, queue: Arc<Queue>, cb: Arc<SecondaryAutoCommandBuffer>) {
+    pub fn render(
+        &mut self,
+        queue: Arc<Queue>,
+        cb: Arc<SecondaryAutoCommandBuffer>,
+        gui: &mut Gui,
+    ) {
         let device = self.swapchain.device();
         let (fb, image_i, suboptimal, acquire_future) = match self.swapchain.acquire_next_image() {
             Ok(r) => r,
@@ -187,26 +175,36 @@ impl SurfaceFrame {
 
         // submit command buffer
 
-        if let Some(image_fence) = &self.fences[image_i] {
-            image_fence.wait(None).unwrap();
-        }
+        // let previous_future = match self.previous_fence.clone() {
+        //     // Create a NowFuture
+        //     None => {
+        //         let mut now = sync::now(device.clone());
+        //         now.cleanup_finished();
 
-        let previous_future = match self.fences[self.previous_fence_i].clone() {
-            // Create a NowFuture
-            None => {
-                let mut now = sync::now(device.clone());
-                now.cleanup_finished();
+        //         now.boxed()
+        //     }
+        //     // Use the existing FenceSignalFuture
+        //     Some(fence) => {
+        //         fence.cleanup_finished();
+        //         fence.boxed()
+        //     }
+        // };
 
-                now.boxed()
-            }
-            // Use the existing FenceSignalFuture
-            Some(fence) => fence.boxed(),
-        };
-
-        let future = previous_future
+        let future = self
+            .previous_frame_end
+            .take()
+            .unwrap()
             .join(acquire_future)
             .then_execute(queue.clone(), command_buffer)
-            .unwrap()
+            .unwrap();
+        // let pc_future = previous_future
+        //     .join(acquire_future)
+        //     .then_execute(queue.clone(), command_buffer)
+        //     .unwrap();
+
+        let after_future = gui.draw_on_image(future, fb.image_view().clone());
+
+        let present_future = after_future
             .then_swapchain_present(
                 queue.clone(),
                 self.swapchain.vk_swapchain().clone(),
@@ -214,17 +212,22 @@ impl SurfaceFrame {
             )
             .then_signal_fence_and_flush();
 
-        self.fences[image_i] = match future {
-            Ok(value) => Some(Arc::new(value)),
+        match present_future {
+            Ok(future) => {
+                match future.wait(None) {
+                    Ok(x) => x,
+                    Err(err) => println!("err: {:?}", err),
+                }
+                self.previous_frame_end = Some(future.boxed());
+            }
             Err(FlushError::OutOfDate) => {
                 self.recreate_swapchain = true;
-                None
+                self.previous_frame_end = Some(sync::now(device.clone()).boxed());
             }
             Err(e) => {
                 println!("Failed to flush future: {:?}", e);
-                None
+                self.previous_frame_end = Some(sync::now(device.clone()).boxed());
             }
         };
-        self.previous_fence_i = image_i;
     }
 }
