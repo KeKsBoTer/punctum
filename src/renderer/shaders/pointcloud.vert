@@ -23,6 +23,7 @@ layout(set = 0, binding = 0) uniform UniformData {
     mat4 proj;
     vec3 camera_pos;
     uint point_size;
+    bool highlight_sh;
 } uniforms;
 
 

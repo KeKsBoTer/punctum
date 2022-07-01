@@ -1,5 +1,5 @@
 use approx::assert_ulps_eq;
-use nalgebra::{distance, matrix, vector, Matrix4, Point3, Vector3, Vector4};
+use nalgebra::{distance, vector, Matrix4, Point3, Vector3, Vector4};
 use std::{f32::consts::PI, time::Duration};
 use winit::{dpi::PhysicalPosition, event::*};
 
@@ -11,8 +11,8 @@ pub trait Projection {
 
 #[derive(Debug, Clone, Copy)]
 pub struct PerspectiveProjection {
-    fovy: f32,
-    aspect_ratio: f32,
+    pub fovy: f32,
+    pub aspect_ratio: f32,
 }
 
 impl Projection for PerspectiveProjection {
@@ -23,8 +23,8 @@ impl Projection for PerspectiveProjection {
 
 #[derive(Debug, Clone, Copy)]
 pub struct OrthographicProjection {
-    width: f32,
-    height: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 impl Projection for OrthographicProjection {
@@ -48,7 +48,7 @@ pub struct Camera<P: Projection> {
     view: Matrix4<f32>,
     proj: Matrix4<f32>,
 
-    projection: P,
+    pub projection: P,
     znear: f32,
     zfar: f32,
 }
@@ -151,29 +151,6 @@ impl<P: Projection> Camera<P> {
             near,
             far,
         };
-    }
-
-    pub fn adjust_znear_zfar(&mut self, bbox: &CubeBoundingBox<f32>) {
-        let radius = bbox.outer_radius();
-        let frustum = self.extract_planes_from_projmat(false);
-        let sign = frustum.near.dot(&bbox.center.to_homogeneous());
-        let mut d = distance(&bbox.center, &self.pos);
-        if sign < 0. {
-            d *= -1.;
-        }
-
-        let mut zfar = d + radius;
-        let mut znear = zfar - 2. * radius;
-
-        if zfar <= 0. {
-            zfar = 100.;
-        }
-        if znear <= 0. || znear >= zfar {
-            znear = zfar / 1000.;
-        }
-        self.znear = znear;
-        self.zfar = zfar;
-        self.update_proj_matrix();
     }
 }
 
@@ -294,6 +271,24 @@ impl Camera<PerspectiveProjection> {
         self.projection.aspect_ratio = aspect_ratio;
         self.update_proj_matrix();
     }
+
+    pub fn adjust_znear_zfar(&mut self, bbox: &CubeBoundingBox<f32>) {
+        let radius = bbox.outer_radius();
+        let d = distance(&bbox.center, &self.pos);
+
+        let mut zfar = d + radius;
+        let mut znear = zfar - 2. * radius;
+
+        if zfar <= 0. {
+            zfar = 100.;
+        }
+        if znear <= 0. || znear >= zfar {
+            znear = zfar / 1000.;
+        }
+        self.znear = znear;
+        self.zfar = zfar;
+        self.update_proj_matrix();
+    }
 }
 
 impl Camera<OrthographicProjection> {
@@ -365,8 +360,8 @@ pub struct CameraController {
     rotate_horizontal: f32,
     rotate_vertical: f32,
     scroll: f32,
-    speed: f32,
-    sensitivity: f32,
+    pub speed: f32,
+    pub sensitivity: f32,
 }
 
 impl CameraController {

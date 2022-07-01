@@ -5,7 +5,7 @@ use crate::{
     vertex::Vertex,
     CubeBoundingBox, Octree, SHVertex, Viewport,
 };
-use nalgebra::{distance, matrix, Matrix4, Point3};
+use nalgebra::{distance, Matrix4};
 use std::{
     collections::HashMap,
     f32::consts::PI,
@@ -69,9 +69,6 @@ impl OctreeRenderer {
         octree: Arc<Octree<f32, f32>>,
         camera: &Camera<impl Projection>,
     ) -> Self {
-        let max_size = octree.bbox().size;
-        let center = octree.bbox().center;
-
         let world = Matrix4::identity();
         let viewport_height = viewport.size()[1] as u32;
 
@@ -112,7 +109,7 @@ impl OctreeRenderer {
     pub fn frustum_culling(&self) {
         let u = {
             let uniforms = self.uniforms.read().unwrap();
-            uniforms.data().clone()
+            uniforms.data.clone()
         };
 
         let frustum = self.frustum.read().unwrap();
@@ -142,7 +139,11 @@ impl OctreeRenderer {
         *screen_height = viewport_height;
     }
 
-    pub fn render(&self) -> Arc<SecondaryAutoCommandBuffer> {
+    pub fn render(
+        &self,
+        render_octants: bool,
+        render_shs: bool,
+    ) -> Arc<SecondaryAutoCommandBuffer> {
         let uniform_buffer = {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.buffer().clone()
@@ -156,31 +157,37 @@ impl OctreeRenderer {
         )
         .unwrap();
 
-        self.sh_renderer
-            .render(uniform_buffer.clone(), &mut builder);
-        self.octant_renderer.render(uniform_buffer, &mut builder);
+        if render_shs {
+            self.sh_renderer
+                .render(uniform_buffer.clone(), &mut builder);
+        }
+        if render_octants {
+            self.octant_renderer.render(uniform_buffer, &mut builder);
+        }
 
         Arc::new(builder.build().unwrap())
     }
 
     pub fn set_point_size(&self, point_size: u32) {
         let mut uniforms = self.uniforms.write().unwrap();
-        let current = *uniforms.data();
-        uniforms.update(vs::ty::UniformData {
-            point_size,
-            ..current
-        });
+        uniforms.data.point_size = point_size;
+    }
+
+    pub fn set_highlight_sh(&self, highlight_sh: bool) {
+        let mut uniforms = self.uniforms.write().unwrap();
+        uniforms.data.highlight_sh = highlight_sh as u32;
+    }
+
+    pub fn update_uniforms(&self) {
+        let mut uniforms = self.uniforms.write().unwrap();
+        uniforms.update_buffer();
     }
 
     pub fn set_camera(&self, camera: &Camera<impl Projection>) {
         let mut uniforms = self.uniforms.write().unwrap();
-        let current = *uniforms.data();
-        uniforms.update(vs::ty::UniformData {
-            view: camera.view().clone().into(),
-            proj: camera.projection().clone().into(),
-            camera_pos: camera.position().clone().into(),
-            ..current
-        });
+        uniforms.data.view = camera.view().clone().into();
+        uniforms.data.proj = camera.projection().clone().into();
+        uniforms.data.camera_pos = camera.position().clone().into();
 
         let mut frustum = self.frustum.write().unwrap();
         *frustum = camera.extract_planes_from_projmat(true);

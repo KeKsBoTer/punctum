@@ -10,8 +10,8 @@ use vulkano::{
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
     image::{ImageDimensions, StorageImage},
     render_pass::RenderPass,
-    swapchain::{AcquireError, PresentFuture, Surface},
-    sync::{self, FenceSignalFuture, FlushError, GpuFuture},
+    swapchain::{AcquireError, Surface},
+    sync::{self, FlushError, GpuFuture},
 };
 use winit::window::Window;
 
@@ -173,23 +173,6 @@ impl SurfaceFrame {
         builder.end_render_pass().unwrap();
         let command_buffer = builder.build().unwrap();
 
-        // submit command buffer
-
-        // let previous_future = match self.previous_fence.clone() {
-        //     // Create a NowFuture
-        //     None => {
-        //         let mut now = sync::now(device.clone());
-        //         now.cleanup_finished();
-
-        //         now.boxed()
-        //     }
-        //     // Use the existing FenceSignalFuture
-        //     Some(fence) => {
-        //         fence.cleanup_finished();
-        //         fence.boxed()
-        //     }
-        // };
-
         let future = self
             .previous_frame_end
             .take()
@@ -197,10 +180,6 @@ impl SurfaceFrame {
             .join(acquire_future)
             .then_execute(queue.clone(), command_buffer)
             .unwrap();
-        // let pc_future = previous_future
-        //     .join(acquire_future)
-        //     .then_execute(queue.clone(), command_buffer)
-        //     .unwrap();
 
         let after_future = gui.draw_on_image(future, fb.image_view().clone());
 

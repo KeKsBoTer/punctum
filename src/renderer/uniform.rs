@@ -11,7 +11,7 @@ where
     [T]: BufferContents,
     T: BufferContents + Default + Copy,
 {
-    data: T,
+    pub data: T,
     buffer_pool: CpuBufferPool<T, Arc<StdMemoryPool>>,
     pool_chunk: Arc<CpuBufferPoolSubbuffer<T, Arc<StdMemoryPool>>>,
 }
@@ -32,16 +32,11 @@ where
         }
     }
 
-    pub fn update(&mut self, data: T) {
-        self.data = data;
+    pub fn update_buffer(&mut self) {
         self.pool_chunk = self.buffer_pool.next(self.data).unwrap();
     }
 
     pub fn buffer(&self) -> &Arc<CpuBufferPoolSubbuffer<T, Arc<StdMemoryPool>>> {
         &self.pool_chunk
-    }
-
-    pub fn data(&self) -> &T {
-        &self.data
     }
 }

@@ -15,6 +15,7 @@ layout(set = 0, binding = 0) uniform UniformData {
     mat4 proj;
     vec3 camera_pos;
     uint point_size;
+    bool highlight_sh;
 } uniforms;
 
 
@@ -71,4 +72,7 @@ void main() {
     vec2 angle = vec2(acos(diff.z),atan(-diff.y,diff.x) + PI);
 
     vertex_color = vec4(sh_color(angle).rgb,1);
+    if(uniforms.highlight_sh){
+        vertex_color = vec4(1.,0.,0.,1.);
+    }
 }
