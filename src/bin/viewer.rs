@@ -27,8 +27,8 @@ use winit::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCo
 use winit::event_loop::ControlFlow;
 
 use punctum::{
-    get_render_pass, select_physical_device, CameraController, Octree, OctreeRenderer,
-    PerspectiveCamera, PointCloud, SHVertex, SurfaceFrame, TeeReader, Viewport,
+    get_render_pass, load_raw_coefs, select_physical_device, CameraController, Octree,
+    OctreeRenderer, PerspectiveCamera, PointCloud, SHVertex, SurfaceFrame, TeeReader, Viewport,
 };
 
 const SH_COEFS: [[f32; 4]; 16] = [
@@ -167,15 +167,21 @@ fn main() {
         octree.into()
     };
 
+    let coefs = load_raw_coefs("coefs.raw").unwrap();
+
     for octant in octree.borrow_mut().into_iter() {
         let pc: &PointCloud<f32, f32> = octant.points().into();
         let mean = pc.mean();
-        let mut coefs = [Vector4::<f32>::zeros(); 121];
-        // coefs[0] = mean.color / 0.28209478;
-        for i in 0..SH_COEFS.len() {
-            coefs[i] = SH_COEFS[i].into();
+        let mut new_coefs = [Vector4::<f32>::zeros(); 121];
+
+        if let Some(cs) = coefs.get(&octant.id()) {
+            for i in 0..cs.len() {
+                new_coefs[i] = cs[i];
+            }
+        } else {
+            panic!("id {} not found", octant.id());
         }
-        octant.sh_approximation = Some(SHVertex::new(mean.position, coefs.into()));
+        octant.sh_approximation = Some(SHVertex::new(mean.position, new_coefs.into()));
     }
 
     let octree = Arc::new(octree);
