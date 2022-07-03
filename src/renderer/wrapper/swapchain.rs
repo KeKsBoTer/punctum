@@ -30,6 +30,7 @@ impl Swapchain {
         let surface_capabilities = physical_device
             .surface_capabilities(&surface, Default::default())
             .unwrap();
+
         let (sc, images) = VulkanSwapchain::new(
             device.clone(),
             surface.clone(),
@@ -39,8 +40,11 @@ impl Swapchain {
                 image_format: Some(format),
                 image_extent: surface.window().inner_size().into(),
 
-                image_usage: ImageUsage::color_attachment(),
-                // present_mode: PresentMode::Immediate,
+                image_usage: ImageUsage {
+                    color_attachment: true,
+                    transfer_destination: true,
+                    ..ImageUsage::none()
+                },
                 ..Default::default()
             },
         )

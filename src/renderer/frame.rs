@@ -8,7 +8,7 @@ use vulkano::{
         SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
-    image::{ImageDimensions, StorageImage},
+    image::{view::ImageView, ImageDimensions, StorageImage, SwapchainImage},
     render_pass::RenderPass,
     swapchain::{AcquireError, Surface},
     sync::{self, FlushError, GpuFuture},
@@ -184,6 +184,59 @@ impl SurfaceFrame {
         let after_future = gui.draw_on_image(future, fb.image_view().clone());
 
         let present_future = after_future
+            .then_swapchain_present(
+                queue.clone(),
+                self.swapchain.vk_swapchain().clone(),
+                image_i,
+            )
+            .then_signal_fence_and_flush();
+
+        match present_future {
+            Ok(future) => {
+                match future.wait(None) {
+                    Ok(x) => x,
+                    Err(err) => println!("err: {:?}", err),
+                }
+                self.previous_frame_end = Some(future.boxed());
+            }
+            Err(FlushError::OutOfDate) => {
+                self.recreate_swapchain = true;
+                self.previous_frame_end = Some(sync::now(device.clone()).boxed());
+            }
+            Err(e) => {
+                println!("Failed to flush future: {:?}", e);
+                self.previous_frame_end = Some(sync::now(device.clone()).boxed());
+            }
+        };
+    }
+
+    pub fn render_fn<F>(&mut self, queue: Arc<Queue>, f: F)
+    where
+        F: Fn(Arc<ImageView<SwapchainImage<Window>>>) -> Box<dyn GpuFuture>,
+    {
+        let device = self.swapchain.device();
+        let (fb, image_i, suboptimal, acquire_future) = match self.swapchain.acquire_next_image() {
+            Ok(r) => r,
+            Err(AcquireError::OutOfDate) => {
+                self.recreate_swapchain = true;
+                return;
+            }
+            Err(e) => panic!("Failed to acquire next image: {:?}", e),
+        };
+        if suboptimal {
+            self.recreate_swapchain = true;
+        }
+
+        let render_future = f(fb.image_view().clone());
+
+        let future = self
+            .previous_frame_end
+            .take()
+            .unwrap()
+            .join(acquire_future)
+            .join(render_future);
+
+        let present_future = future
             .then_swapchain_present(
                 queue.clone(),
                 self.swapchain.vk_swapchain().clone(),

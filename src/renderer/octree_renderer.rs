@@ -1,6 +1,6 @@
 use crate::{
     camera::{Camera, Projection, ViewFrustum},
-    octree::OctreeIter,
+    octree::{self, Octant, OctreeIter},
     sh::calc_sh_grid,
     vertex::Vertex,
     CubeBoundingBox, Octree, SHVertex, Viewport,
@@ -90,8 +90,13 @@ impl OctreeRenderer {
             subpass.clone(),
             viewport.clone(),
         );
-        let octant_renderer =
-            OctantRenderer::new(device.clone(), queue.clone(), subpass.clone(), viewport);
+        let octant_renderer = OctantRenderer::new(
+            device.clone(),
+            queue.clone(),
+            subpass.clone(),
+            viewport,
+            octree.clone(),
+        );
 
         Self {
             device,
@@ -465,10 +470,19 @@ struct OctantRenderer {
 
     loaded_octants: RwLock<HashMap<u64, OctantBuffer<8192>>>,
     octants_pool: CpuBufferPool<[Vertex<f32, f32>; 8192]>,
+
+    vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>>,
+    vertex_mapping: HashMap<u64, (usize, usize)>,
 }
 
 impl OctantRenderer {
-    fn new(device: Arc<Device>, queue: Arc<Queue>, subpass: Subpass, viewport: Viewport) -> Self {
+    fn new(
+        device: Arc<Device>,
+        queue: Arc<Queue>,
+        subpass: Subpass,
+        viewport: Viewport,
+        octree: Arc<Octree<f32, f32>>,
+    ) -> Self {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
@@ -483,6 +497,29 @@ impl OctantRenderer {
         let pool: CpuBufferPool<[Vertex<f32, f32>; 8192]> =
             CpuBufferPool::new(device.clone(), BufferUsage::vertex_buffer());
 
+        let vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>> = unsafe {
+            CpuAccessibleBuffer::uninitialized_array(
+                device.clone(),
+                octree.num_points(),
+                BufferUsage::vertex_buffer(),
+                false,
+            )
+            .unwrap()
+        };
+        let mut offset = 0;
+        let mut vertex_mapping: HashMap<u64, (usize, usize)> =
+            HashMap::with_capacity(octree.num_octants() as usize);
+        let mut vertices = vertex_buffer.write().unwrap();
+        for octant in octree.into_iter() {
+            let octant_size = octant.points().len();
+            vertex_mapping.insert(octant.id(), (offset, octant_size));
+            for (i, p) in octant.points().iter().enumerate() {
+                vertices[offset + i] = *p;
+            }
+            offset += octant_size;
+        }
+        drop(vertices);
+
         Self {
             device,
             queue,
@@ -491,6 +528,9 @@ impl OctantRenderer {
             fs,
             loaded_octants: RwLock::new(HashMap::new()),
             octants_pool: pool,
+
+            vertex_buffer,
+            vertex_mapping,
         }
     }
     fn render(
@@ -517,12 +557,13 @@ impl OctantRenderer {
                 [set.clone()].to_vec(),
             );
 
-        for (_, octant) in self.loaded_octants.read().unwrap().iter() {
-            builder
-                .bind_vertex_buffers(0, octant.points.clone())
-                .draw(octant.length, 1, 0, 0)
-                .unwrap();
-        }
+        builder.bind_vertex_buffers(0, self.vertex_buffer.clone());
+        builder
+            .draw(self.vertex_buffer.into_buffer_slice().len() as u32, 1, 0, 0)
+            .unwrap();
+        // for (_, (offset, len)) in &self.vertex_mapping {
+        //     builder.draw(*len as u32, 1, *offset as u32, 0).unwrap();
+        // }
     }
 
     pub fn frustum_culling<'a, F>(
@@ -532,6 +573,7 @@ impl OctantRenderer {
     ) where
         F: Fn(&CubeBoundingBox<f32>) -> bool,
     {
+        return;
         let octants = self.loaded_octants.read().unwrap();
         let mut new_octants = HashMap::new();
 
