@@ -212,7 +212,7 @@ impl SurfaceFrame {
 
     pub fn render_fn<F>(&mut self, queue: Arc<Queue>, f: F)
     where
-        F: Fn(Arc<ImageView<SwapchainImage<Window>>>) -> Box<dyn GpuFuture>,
+        F: Fn(Box<dyn GpuFuture>, Arc<ImageView<SwapchainImage<Window>>>) -> Box<dyn GpuFuture>,
     {
         let device = self.swapchain.device();
         let (fb, image_i, suboptimal, acquire_future) = match self.swapchain.acquire_next_image() {
@@ -227,16 +227,11 @@ impl SurfaceFrame {
             self.recreate_swapchain = true;
         }
 
-        let render_future = f(fb.image_view().clone());
+        let swapchain_future = self.previous_frame_end.take().unwrap().join(acquire_future);
 
-        let future = self
-            .previous_frame_end
-            .take()
-            .unwrap()
-            .join(acquire_future)
-            .join(render_future);
+        let render_future = f(swapchain_future.boxed(), fb.image_view().clone());
 
-        let present_future = future
+        let present_future = render_future
             .then_swapchain_present(
                 queue.clone(),
                 self.swapchain.vk_swapchain().clone(),

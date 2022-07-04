@@ -14,7 +14,7 @@ use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::StorageImage;
 use vulkano::pipeline::{ComputePipeline, Pipeline, PipelineBindPoint};
-use vulkano::sync::{self, GpuFuture};
+use vulkano::sync::GpuFuture;
 
 use pbr::ProgressBar;
 use vulkano::device::DeviceExtensions;
@@ -87,19 +87,21 @@ layout (set = 0, binding = 2, std430) buffer framebuffer_data {
 	uint64_t ssFramebuffer[];
 };
 
-
 void main() {
-
-	uint globalID = gl_GlobalInvocationID.x;
-
+	uint globalID = gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * gl_WorkGroupSize.x) + gl_GlobalInvocationID.x;
+    
+    if (globalID >= vertices.length()){
+        return;
+    }
+    
     Vertex v = vertices[globalID];
 
-    mat4 uTransform = uniforms.proj * uniforms.proj * uniforms.world;
+    mat4 uTransform = uniforms.proj * uniforms.view * uniforms.world;
 
 	vec4 pos = uTransform * vec4(v.x, v.y, v.z, 1.0);
 	pos.xyz = pos.xyz / pos.w;
 
-	if(pos.w <= 0.0 || pos.x < -1.0 || pos.x > 1.0 || pos.y < -1.0 || pos.y > 1.0){
+	if(pos.w <= -1.0 || pos.x < -1.0 || pos.x > 1.0 || pos.y < -1.0 || pos.y > 1.0){
 		return;
 	}
 
@@ -126,7 +128,6 @@ void main() {
 	if(u64Depth < oldDepth){
 		atomicMin(ssFramebuffer[pixelID], val64);
 	}
-
 }"
     }
 }
@@ -146,8 +147,6 @@ layout(local_size_x = 16, local_size_y = 16) in;
 layout (set = 0, binding = 0, std430) buffer framebuffer_data {
 	uint64_t ssFramebuffer[];
 };
-
-
 
 layout(set=0, binding = 1, rgba8ui) uniform uimage2D uOutput;
 
@@ -179,6 +178,7 @@ void main() {
 
 	ivec2 pixelCoords = ivec2(id);
 	ivec2 sourceCoords = ivec2(id);
+    sourceCoords.y = imgSize.y - sourceCoords.y;
 	int pixelID = sourceCoords.x + sourceCoords.y * imgSize.x;
 
 	
@@ -186,11 +186,15 @@ void main() {
 
 	imageStore(uOutput, pixelCoords, icolor);
 
-	// rgb(60, 50, 30) = 0x3c321e (0xRGB)
-	ssFramebuffer[pixelID] = 0xffffffffff3c321eUL;
+    uint64_t clear_color = 0xffffffffff000000UL + (255 << 0) + (0 << 8) + (0 << 16);
+	ssFramebuffer[pixelID] = clear_color;
 
 }"
     }
+}
+
+fn div_ceil(a: u32, b: u32) -> u32 {
+    a / b + u32::from(a % b == 0)
 }
 
 fn main() {
@@ -310,7 +314,7 @@ fn main() {
         Vector3::new(0.4617872, 0.0, 0.0),
         aspect_ratio,
     );
-    camera.adjust_znear_zfar(octree.bbox());
+    // camera.adjust_znear_zfar(octree.bbox());
 
     let intermedite_image = CpuAccessibleBuffer::from_iter(
         device.clone(),
@@ -462,7 +466,7 @@ fn main() {
             surface.window().request_redraw();
         }
         Event::RedrawRequested(..) => {
-            frame.render_fn(queue.clone(), |img| {
+            frame.render_fn(queue.clone(), |acquire_future, img| {
                 let mut builder = AutoCommandBufferBuilder::primary(
                     device.clone(),
                     queue.family(),
@@ -470,8 +474,17 @@ fn main() {
                 )
                 .unwrap();
 
-                // let group_size = ((octree.num_points() as f32) / (128 as f32)).ceil() as u32;
-                let group_size = 65535;
+                let max_groups = device
+                    .physical_device()
+                    .properties()
+                    .max_compute_work_group_count[0];
+
+                let mut num_groups_x = div_ceil(octree.num_points() as u32, 128);
+                let mut num_groups_y = 1;
+                if num_groups_x > max_groups {
+                    num_groups_y = div_ceil(num_groups_x, max_groups);
+                    num_groups_x = max_groups;
+                }
 
                 builder
                     .bind_pipeline_compute(compute_pipeline.clone())
@@ -481,7 +494,7 @@ fn main() {
                         0, // 0 is the index of our set
                         set.clone(),
                     )
-                    .dispatch([group_size, 1, 1])
+                    .dispatch([num_groups_x, num_groups_y, 1])
                     .unwrap();
 
                 let [width, height] = img.image().swapchain().image_extent();
@@ -514,7 +527,7 @@ fn main() {
 
                 let command_buffer = builder.build().unwrap();
 
-                sync::now(device.clone())
+                acquire_future
                     .then_execute(queue.clone(), command_buffer)
                     .unwrap()
                     .then_signal_fence_and_flush()

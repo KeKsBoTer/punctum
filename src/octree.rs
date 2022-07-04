@@ -132,15 +132,15 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         }
     }
 
-    fn traverse<'a, A: FnMut(&'a Octant<F, C>, CubeBoundingBox<F>)>(
+    fn traverse<'a, A: FnMut(&'a Octant<F, C>, CubeBoundingBox<f64>)>(
         &'a self,
         f: &mut A,
-        bbox: CubeBoundingBox<F>,
+        bbox: CubeBoundingBox<f64>,
     ) {
         match self {
             Node::Group(group) => {
                 for (i, node) in group.iter().enumerate() {
-                    let bbox_new = Self::octant_box(i, &bbox);
+                    let bbox_new = Node::<f64, C>::octant_box(i, &bbox);
                     node.traverse(f, bbox_new);
                 }
             }
@@ -275,8 +275,8 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         }
     }
 
-    pub fn traverse<'a, A: FnMut(&'a Octant<F, C>, CubeBoundingBox<F>)>(&'a self, mut f: A) {
-        self.root.traverse(&mut f, self.bbox);
+    pub fn traverse<'a, A: FnMut(&'a Octant<F, C>, CubeBoundingBox<f64>)>(&'a self, mut f: A) {
+        self.root.traverse(&mut f, self.bbox.to_f64());
     }
 
     pub fn depth(&self) -> usize {
@@ -313,20 +313,21 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
     }
 
     pub fn visible_octants<'a>(&'a self, frustum: &ViewFrustum<F>) -> Vec<OctreeIter<'a, F, C>> {
+        let frustum = frustum.to_f64();
         match &self.root {
             Node::Group(root) => {
                 let mut visible_octants = Vec::new();
-                let mut queue = vec![(root, self.bbox)];
+                let mut queue = vec![(root, self.bbox.to_f64())];
                 while let Some((node, bbox)) = queue.pop() {
                     if bbox.within_frustum(&frustum) {
                         for (i, child) in node.iter().enumerate() {
                             match child {
                                 Node::Group(children) => {
-                                    let bbox_child = Node::<F, C>::octant_box(i, &bbox);
+                                    let bbox_child = Node::<f64, C>::octant_box(i, &bbox);
                                     queue.push((children, bbox_child));
                                 }
                                 Node::Filled(child) => {
-                                    let bbox_child = Node::<F, C>::octant_box(i, &bbox);
+                                    let bbox_child = Node::<f64, C>::octant_box(i, &bbox);
                                     if bbox_child.within_frustum(&frustum) {
                                         visible_octants.push(OctreeIter {
                                             octant: child,
@@ -342,11 +343,9 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
                 return visible_octants;
             }
             Node::Filled(octant) => {
-                if self.bbox.within_frustum(&frustum) {
-                    vec![OctreeIter {
-                        octant,
-                        bbox: self.bbox,
-                    }]
+                let bbox = self.bbox.to_f64();
+                if bbox.within_frustum(&frustum) {
+                    vec![OctreeIter { octant, bbox }]
                 } else {
                     Vec::new()
                 }
@@ -359,7 +358,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
 #[derive(Clone, Copy)]
 pub struct OctreeIter<'a, F: BaseFloat, C: BaseColor> {
     pub octant: &'a Octant<F, C>,
-    pub bbox: CubeBoundingBox<F>,
+    pub bbox: CubeBoundingBox<f64>,
 }
 
 impl Into<Vec<Vertex<f32, f32>>> for Octree<f64, u8> {

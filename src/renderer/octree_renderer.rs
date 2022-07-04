@@ -1,27 +1,24 @@
 use crate::{
     camera::{Camera, Projection, ViewFrustum},
-    octree::{self, Octant, OctreeIter},
+    octree::Octant,
     sh::calc_sh_grid,
-    vertex::Vertex,
+    vertex::{IndexVertex, Vertex},
     CubeBoundingBox, Octree, SHVertex, Viewport,
 };
-use nalgebra::{distance, Matrix4};
+use nalgebra::{distance, Matrix4, Point3};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashMap,
-    f32::consts::PI,
+    f64::consts::PI,
     sync::{Arc, RwLock},
 };
 use vulkano::{
-    buffer::{
-        cpu_pool::CpuBufferPoolSubbuffer, BufferAccess, BufferUsage, CpuAccessibleBuffer,
-        CpuBufferPool,
-    },
+    buffer::{BufferAccess, BufferUsage, CpuAccessibleBuffer},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, Queue},
     format::Format,
     image::{view::ImageView, ImageDimensions, ImmutableImage},
-    memory::pool::StdMemoryPool,
     pipeline::{
         graphics::{
             depth_stencil::DepthStencilState,
@@ -38,12 +35,6 @@ use vulkano::{
 };
 
 use super::UniformBuffer;
-
-#[derive(Clone)]
-pub struct OctantBuffer<const T: usize> {
-    length: u32,
-    points: Arc<CpuBufferPoolSubbuffer<[Vertex<f32, f32>; T], Arc<StdMemoryPool>>>,
-}
 
 pub struct OctreeRenderer {
     device: Arc<Device>,
@@ -89,14 +80,10 @@ impl OctreeRenderer {
             queue.clone(),
             subpass.clone(),
             viewport.clone(),
-        );
-        let octant_renderer = OctantRenderer::new(
-            device.clone(),
-            queue.clone(),
-            subpass.clone(),
-            viewport,
             octree.clone(),
         );
+        let octant_renderer =
+            OctantRenderer::new(device.clone(), subpass.clone(), viewport, octree.clone());
 
         Self {
             device,
@@ -118,21 +105,26 @@ impl OctreeRenderer {
         };
 
         let frustum = self.frustum.read().unwrap();
-        let visible_octants = self.octree.visible_octants(&frustum);
 
         let camera_fov = PI / 2.;
         let screen_height = self.screen_height.read().unwrap().clone();
-        let threshold_fn = |bbox: &CubeBoundingBox<f32>| {
-            let d = distance(&bbox.center, &u.camera_pos.into());
+        let cam_pos: Point3<f32> = u.camera_pos.into();
+        let threshold_fn = |bbox: &CubeBoundingBox<f64>| {
+            let d = distance(&bbox.center, &cam_pos.cast());
             let radius = bbox.outer_radius();
             let a = 2. * (radius / d).atan();
-            return a / camera_fov <= 2. / screen_height as f32;
+            return a / camera_fov <= 1. / screen_height as f64;
         };
 
-        self.sh_renderer
-            .frustum_culling(&visible_octants, threshold_fn);
-        self.octant_renderer
-            .frustum_culling(&visible_octants, threshold_fn);
+        let visible_octants: Vec<(&Octant<f32, f32>, bool)> = self
+            .octree
+            .visible_octants(&frustum)
+            .iter()
+            .map(|o| (o.octant, threshold_fn(&o.bbox)))
+            .collect();
+
+        self.sh_renderer.frustum_culling(&visible_octants);
+        self.octant_renderer.frustum_culling(&visible_octants);
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
@@ -199,38 +191,6 @@ impl OctreeRenderer {
     }
 }
 
-// fn raw_device_address(buffer: impl BufferAccess) -> Result<NonZeroU64, BufferDeviceAddressError> {
-//     let inner = buffer.inner();
-//     let device = buffer.device();
-
-//     // VUID-vkGetBufferDeviceAddress-bufferDeviceAddress-03324
-//     if !device.enabled_features().buffer_device_address {
-//         return Err(BufferDeviceAddressError::FeatureNotEnabled);
-//     }
-
-//     // VUID-VkBufferDeviceAddressInfo-buffer-02601
-//     if !inner.buffer.usage().device_address {
-//         return Err(BufferDeviceAddressError::BufferMissingUsage);
-//     }
-
-//     unsafe {
-//         let info = ash::vk::BufferDeviceAddressInfo {
-//             buffer: inner.buffer.internal_object(),
-//             ..Default::default()
-//         };
-//         let ptr = device
-//             .fns()
-//             .ext_buffer_device_address
-//             .get_buffer_device_address_ext(device.internal_object(), &info);
-
-//         if ptr == 0 {
-//             panic!("got null ptr from a valid GetBufferDeviceAddressEXT call");
-//         }
-
-//         Ok(NonZeroU64::new_unchecked(ptr + inner.offset))
-//     }
-// }
-
 mod fs {
     vulkano_shaders::shader! {
         ty: "fragment",
@@ -253,15 +213,15 @@ mod vs_sh {
 
 struct SHRenderer {
     device: Arc<Device>,
-    queue: Arc<Queue>,
 
     pipeline: RwLock<Arc<GraphicsPipeline>>,
 
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
 
-    sh_vertex_buffer: RwLock<Arc<CpuAccessibleBuffer<[SHVertex<f32, 121>]>>>,
-    sh_vertex_buffer_len: RwLock<u32>,
+    sh_vertex_buffer: Arc<CpuAccessibleBuffer<[SHVertex<f32, 121>]>>,
+    sh_index_buffer: RwLock<Option<Arc<CpuAccessibleBuffer<[IndexVertex]>>>>,
+    sh_mapping: HashMap<u64, u32>,
 
     sh_images: Arc<ImageView<ImmutableImage>>,
     sh_sampler: Arc<Sampler>,
@@ -273,11 +233,12 @@ impl SHRenderer {
         queue: Arc<Queue>,
         subpass: Subpass,
         viewport: Viewport,
+        octree: Arc<Octree<f32, f32>>,
     ) -> Self {
         let vs = vs_sh::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
-        let pipeline = build_pipeline::<SHVertex<f32, 121>>(
+        let pipeline = build_pipeline::<IndexVertex>(
             vs.clone(),
             fs.clone(),
             subpass,
@@ -287,29 +248,37 @@ impl SHRenderer {
 
         let (sh_images, sh_sampler) = Self::calc_sh_images(device.clone(), queue.clone(), 128, 10);
 
-        let num_empty_sh_vertices = 1;
-        let sh_vertex_buffer = RwLock::new(
-            CpuAccessibleBuffer::from_iter(
-                device.clone(),
-                BufferUsage {
-                    vertex_buffer: true,
-                    storage_buffer: true,
-                    ..BufferUsage::default()
-                },
-                false,
-                (0..1).map(|_| SHVertex::<f32, 121>::default()),
-            )
-            .unwrap(),
-        );
+        let num_octants = octree.num_octants() as usize;
+        let mut shs = Vec::with_capacity(num_octants);
+        let mut sh_mapping = HashMap::with_capacity(num_octants);
+        for (i, octant) in octree
+            .into_iter()
+            .filter(|o| o.sh_approximation.is_some())
+            .enumerate()
+        {
+            shs.push(octant.sh_approximation.unwrap());
+            sh_mapping.insert(octant.id(), i as u32);
+        }
+
+        let sh_vertex_buffer = CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage {
+                storage_buffer: true,
+                ..BufferUsage::default()
+            },
+            false,
+            shs,
+        )
+        .unwrap();
 
         Self {
             device,
-            queue,
             pipeline: RwLock::new(pipeline),
             vs,
             fs,
-            sh_vertex_buffer: sh_vertex_buffer,
-            sh_vertex_buffer_len: RwLock::new(num_empty_sh_vertices),
+            sh_vertex_buffer,
+            sh_index_buffer: RwLock::new(None),
+            sh_mapping,
             sh_images,
             sh_sampler,
         }
@@ -330,8 +299,6 @@ impl SHRenderer {
         )
         .unwrap();
 
-        let sh_vertex_buffer = self.sh_vertex_buffer.read().unwrap();
-
         let sh_set = PersistentDescriptorSet::new(
             set_layouts.get(1).unwrap().clone(),
             [
@@ -340,7 +307,7 @@ impl SHRenderer {
                     self.sh_images.clone(),
                     self.sh_sampler.clone(),
                 ),
-                WriteDescriptorSet::buffer(1, sh_vertex_buffer.clone()),
+                WriteDescriptorSet::buffer(1, self.sh_vertex_buffer.clone()),
             ],
         )
         .unwrap();
@@ -354,53 +321,53 @@ impl SHRenderer {
                 [set.clone(), sh_set.clone()].to_vec(),
             );
 
-        builder
-            .bind_vertex_buffers(0, sh_vertex_buffer.clone())
-            .draw(*self.sh_vertex_buffer_len.read().unwrap(), 1, 0, 0)
-            .unwrap();
+        let vertex_indices = self.sh_index_buffer.read().unwrap();
+        if vertex_indices.is_some() {
+            let indices = vertex_indices.as_ref().unwrap();
+            builder
+                .bind_vertex_buffers(0, indices.clone())
+                .draw(indices.into_buffer_slice().len() as u32, 1, 0, 0)
+                .unwrap();
+        }
     }
 
-    pub fn frustum_culling<'a, F>(
-        &self,
-        visible_octants: &Vec<OctreeIter<'a, f32, f32>>,
-        threshold_fn: F,
-    ) where
-        F: Fn(&CubeBoundingBox<f32>) -> bool,
-    {
-        let mut sh_vertices = Vec::new();
-
-        for OctreeIter { octant, bbox } in visible_octants {
-            if let Some(sh) = octant.sh_approximation {
-                if threshold_fn(bbox) {
-                    sh_vertices.push(sh);
+    pub fn frustum_culling<'a>(&self, visible_octants: &Vec<(&Octant<f32, f32>, bool)>) {
+        // calculate indices to all visible sh vertices
+        let mut sh_vertices: Vec<IndexVertex> = visible_octants
+            .par_iter()
+            .filter_map(|(octant, below_threshold)| {
+                if octant.sh_approximation.is_some() && *below_threshold {
+                    Some(IndexVertex {
+                        index: *self.sh_mapping.get(&octant.id()).unwrap(),
+                    })
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .collect();
 
-        // TODO write to buffer instead of creating a new one
-        // maybe use CPU pool?
+        sh_vertices.sort_by_key(|v| v.index);
+
         let new_len = sh_vertices.len() as u32;
         if new_len > 0 {
-            let mut vertex_buffer = self.sh_vertex_buffer.write().unwrap();
-            *vertex_buffer = CpuAccessibleBuffer::from_iter(
+            let new_buffer = CpuAccessibleBuffer::from_iter(
                 self.device.clone(),
                 BufferUsage {
                     vertex_buffer: true,
-                    storage_buffer: true,
                     ..BufferUsage::default()
                 },
                 false,
                 sh_vertices,
             )
             .unwrap();
+            let mut sh_index_buffer = self.sh_index_buffer.write().unwrap();
+            *sh_index_buffer = Some(new_buffer);
         }
-        let mut size = self.sh_vertex_buffer_len.write().unwrap();
-        *size = new_len;
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
         let mut pipeline = self.pipeline.write().unwrap();
-        *pipeline = build_pipeline::<SHVertex<f32, 121>>(
+        *pipeline = build_pipeline::<IndexVertex>(
             self.vs.clone(),
             self.fs.clone(),
             pipeline.subpass().clone(),
@@ -460,25 +427,23 @@ mod vs {
 }
 
 struct OctantRenderer {
-    device: Arc<Device>,
-    queue: Arc<Queue>,
-
     pipeline: RwLock<Arc<GraphicsPipeline>>,
 
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
 
-    loaded_octants: RwLock<HashMap<u64, OctantBuffer<8192>>>,
-    octants_pool: CpuBufferPool<[Vertex<f32, f32>; 8192]>,
+    /// list of visible octants
+    visible_octants: RwLock<Vec<(u32, u32)>>,
 
+    /// all octree vertices in one block of memory
     vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>>,
-    vertex_mapping: HashMap<u64, (usize, usize)>,
+    /// maps octant ids to (location,size) in vertex_buffer
+    vertex_mapping: HashMap<u64, (u32, u32)>,
 }
 
 impl OctantRenderer {
     fn new(
         device: Arc<Device>,
-        queue: Arc<Queue>,
         subpass: Subpass,
         viewport: Viewport,
         octree: Arc<Octree<f32, f32>>,
@@ -494,9 +459,8 @@ impl OctantRenderer {
             device.clone(),
         );
 
-        let pool: CpuBufferPool<[Vertex<f32, f32>; 8192]> =
-            CpuBufferPool::new(device.clone(), BufferUsage::vertex_buffer());
-
+        // upload all vertices to GPU into one large buffer
+        // stores memory mapping in hash map for later access
         let vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>> = unsafe {
             CpuAccessibleBuffer::uninitialized_array(
                 device.clone(),
@@ -507,27 +471,25 @@ impl OctantRenderer {
             .unwrap()
         };
         let mut offset = 0;
-        let mut vertex_mapping: HashMap<u64, (usize, usize)> =
+        let mut vertex_mapping: HashMap<u64, (u32, u32)> =
             HashMap::with_capacity(octree.num_octants() as usize);
-        let mut vertices = vertex_buffer.write().unwrap();
-        for octant in octree.into_iter() {
-            let octant_size = octant.points().len();
-            vertex_mapping.insert(octant.id(), (offset, octant_size));
-            for (i, p) in octant.points().iter().enumerate() {
-                vertices[offset + i] = *p;
+        {
+            let mut vertices = vertex_buffer.write().unwrap();
+            for octant in octree.into_iter() {
+                let octant_size = octant.points().len();
+                vertex_mapping.insert(octant.id(), (offset, octant_size as u32));
+                for (i, p) in octant.points().iter().enumerate() {
+                    vertices[offset as usize + i] = *p;
+                }
+                offset += octant_size as u32;
             }
-            offset += octant_size;
         }
-        drop(vertices);
 
         Self {
-            device,
-            queue,
             pipeline: RwLock::new(pipeline),
             vs,
             fs,
-            loaded_octants: RwLock::new(HashMap::new()),
-            octants_pool: pool,
+            visible_octants: RwLock::new(Vec::new()),
 
             vertex_buffer,
             vertex_mapping,
@@ -557,54 +519,63 @@ impl OctantRenderer {
                 [set.clone()].to_vec(),
             );
 
+        let visible_octants = self.visible_octants.read().unwrap();
         builder.bind_vertex_buffers(0, self.vertex_buffer.clone());
-        builder
-            .draw(self.vertex_buffer.into_buffer_slice().len() as u32, 1, 0, 0)
-            .unwrap();
-        // for (_, (offset, len)) in &self.vertex_mapping {
-        //     builder.draw(*len as u32, 1, *offset as u32, 0).unwrap();
-        // }
-    }
-
-    pub fn frustum_culling<'a, F>(
-        &self,
-        visible_octants: &Vec<OctreeIter<'a, f32, f32>>,
-        threshold_fn: F,
-    ) where
-        F: Fn(&CubeBoundingBox<f32>) -> bool,
-    {
-        return;
-        let octants = self.loaded_octants.read().unwrap();
-        let mut new_octants = HashMap::new();
-
-        for OctreeIter { octant, bbox } in visible_octants {
-            // check if octant is larger than one pixel on screen
-            if !threshold_fn(bbox) {
-                let id = octant.id();
-                if let Some(o) = octants.get(&id) {
-                    new_octants.insert(id, o.clone());
-                } else {
-                    let mut data = [Vertex::<f32, f32>::default(); 8192];
-                    for (i, p) in octant.points().iter().enumerate() {
-                        data[i] = Vertex {
-                            position: p.position.into(),
-                            color: p.color,
-                        };
-                    }
-                    new_octants.insert(
-                        id,
-                        OctantBuffer {
-                            length: octant.points().len() as u32,
-                            points: self.octants_pool.next(data).unwrap(),
-                        },
-                    );
+        let mut last_offset = 0;
+        let mut last_len = 0;
+        for (offset, len) in visible_octants.iter() {
+            if last_offset + last_len == *offset as u32 {
+                last_len += *len as u32;
+            } else {
+                if last_len > 0 {
+                    builder.draw(last_len, 1, last_offset, 0).unwrap();
                 }
+                last_offset = *offset as u32;
+                last_len = *len as u32;
             }
         }
-        drop(octants);
+        builder.draw(last_len, 1, last_offset, 0).unwrap();
+    }
 
-        let mut octants = self.loaded_octants.write().unwrap();
-        *octants = new_octants;
+    pub fn frustum_culling<'a>(&self, visible_octants: &Vec<(&Octant<f32, f32>, bool)>) {
+        let mut new_octants: Vec<(u32, u32)> = visible_octants
+            .par_iter()
+            .filter_map(|(o, below_threshold)| {
+                if !below_threshold {
+                    let id = o.id();
+                    Some(self.vertex_mapping.get(&id).unwrap().clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // merge draw calls together that overlap
+        // e.g. (0,17) and (17,5) would be merged to (0,23)
+        new_octants.sort_by_key(|(offset, _)| *offset);
+        let mut merged = Vec::new();
+        let mut last_offset = 0;
+        let mut last_len = 0;
+        for (offset, len) in new_octants.iter() {
+            if last_offset + last_len == *offset as u32 {
+                last_len += *len as u32;
+            } else {
+                if last_len > 0 {
+                    merged.push((last_offset, last_len));
+                }
+                last_offset = *offset as u32;
+                last_len = *len as u32;
+            }
+        }
+        if last_len > 0 {
+            merged.push((last_offset, last_len));
+        }
+
+        println!("{} > {}", new_octants.len(), merged.len());
+        {
+            let mut octants = self.visible_octants.write().unwrap();
+            *octants = merged;
+        }
     }
 
     fn set_viewport(&self, viewport: Viewport) {

@@ -6,7 +6,7 @@ const float PI = 3.14159265358979323846264338327950288;
 //layout(constant_id=0)
 const int num_coefs = 121;
 
-layout(location = 0) in vec3 position;
+layout(location = 0) in uint index;
 
 
 layout(set = 0, binding = 0) uniform UniformData {
@@ -55,7 +55,7 @@ vec4 sh_color(vec2 angle){
 }
 
 void main() {
-    vec4 pos = vec4(position, 1.0);
+    vec4 pos = vec4(sh.vertices[index].pos, 1.0);
     // absolute position within world
     vec4 world_pos = uniforms.world * pos;
     
@@ -68,11 +68,13 @@ void main() {
     gl_PointSize = uniforms.point_size;
     pointSize = gl_PointSize;
 
+    if(uniforms.highlight_sh){
+        vertex_color = vec4(1.,0.,0.,1.);
+        return;
+    }
+
     vec3 diff = normalize(world_pos.xyz - uniforms.camera_pos);
     vec2 angle = vec2(acos(diff.z),atan(-diff.y,diff.x) + PI);
 
     vertex_color = vec4(sh_color(angle).rgb,1);
-    if(uniforms.highlight_sh){
-        vertex_color = vec4(1.,0.,0.,1.);
-    }
 }

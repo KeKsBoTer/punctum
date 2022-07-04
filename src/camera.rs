@@ -202,6 +202,47 @@ impl<F: BaseFloat> ViewFrustum<F> {
         }
         return true;
     }
+
+    pub fn to_f64(&self) -> ViewFrustum<f64> {
+        ViewFrustum {
+            left: Vector4::new(
+                self.left.x.to_f64().unwrap(),
+                self.left.y.to_f64().unwrap(),
+                self.left.z.to_f64().unwrap(),
+                self.left.w.to_f64().unwrap(),
+            ),
+            right: Vector4::new(
+                self.right.x.to_f64().unwrap(),
+                self.right.y.to_f64().unwrap(),
+                self.right.z.to_f64().unwrap(),
+                self.right.w.to_f64().unwrap(),
+            ),
+            top: Vector4::new(
+                self.top.x.to_f64().unwrap(),
+                self.top.y.to_f64().unwrap(),
+                self.top.z.to_f64().unwrap(),
+                self.top.w.to_f64().unwrap(),
+            ),
+            bottom: Vector4::new(
+                self.bottom.x.to_f64().unwrap(),
+                self.bottom.y.to_f64().unwrap(),
+                self.bottom.z.to_f64().unwrap(),
+                self.bottom.w.to_f64().unwrap(),
+            ),
+            near: Vector4::new(
+                self.near.x.to_f64().unwrap(),
+                self.near.y.to_f64().unwrap(),
+                self.near.z.to_f64().unwrap(),
+                self.near.w.to_f64().unwrap(),
+            ),
+            far: Vector4::new(
+                self.far.x.to_f64().unwrap(),
+                self.far.y.to_f64().unwrap(),
+                self.far.z.to_f64().unwrap(),
+                self.far.w.to_f64().unwrap(),
+            ),
+        }
+    }
 }
 
 impl Camera<PerspectiveProjection> {

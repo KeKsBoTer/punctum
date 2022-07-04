@@ -119,4 +119,10 @@ impl<F: BaseFloat, const T: usize> Default for SHVertex<F, T> {
 // unsafe impl Zeroable for Vertex<f32, f32> {}
 unsafe impl Pod for SHVertex<f32, 121> {}
 
-vulkano::impl_vertex!(SHVertex<f32,121>, position);
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Zeroable, Pod, Default)]
+#[repr(C)]
+pub struct IndexVertex {
+    pub index: u32,
+}
+
+vulkano::impl_vertex!(IndexVertex, index);

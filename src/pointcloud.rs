@@ -226,4 +226,14 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
         let radius = (self.size / two) * three.sqrt();
         return radius;
     }
+
+    pub fn to_f64(&self) -> CubeBoundingBox<f64> {
+        let center = Point3::new(
+            self.center.x.to_f64().unwrap(),
+            self.center.y.to_f64().unwrap(),
+            self.center.z.to_f64().unwrap(),
+        );
+        let size = self.size.to_f64().unwrap();
+        CubeBoundingBox { center, size }
+    }
 }

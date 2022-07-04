@@ -27,38 +27,13 @@ use vulkano::{
 };
 
 mod vs {
-    use bytemuck::{Pod, Zeroable};
-    use nalgebra::Matrix4;
-
     vulkano_shaders::shader! {
         ty: "vertex",
         path: "src/renderer/shaders/pointcloud.vert",
-    }
 
-    #[derive(Clone, Copy)]
-    #[repr(C)]
-    pub struct UniformData {
-        pub world: Matrix4<f32>,
-        pub view: Matrix4<f32>,
-        pub proj: Matrix4<f32>,
-        pub point_size: u32,
-        pub znear: f32,
-        pub zfar: f32,
-    }
-
-    unsafe impl Zeroable for UniformData {}
-    unsafe impl Pod for UniformData {}
-
-    impl Default for UniformData {
-        fn default() -> Self {
-            Self {
-                world: Matrix4::identity().into(),
-                view: Matrix4::identity().into(),
-                proj: Matrix4::identity().into(),
-                point_size: 1,
-                znear: 0.01,
-                zfar: 100.,
-            }
+        types_meta: {
+            use bytemuck::{Pod, Zeroable};
+            #[derive(Clone, Copy,Pod, Zeroable,Default)]
         }
     }
 }
@@ -77,9 +52,9 @@ pub struct PointCloudRenderer {
     pipeline: Arc<GraphicsPipeline>,
     set: Arc<PersistentDescriptorSet>,
 
-    uniform_buffer_pool: Arc<CpuBufferPool<vs::UniformData, Arc<StdMemoryPool>>>,
-    uniform_buffer: Arc<DeviceLocalBuffer<vs::UniformData>>,
-    uniform_data: vs::UniformData,
+    uniform_buffer_pool: Arc<CpuBufferPool<vs::ty::UniformData, Arc<StdMemoryPool>>>,
+    uniform_buffer: Arc<DeviceLocalBuffer<vs::ty::UniformData>>,
+    uniform_data: vs::ty::UniformData,
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
 }
@@ -104,7 +79,7 @@ impl PointCloudRenderer {
             device.clone(),
         );
 
-        let uniform_buffer: Arc<DeviceLocalBuffer<vs::UniformData>> = DeviceLocalBuffer::new(
+        let uniform_buffer: Arc<DeviceLocalBuffer<vs::ty::UniformData>> = DeviceLocalBuffer::new(
             device.clone(),
             BufferUsage::uniform_buffer_transfer_destination(),
             None,
@@ -126,7 +101,7 @@ impl PointCloudRenderer {
             set,
             uniform_buffer_pool: pool,
             uniform_buffer,
-            uniform_data: vs::UniformData::default(),
+            uniform_data: vs::ty::UniformData::default(),
             vs: vs,
             fs: fs,
         }
@@ -222,7 +197,7 @@ impl PointCloudRenderer {
     }
 
     pub fn set_point_size(&mut self, point_size: u32) {
-        self.uniform_data = vs::UniformData {
+        self.uniform_data = vs::ty::UniformData {
             point_size,
             ..self.uniform_data
         };
@@ -230,12 +205,10 @@ impl PointCloudRenderer {
     }
 
     pub fn set_camera(&mut self, camera: &Camera<impl Projection>) {
-        self.uniform_data = vs::UniformData {
+        self.uniform_data = vs::ty::UniformData {
             world: Matrix4::identity().into(),
             view: camera.view().clone().into(),
             proj: camera.projection().clone().into(),
-            znear: *camera.znear(),
-            zfar: *camera.zfar(),
             ..self.uniform_data
         };
         self.update_uniforms();
