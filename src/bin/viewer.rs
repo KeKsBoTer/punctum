@@ -27,8 +27,8 @@ use winit::event::{ElementState, Event, KeyboardInput, MouseButton, WindowEvent}
 use winit::event_loop::ControlFlow;
 
 use punctum::{
-    get_render_pass, select_physical_device, CameraController, Octree, OctreeRenderer,
-    PerspectiveCamera, PointCloud, SHVertex, SurfaceFrame, TeeReader, Viewport,
+    get_render_pass, load_raw_coefs, select_physical_device, CameraController, Octree,
+    OctreeRenderer, PerspectiveCamera, PointCloud, SHVertex, SurfaceFrame, TeeReader, Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -180,20 +180,20 @@ fn main() {
         octree.into()
     };
 
-    // let coefs = load_raw_coefs("coefs.raw").unwrap();
+    let coefs = load_raw_coefs("datasets/neuschwanstein/octants_1024max_sh/coefs.raw").unwrap();
 
     for octant in octree.borrow_mut().into_iter() {
         let pc: &PointCloud<f32, f32> = octant.points().into();
         let mean = pc.mean();
-        let new_coefs = [Vector4::<f32>::zeros(); 121];
+        let mut new_coefs = [Vector4::<f32>::zeros(); 121];
 
-        // if let Some(cs) = coefs.get(&octant.id()) {
-        //     for i in 0..cs.len() {
-        //         new_coefs[i] = cs[i].into();
-        //     }
-        // } else {
-        //     panic!("id {} not found", octant.id());
-        // }
+        if let Some(cs) = coefs.get(&octant.id()) {
+            for i in 0..cs.len() {
+                new_coefs[i] = cs[i].into();
+            }
+        } else {
+            // panic!("id {} not found", octant.id());
+        }
         octant.sh_approximation = Some(SHVertex::new(mean.position, new_coefs.into()));
     }
 
