@@ -1,9 +1,6 @@
 use egui_winit_vulkano::egui::{CollapsingHeader, Context, Visuals};
 use egui_winit_vulkano::{egui, Gui};
-use nalgebra::{Point3, Vector3, Vector4};
-use std::borrow::BorrowMut;
-use std::fs::File;
-use std::io::BufReader;
+use nalgebra::{Point3, Vector3};
 use std::path::PathBuf;
 use std::sync::mpsc::TryRecvError;
 use std::sync::{mpsc, Arc, Mutex};
@@ -11,7 +8,6 @@ use std::thread;
 use std::time::Instant;
 use vulkano::device::Features;
 
-use pbr::ProgressBar;
 use structopt::StructOpt;
 use vulkano::device::DeviceExtensions;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo};
@@ -27,8 +23,8 @@ use winit::event::{ElementState, Event, KeyboardInput, MouseButton, WindowEvent}
 use winit::event_loop::ControlFlow;
 
 use punctum::{
-    get_render_pass, load_raw_coefs, select_physical_device, CameraController, Octree,
-    OctreeRenderer, PerspectiveCamera, PointCloud, SHVertex, SurfaceFrame, TeeReader, Viewport,
+    get_render_pass, load_octree_with_progress_bar, select_physical_device, CameraController,
+    Octree, OctreeRenderer, PerspectiveCamera, SurfaceFrame, Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -159,44 +155,9 @@ impl GuiState {
 
 fn main() {
     let opt = Opt::from_args();
-    let filename = opt.input.as_os_str().to_str().unwrap();
+    let filename = opt.input;
 
-    let mut octree: Octree<f32, f32> = {
-        let in_file = File::open(filename).unwrap();
-
-        let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
-
-        let mut buf = BufReader::new(in_file);
-
-        pb.message(&format!("decoding {}: ", filename));
-
-        pb.set_units(pbr::Units::Bytes);
-        let mut tee = TeeReader::new(&mut buf, &mut pb);
-
-        let octree: Octree<f64, u8> = bincode::deserialize_from(&mut tee).unwrap();
-
-        pb.finish_println("done!");
-
-        octree.into()
-    };
-
-    let coefs = load_raw_coefs("datasets/neuschwanstein/octants_1024max_sh/coefs.raw").unwrap();
-
-    for octant in octree.borrow_mut().into_iter() {
-        let pc: &PointCloud<f32, f32> = octant.points().into();
-        let mean = pc.mean();
-        let mut new_coefs = [Vector4::<f32>::zeros(); 121];
-
-        if let Some(cs) = coefs.get(&octant.id()) {
-            for i in 0..cs.len() {
-                new_coefs[i] = cs[i].into();
-            }
-        } else {
-            // panic!("id {} not found", octant.id());
-        }
-        octant.sh_approximation = Some(SHVertex::new(mean.position, new_coefs.into()));
-    }
-
+    let octree: Octree<f32, f32> = load_octree_with_progress_bar(&filename).unwrap().into();
     let octree = Arc::new(octree);
 
     let required_extensions = vulkano_win::required_extensions();

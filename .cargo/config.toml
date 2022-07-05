@@ -1,0 +1,2 @@
+[env]
+TORCH_CUDA_VERSION = "cu113"

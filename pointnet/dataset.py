@@ -4,15 +4,15 @@ from typing import Tuple
 
 import numpy as np
 import torch
-from iopath.common.file_io import PathManager
-from pytorch3d import io
-from pytorch3d.structures import Pointclouds
+from plyfile import PlyData
 from torch.utils.data import Dataset
 from functools import lru_cache
 
 from tqdm import tqdm
 
-from sh import lm2flat_index
+from .pointclouds import Pointclouds
+
+from .sh import lm2flat_index
 
 
 class OctantDataset(Dataset):
@@ -52,17 +52,15 @@ class OctantDataset(Dataset):
 
     @lru_cache(maxsize=None)
     def load_ply(self, file: str) -> Tuple[Pointclouds, torch.Tensor]:
-        _, data = io.ply_io._load_ply_raw(file, path_manager=PathManager())
-        pos, color = data["vertex"]
-        sh_coefficients = data["sh_coefficients"]
+        plydata = PlyData.read(file)
+        vertex_data = unpack_data(plydata["vertex"].data,["x","y","z","red","green","blue","alpha"])
+        coords = vertex_data[:,:3]
+        color = vertex_data[:,3:]/255
 
-        sh_coef = torch.empty((len(sh_coefficients), 4), requires_grad=False)
+        sh_coef = torch.empty((plydata["sh_coefficients"].count, 4), requires_grad=False)
 
-        for (l, m, values) in sh_coefficients:
-            sh_coef[lm2flat_index(l, m)] = torch.tensor(values)
-
-        coords = torch.from_numpy(pos)
-        color = torch.from_numpy(color)
+        for (l, m, values) in plydata["sh_coefficients"].data:
+            sh_coef[lm2flat_index(l, m)] = torch.tensor(values) 
 
         before = len(coords)
         nan_mask = coords.isnan().any(-1)
@@ -75,23 +73,30 @@ class OctantDataset(Dataset):
             coords = torch.zeros((len(color), 3))
             print(f"warning: {file} has no coords")
 
-        pc = Pointclouds(coords.unsqueeze(0), features=color.unsqueeze(0),)
+        pc = Pointclouds(coords, features=color,file_names=[file])
         return (pc, sh_coef)
 
     def __getitem__(self, idx: int) -> Tuple[Pointclouds, torch.Tensor]:
         return self.load_fn(self.ply_files[idx])
 
 
+def unpack_data(data, field_names):
+    return torch.from_numpy(np.stack([data[key] for key in field_names]).T)
+
+
 class CamerasDataset(Dataset):
     """ Dataset containing pointclouds and their respective SH coefficients"""
 
     def __init__(
-        self, data_dir: str,
+        self, data_dir: str, preload: bool = True,
     ):
         self.data_dir = data_dir
         self.ply_files = np.array(glob.glob(os.path.join(data_dir, "*.ply")))
 
         self.load_fn = self.load_ply
+        if preload:
+            for i in tqdm(range(len(self.ply_files)), desc="loading dataset"):
+                self.__getitem__(i)
 
     def __len__(self):
         return len(self.ply_files)
@@ -101,24 +106,23 @@ class CamerasDataset(Dataset):
 
     @lru_cache(maxsize=None)
     def load_ply(self, file: str) -> Tuple[Pointclouds, torch.Tensor]:
-        _, data = io.ply_io._load_ply_raw(file, path_manager=PathManager())
-        pos, colors = data["camera"]
+        plydata = PlyData.read(file)
+        vertex_data = unpack_data(plydata["vertex"].data,["x","y","z","red","green","blue","alpha"])
+        vertex_pos = vertex_data[:,:3]
+        vertex_color = vertex_data[:,3:]/255
 
-        pos = torch.from_numpy(pos)
-        colors = torch.from_numpy(colors)
 
-        vertex_pos, vertex_color = data["vertex"]
-        vertex_pos = torch.from_numpy(vertex_pos)
-        vertex_color = torch.from_numpy(vertex_color)
+        camera_data = unpack_data(plydata["camera"].data,["x","y","z","red","green","blue","alpha"])
+        pos = camera_data[:,:3]
+        colors = camera_data[:,3:]/255
+
 
         sh_coef = None
-        if "sh_coefficients" in data:
-            sh_coefficients = data["sh_coefficients"]
+        if "sh_coefficients" in plydata:
+            sh_coef = torch.empty((plydata["sh_coefficients"].count, 4), requires_grad=False)
 
-            sh_coef = torch.empty((len(sh_coefficients), 4), requires_grad=False)
-
-            for (l, m, values) in sh_coefficients:
-                sh_coef[lm2flat_index(l, m)] = torch.tensor(values)
+            for (l, m, values) in plydata["sh_coefficients"].data:
+                sh_coef[lm2flat_index(l, m)] = torch.tensor(values) 
 
         return (pos, colors, vertex_pos, vertex_color, sh_coef)
 

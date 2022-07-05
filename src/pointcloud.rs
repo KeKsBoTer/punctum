@@ -26,6 +26,16 @@ impl Into<PointCloud<f32, u8>> for &PointCloud<f32, f32> {
     }
 }
 
+impl Into<PointCloud<f32, f32>> for &PointCloud<f64, u8> {
+    fn into(self) -> PointCloud<f32, f32> {
+        self.0
+            .iter()
+            .map(|p| (*p).into())
+            .collect::<Vec<Vertex<f32, f32>>>()
+            .into()
+    }
+}
+
 impl<F: BaseFloat, C: BaseColor> Into<PointCloud<F, C>> for Vec<Vertex<F, C>> {
     fn into(self) -> PointCloud<F, C> {
         PointCloud(self)
@@ -90,18 +100,13 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
     pub fn points(&self) -> &Vec<Vertex<F, C>> {
         &self.0
     }
-}
-
-impl<F: BaseFloat> PointCloud<F, f32> {
-    pub fn mean(&self) -> Vertex<F, f32> {
-        let mut mean = Vertex::default();
+    pub fn centroid(&self) -> Point3<F> {
+        let mut mean = Point3::origin();
         for v in self.0.iter() {
-            mean.position += v.position.coords;
-            mean.color += v.color;
+            mean += v.position.coords;
         }
         let length = self.0.len() as f64;
-        mean.position /= F::from_subset(&length);
-        mean.color /= length as f32;
+        mean /= F::from_subset(&length);
 
         return mean;
     }

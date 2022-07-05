@@ -7,6 +7,7 @@ use std::{
 };
 
 use nalgebra::Vector4;
+use pbr::ProgressBar;
 use ply_rs::{
     ply::{Addable, Encoding, Ply},
     writer::Writer,
@@ -14,7 +15,7 @@ use ply_rs::{
 
 use crate::{
     vertex::{BaseColor, BaseFloat},
-    PointCloud, Vertex,
+    Octree, PointCloud, TeeReader, Vertex,
 };
 
 pub fn export_ply<F: BaseFloat, C: BaseColor>(output_file: &PathBuf, pc: &PointCloud<F, C>) {
@@ -74,4 +75,20 @@ pub fn load_raw_coefs<P: AsRef<Path>>(path: P) -> io::Result<HashMap<u64, Vec<Ve
         })
         .collect();
     Ok(coefs)
+}
+
+pub fn load_octree_with_progress_bar(path: &PathBuf) -> io::Result<Octree<f64, u8>> {
+    let in_file = File::open(path)?;
+
+    let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
+
+    let mut buf = BufReader::new(in_file);
+
+    pb.message(&format!("decoding {}: ", path.to_str().unwrap()));
+
+    pb.set_units(pbr::Units::Bytes);
+    let mut tee = TeeReader::new(&mut buf, &mut pb);
+
+    let octree: Octree<f64, u8> = bincode::deserialize_from(&mut tee).unwrap();
+    return Ok(octree);
 }

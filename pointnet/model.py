@@ -5,7 +5,13 @@ Based on https://github.com/fxia22/pointnet.pytorch
 import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
-from torch_scatter import scatter
+
+
+def scatter_max(x:torch.Tensor,batch:torch.Tensor)->torch.Tensor:
+    batch_idx = batch.unsqueeze(-1).repeat(1,x.shape[1])
+    target:torch.Tensor = torch.zeros((batch_idx.max()+1,x.shape[1]),device=x.device)
+
+    return target.scatter_reduce(0,batch_idx,x,reduce="amax")
 
 
 class TNet(nn.Module):
@@ -54,7 +60,7 @@ class TNet(nn.Module):
             x = F.relu(self.conv3(x))
 
         x = x.squeeze(0)
-        x = scatter(x.T, batch, dim=0, reduce="max")
+        x = scatter_max(x.T, batch)
 
         if self.batch_norm:
             x = F.relu(self.bn4(self.fc1(x)))
@@ -73,14 +79,16 @@ class FeatureNet(nn.Module):
     """ Global feature extraction network used in PointNet"""
 
     def __init__(
-        self, batch_norm: bool = False, layer_sizes=[32, 128, 256],
+        self, color_channels: int, batch_norm: bool = False, layer_sizes=[32, 128, 256],
     ):
         super(FeatureNet, self).__init__()
         # self.tnet = TNet()
-        # rfft_dim = 64
-        # self.gfft = GaussianFourierFeatureTransform(6, mapping_size=rfft_dim)
+        # rfft_dim = 16
+        # self.gfft = GaussianFourierFeatureTransform(
+        #    3 + color_channels, mapping_size=rfft_dim
+        # )
         s1, s2, s3 = layer_sizes
-        self.conv1 = torch.nn.Conv1d(6, s1, 1, bias=not batch_norm)
+        self.conv1 = torch.nn.Conv1d(3 + color_channels, s1, 1, bias=not batch_norm)
         self.conv2 = torch.nn.Conv1d(s1, s2, 1, bias=not batch_norm)
         self.conv3 = torch.nn.Conv1d(s2, s3, 1, bias=not batch_norm)
 
@@ -120,7 +128,8 @@ class FeatureNet(nn.Module):
             x = self.conv3(x)
 
         x = x.squeeze(0).T
-        x_max = scatter(x, batch, dim=0, reduce="max")
+        x_max = scatter_max(x, batch)
+        x_max = x[0]
         return x_max
 
 
@@ -171,19 +180,21 @@ class PointNet(nn.Module):
 
     def __init__(
         self,
-        k: int = 3,
+        l: int = 10,
+        color_channels: int = 4,
         batch_norm: bool = False,
         use_dropout: bool = False,
         use_spherical: bool = False,
         layer_sizes=[128, 64],
     ):
         super(PointNet, self).__init__()
-        self.feat = FeatureNet(batch_norm)
+        self.feat = FeatureNet(color_channels, batch_norm)
         s1, s2 = layer_sizes
         self.fc1 = nn.Linear(256, s1, bias=not batch_norm)
         self.fc2 = nn.Linear(s1, s2, bias=not batch_norm)
-        self.fc3 = nn.Linear(s2, k * 3)
-        self.k = k
+        self.fc3 = nn.Linear(s2, (l + 1) ** 2 * color_channels)
+        self.l = l
+        self.color_channels = color_channels
         self.use_spherical = use_spherical
         self.use_dropout = use_dropout
         if use_dropout:
@@ -200,7 +211,7 @@ class PointNet(nn.Module):
 
         Args:
             points (torch.Tensor[N,3]): vertex positions
-            color (torch.Tensor[N,3]): colors
+            color (torch.Tensor[N,C]): colors
             batch (torch.Tensor[N]): tensor indicating the batch number of each point
 
         Returns:
@@ -223,5 +234,5 @@ class PointNet(nn.Module):
                 x = F.relu(self.fc2(x))
 
         x: torch.Tensor = self.fc3(x)
-        x = x.reshape(-1, self.k, 3)
+        x = x.reshape(-1, (self.l + 1) ** 2, self.color_channels)
         return x

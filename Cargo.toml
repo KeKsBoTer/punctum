@@ -31,6 +31,8 @@ structopt = "0.3"
 
 egui_winit_vulkano = "0.17.0"
 
+tch = "0.7.2"
+
 [profile.release]
 debug = 1
 

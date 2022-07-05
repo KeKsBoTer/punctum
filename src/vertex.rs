@@ -73,6 +73,8 @@ impl From<Vertex<f32, f32>> for Vertex<f32, u8> {
 #[repr(C)]
 pub struct SHCoefficients<const T: usize>(#[serde(with = "BigArray")] [Vector4<f32>; T]);
 
+unsafe impl Pod for SHCoefficients<121> {}
+
 impl<const T: usize> Into<SHCoefficients<T>> for [Vector4<f32>; T] {
     fn into(self) -> SHCoefficients<T> {
         SHCoefficients(self)
@@ -94,6 +96,16 @@ pub struct SHVertex<F: BaseFloat, const T: usize> {
     // we need to add padding manually here since we only use the coefficients in a uniform buffer
     _pad: F,
     pub coefficients: SHCoefficients<T>,
+}
+
+impl<const T: usize> Into<SHVertex<f32, T>> for SHVertex<f64, T> {
+    fn into(self) -> SHVertex<f32, T> {
+        SHVertex {
+            position: self.position.cast(),
+            _pad: 0.,
+            coefficients: self.coefficients.clone(),
+        }
+    }
 }
 
 impl<F: BaseFloat, const T: usize> SHVertex<F, T> {

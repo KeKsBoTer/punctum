@@ -16,11 +16,11 @@ pub struct Octant<F: BaseFloat, C: BaseColor> {
 }
 
 impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
-    fn new(id: u64, data: Vec<Vertex<F, C>>) -> Self {
+    fn new(id: u64, data: Vec<Vertex<F, C>>, sh_approximation: Option<SHVertex<F, 121>>) -> Self {
         Self {
             id,
             data,
-            sh_approximation: None,
+            sh_approximation,
         }
     }
 
@@ -48,8 +48,11 @@ impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
                 Node::Empty => {
                     let mut new_vec = Vec::with_capacity(max_node_size);
                     new_vec.push(*v);
-                    new_data[octant_i] =
-                        Node::Filled(Octant::new(next_id(self.id, level, octant_i), new_vec));
+                    new_data[octant_i] = Node::Filled(Octant::new(
+                        next_id(self.id, level, octant_i),
+                        new_vec,
+                        None,
+                    ));
                 }
             }
         }
@@ -125,7 +128,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
                 Node::Empty => {
                     let mut new_vec = Vec::with_capacity(max_node_size);
                     new_vec.push(point);
-                    *node = Node::Filled(Octant::new(id, new_vec));
+                    *node = Node::Filled(Octant::new(id, new_vec, None));
                     return octants_created + 1;
                 }
             }
@@ -269,7 +272,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
             Node::Empty => {
                 let mut new_vec = Vec::with_capacity(self.max_node_size);
                 new_vec.push(point);
-                self.root = Node::Filled(Octant::new(0, new_vec));
+                self.root = Node::Filled(Octant::new(0, new_vec, None));
                 return 1;
             }
         }
@@ -361,32 +364,24 @@ pub struct OctreeIter<'a, F: BaseFloat, C: BaseColor> {
     pub bbox: CubeBoundingBox<f64>,
 }
 
-impl Into<Vec<Vertex<f32, f32>>> for Octree<f64, u8> {
-    fn into(self) -> Vec<Vertex<f32, f32>> {
-        self.into_iter()
-            .flat_map(|octant| {
-                octant
-                    .data
-                    .iter()
-                    .map(|p| (*p).into())
-                    .collect::<Vec<Vertex<f32, f32>>>()
-            })
-            .collect()
-    }
-}
-
 impl Into<Node<f32, f32>> for Node<f64, u8> {
     fn into(self) -> Node<f32, f32> {
         match self {
             Node::Group(octants) => Node::Group(Box::new(octants.map(|octant| octant.into()))),
             Node::Filled(Octant {
-                id, data: points, ..
+                id,
+                data: points,
+                sh_approximation,
             }) => Node::Filled(Octant::new(
                 id,
                 points
                     .iter()
                     .map(|p| (*p).into())
                     .collect::<Vec<Vertex<f32, f32>>>(),
+                match sh_approximation {
+                    Some(sh) => Some(sh.into()),
+                    None => None,
+                },
             )),
             Node::Empty => Node::Empty,
         }

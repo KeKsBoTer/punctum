@@ -5,31 +5,26 @@ from typing import List, Tuple
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 import torch.utils.data as data
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 from plyfile import PlyData
-from pytorch3d.structures import Pointclouds
 from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from dataset import OctantDataset, lm2flat_index
-from sh import calc_sh, to_spherical
+from pointnet.dataset import OctantDataset, lm2flat_index
+from pointnet.sh import calc_sh, to_spherical
+from pointnet.pointclouds import Pointclouds,collate_batched
 
-from model import PointNet
+from pointnet.model import PointNet
 
 torch.backends.cudnn.benchmark = True
 
 
 def collate_batched_point_clouds(batch: List[Tuple[Pointclouds, torch.Tensor]]):
     coefs = torch.stack([x[1] for x in batch])
-    pcs = Pointclouds(
-        points=[x[0].points_packed() for x in batch],
-        features=[x[0].features_packed() for x in batch],
-    )
-    pcs.file_names = [x[0].file_names[0] for x in batch]
+    pcs = collate_batched([pc for pc,_ in batch])
     return (pcs, coefs)
 
 
@@ -41,7 +36,7 @@ def random_batches(ds_size: int, batch_size: int) -> torch.LongTensor:
 
 def unpack_pointclouds(pcs: Pointclouds):
     vertices = pcs.points_packed().cuda()
-    color = (pcs.features_packed()[:, :3]).cuda().float() / 255.0
+    color = pcs.features_packed().cuda().float() / 255.0
     batch = pcs.packed_to_cloud_idx().cuda()
     return vertices, color, batch
 
@@ -106,6 +101,7 @@ class CoefNormalizer:
         ax.plot(x, self.std[:, 0].cpu(), label="red")
         ax.plot(x, self.std[:, 1].cpu(), label="green")
         ax.plot(x, self.std[:, 2].cpu(), label="blue")
+        ax.plot(x, self.std[:, 3].cpu(), label="alpha")
         ax.set_xlabel("coefs.")  #
         ax.legend()
         return fig
@@ -127,11 +123,14 @@ def plot_samples(
 
     rand_sample = torch.randint(0, len(prediction_coefs), (num_samples,))
 
-    fig, axes = plt.subplots(num_samples, 4, figsize=(8, num_samples * 2))
+    cols = 5
+    fig, axes = plt.subplots(num_samples, cols, figsize=(cols * 2, num_samples * 2))
     fig.tight_layout()
 
-    targets = torch.empty((len(rand_sample), res, res, 3))
-    predictions = torch.empty((len(rand_sample), res, res, 3))
+    color_channels = target_coefs.shape[-1]
+
+    targets = torch.empty((len(rand_sample), res, res, color_channels))
+    predictions = torch.empty((len(rand_sample), res, res, color_channels))
     errors = torch.empty((len(rand_sample), res, res))
 
     for i, s in enumerate(rand_sample):
@@ -142,25 +141,28 @@ def plot_samples(
         errors[i] = (predictions[i] - targets[i]).square().mean(-1)
 
     for i, s in enumerate(rand_sample):
-        ax1, ax2, ax3, ax4 = axes[i]
-
-        ax3.set_title("avg color")
-        ax3.set_axis_off()
-        avg = pc.features_list()[s].float().mean(0).reshape(1, 1, 4) / 255.0
-        ax3.imshow(avg)
+        ax1, ax2, ax3, ax4, ax5 = axes[i]
 
         name = pc.file_names[s].split("/")[-1]
         ax1.set_title(f"target ({name})")
         ax1.set_axis_off()
-        ax1.imshow(targets[i])
+        ax1.imshow(targets[i][:, :, :3])
 
         ax2.set_title("prediction")
         ax2.set_axis_off()
-        ax2.imshow(predictions[i])
+        ax2.imshow(predictions[i][:, :, :3])
 
-        ax4.set_title("error")
+        ax3.set_title("error")
+        ax3.set_axis_off()
+        ax3.imshow(errors[i], vmin=errors.min(), vmax=errors.max(), cmap="winter")
+
+        ax4.set_title("alpha target.")
         ax4.set_axis_off()
-        ax4.imshow(errors[i], vmin=errors.min(), vmax=errors.max(), cmap="winter")
+        ax4.imshow(targets[i][:, :, 3], vmin=0, vmax=1)
+
+        ax5.set_title("alpha pred.")
+        ax5.set_axis_off()
+        ax5.imshow(predictions[i][:, :, 3], vmin=0, vmax=1)
 
     return fig
 
@@ -182,16 +184,22 @@ def plot_coefs(
 
     ax.set_ylabel("error")
     ax.set_xlabel("coef.")
-    error = (target_coefs - pred).abs().mean(-1).mean(0)
-    ax.plot(error.cpu(), label="error")
+    error = (target_coefs - pred).abs().mean(0)
+    ax.plot(error[:, 0].cpu(), label="red")
+    ax.plot(error[:, 1].cpu(), label="green")
+    ax.plot(error[:, 2].cpu(), label="blue")
+    ax.plot(error[:, 3].cpu(), label="alpha")
     ax.legend()
 
     fig3, ax = plt.subplots()
 
     ax.set_ylabel("error (relative)")
     ax.set_xlabel("coef.")
-    error = ((target_coefs - pred) / (target_coefs + 1e-8)).abs().mean(-1).mean(0)
-    ax.plot(error.cpu(), label="error")
+    error = ((target_coefs - pred) / (target_coefs + 1e-8)).abs().mean(0)
+    ax.plot(error[:, 0].cpu(), label="red")
+    ax.plot(error[:, 1].cpu(), label="green")
+    ax.plot(error[:, 2].cpu(), label="blue")
+    ax.plot(error[:, 3].cpu(), label="alpha")
     ax.legend()
     ax.set_yscale("log")
 
@@ -244,7 +252,9 @@ if __name__ == "__main__":
 
     logger.info(f"loading dataset {ds_path}")
 
-    selected_indices = torch.load("top_100k.pt")
+    selected_indices = torch.load(
+       "datasets/neuschwanstein/octants_1024max_var_sorted.pt"
+    )[:100000]
 
     ds = OctantDataset(ds_path, preload=True, selected_samples=selected_indices)
 
@@ -258,7 +268,7 @@ if __name__ == "__main__":
     val_batches = random_batches(len(ds_val), batch_size)
 
     model = PointNet(
-        (l_max + 1) ** 2, batch_norm=True, use_dropout=False, use_spherical=False
+        l_max, 4, batch_norm=True, use_dropout=0.05, use_spherical=False
     ).cuda()
 
     # model = torch.load(f"logs/l_max=10 1024 complete/model.pt").cuda()
@@ -286,15 +296,11 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
     scheduler = OneCycleLR(
-        optimizer, max_lr=1e-4, steps_per_epoch=len(train_batches), epochs=epochs
+        optimizer, max_lr=1e-3, steps_per_epoch=len(train_batches), epochs=epochs
     )
 
-    train_batches_pre = [
-        collate_batched_point_clouds([ds_train[i] for i in s]) for s in train_batches
-    ]
-    val_batches_pre = [
-        collate_batched_point_clouds([ds_val[i] for i in s]) for s in val_batches
-    ]
+    train_batches_pre: list[tuple[Pointclouds, torch.Tensor]] = None
+    val_batches_pre: list[tuple[Pointclouds, torch.Tensor]] = None
 
     step = 0
     for epoch in range(epochs):
@@ -329,7 +335,7 @@ if __name__ == "__main__":
             target_coefs_n = coef_transform.normalize(target_coefs)
             c_loss = loss_fn(coef_transform.denormalize(pred_coefs), target_coefs)
             coef_loss = coef_loss_fn(pred_coefs, target_coefs_n)
-            train_loss = c_loss + coef_loss * 0.01
+            train_loss = c_loss  # + coef_loss * 0.01
             train_loss.backward()
 
             optimizer.step()
@@ -377,7 +383,7 @@ if __name__ == "__main__":
 
                 c_loss = loss_fn(coef_transform.denormalize(pred_coefs), target_coefs)
                 coef_loss = coef_loss_fn(pred_coefs, target_coefs_n)
-                val_loss = c_loss + coef_loss * 0.01
+                val_loss = c_loss  # + coef_loss * 0.01
 
                 writer_val.add_scalar(
                     "loss/camera", c_loss.item(), step, new_style=True
