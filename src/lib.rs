@@ -27,15 +27,16 @@ mod tee;
 mod vertex;
 
 pub use avg_color::ImageAvgColor;
-pub use camera::{Camera, CameraController, OrthographicCamera, PerspectiveCamera};
-pub use io::{export_ply, load_octree_with_progress_bar, load_raw_coefs};
+pub use camera::{
+    Camera, CameraController, OrthographicCamera, OrthographicProjection, PerspectiveCamera,
+    PerspectiveProjection,
+};
+pub use io::{export_ply, load_cameras, load_octree_with_progress_bar, load_raw_coefs};
 pub use octree::{Node, Octree};
 pub use pointcloud::{CubeBoundingBox, PointCloud, PointCloudGPU};
-pub use renderer::{OctreeRenderer, PointCloudRenderer, SurfaceFrame, Viewport};
+pub use renderer::{Frame, OctreeRenderer, PointCloudRenderer, SurfaceFrame, Viewport};
 pub use tee::{TeeReader, TeeWriter};
 pub use vertex::{BaseColor, BaseFloat, SHCoefficients, SHVertex, Vertex};
-
-use renderer::Frame;
 
 pub fn select_physical_device<'a>(
     instance: &'a Arc<Instance>,
@@ -122,12 +123,7 @@ pub struct OfflineRenderer {
 
 impl OfflineRenderer {
     pub fn new(img_size: u32, render_settings: RenderSettings, save_renders: bool) -> Self {
-        let required_extensions = vulkano_win::required_extensions();
-        let instance = Instance::new(InstanceCreateInfo {
-            enabled_extensions: required_extensions,
-            ..Default::default()
-        })
-        .unwrap();
+        let instance = Instance::new(InstanceCreateInfo::default()).unwrap();
 
         let device_extensions = DeviceExtensions::none();
 

@@ -87,7 +87,7 @@ impl GuiState {
                             .spacing([40.0, 4.0])
                             .striped(true)
                             .show(ui, |ui| {
-                                let pos = *camera.position();
+                                let pos = camera.position();
                                 ui.label("Position");
                                 ui.columns(3, |cols| {
                                     for (i, col) in cols.iter_mut().enumerate() {
@@ -96,7 +96,7 @@ impl GuiState {
                                 });
                                 ui.end_row();
 
-                                let rot = *camera.rotation();
+                                let rot = camera.rotation();
                                 ui.label("Rotation");
                                 ui.columns(3, |cols| {
                                     for (i, col) in cols.iter_mut().enumerate() {
@@ -193,7 +193,6 @@ fn main() {
 
             queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
             enabled_features: Features {
-                buffer_device_address: true,
                 shader_int64: true,
                 ..Features::none()
             },

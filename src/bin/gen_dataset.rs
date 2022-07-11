@@ -12,8 +12,8 @@ use ply_rs::{
     writer::Writer,
 };
 use punctum::{
-    Octree, OfflineRenderer, OrthographicCamera, PointCloud, PointCloudGPU, RenderSettings,
-    TeeReader, Vertex,
+    load_cameras, Octree, OfflineRenderer, OrthographicProjection, PointCloud, PointCloudGPU,
+    RenderSettings, TeeReader, Vertex,
 };
 use rayon::prelude::*;
 use std::path::PathBuf;
@@ -102,25 +102,6 @@ fn export_ply(
         .unwrap();
 }
 
-fn load_cameras() -> Vec<OrthographicCamera> {
-    let mut f = std::fs::File::open("sphere.ply").unwrap();
-
-    // create a parser
-    let p = ply_rs::parser::Parser::<Vertex<f32, f32>>::new();
-
-    // use the parser: read the entire file
-    let in_ply = p.read_ply(&mut f).unwrap();
-
-    in_ply
-        .payload
-        .get("vertex")
-        .unwrap()
-        .clone()
-        .iter()
-        .map(|c| OrthographicCamera::on_unit_sphere(c.position.into()))
-        .collect::<Vec<OrthographicCamera>>()
-}
-
 fn main() {
     let opt = Opt::from_args();
     let filename = opt.input.as_os_str().to_str().unwrap();
@@ -148,7 +129,14 @@ fn main() {
         octree
     });
 
-    let cameras = load_cameras();
+    let cameras = load_cameras(
+        "sphere.ply",
+        OrthographicProjection {
+            width: 2.,
+            height: 2.,
+        },
+    )
+    .unwrap();
 
     let pb = Arc::new(Mutex::new(ProgressBar::new(octree.num_octants())));
     {
@@ -217,7 +205,7 @@ fn main() {
                 .iter()
                 .zip(cameras.clone())
                 .map(|(color, cam)| Vertex {
-                    position: *cam.position(),
+                    position: cam.position(),
                     color: Vector4::from(color.0),
                 })
                 .collect();

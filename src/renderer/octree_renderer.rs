@@ -46,8 +46,8 @@ pub struct OctreeRenderer {
     octree: Arc<Octree<f32, f32>>,
 
     subpass: Subpass,
-    sh_renderer: SHRenderer,
     octant_renderer: OctantRenderer,
+    sh_renderer: Option<SHRenderer>,
     screen_height: RwLock<u32>,
 }
 
@@ -75,13 +75,17 @@ impl OctreeRenderer {
         ));
         let frustum = RwLock::new(camera.extract_planes_from_projmat(true));
 
-        let sh_renderer = SHRenderer::new(
-            device.clone(),
-            queue.clone(),
-            subpass.clone(),
-            viewport.clone(),
-            octree.clone(),
-        );
+        let sh_renderer = if octree.into_iter().any(|o| o.sh_approximation.is_some()) {
+            Some(SHRenderer::new(
+                device.clone(),
+                queue.clone(),
+                subpass.clone(),
+                viewport.clone(),
+                octree.clone(),
+            ))
+        } else {
+            None
+        };
         let octant_renderer =
             OctantRenderer::new(device.clone(), subpass.clone(), viewport, octree.clone());
 
@@ -122,15 +126,19 @@ impl OctreeRenderer {
             .octree
             .visible_octants(&frustum)
             .into_par_iter()
-            .partition(|o| threshold_fn(&o.bbox));
+            .partition(|o| threshold_fn(&o.bbox) && o.octant.sh_approximation.is_some());
 
-        self.sh_renderer.frustum_culling(&visible_sh);
+        if let Some(sh_renderer) = &self.sh_renderer {
+            sh_renderer.frustum_culling(&visible_sh);
+        }
         self.octant_renderer.frustum_culling(&visible_octants);
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
         let viewport_height = viewport.size()[1] as u32;
-        self.sh_renderer.set_viewport(viewport.clone());
+        if let Some(sh_renderer) = &self.sh_renderer {
+            sh_renderer.set_viewport(viewport.clone());
+        }
         self.octant_renderer.set_viewport(viewport);
 
         let mut screen_height = self.screen_height.write().unwrap();
@@ -156,11 +164,13 @@ impl OctreeRenderer {
         .unwrap();
 
         if render_shs {
-            self.sh_renderer
-                .render(uniform_buffer.clone(), &mut builder);
+            if let Some(sh_renderer) = &self.sh_renderer {
+                sh_renderer.render(uniform_buffer.clone(), &mut builder);
+            }
         }
         if render_octants {
-            self.octant_renderer.render(uniform_buffer, &mut builder);
+            self.octant_renderer
+                .render(uniform_buffer.clone(), &mut builder);
         }
 
         Arc::new(builder.build().unwrap())
