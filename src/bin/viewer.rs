@@ -228,8 +228,8 @@ fn main() {
     let window_size = surface.window().inner_size();
     let aspect_ratio = window_size.width as f32 / window_size.height as f32;
     let mut camera = PerspectiveCamera::new(
-        Point3::new(4.293682, 31.51273, -244.75063),
-        Vector3::new(0.4617872, 0.0, 0.0),
+        Point3::new(-1.309, -19.021, -28.548),
+        Vector3::new(-0.367, 1.367, -0.130),
         aspect_ratio,
     );
     camera.adjust_znear_zfar(octree.bbox());
@@ -244,7 +244,7 @@ fn main() {
     ));
 
     renderer.set_point_size(1);
-    renderer.frustum_culling();
+    renderer.frustum_culling(true);
 
     let renderer_clone = renderer.clone();
     let gui_state_clone = gui_state.clone();
@@ -256,7 +256,7 @@ fn main() {
             state.frustum_culling
         };
         if frustum_culling {
-            renderer_clone.frustum_culling();
+            renderer_clone.frustum_culling(true);
         }
         match rx.try_recv() {
             Ok(_) | Err(TryRecvError::Disconnected) => {

@@ -76,5 +76,5 @@ void main() {
     vec3 diff = normalize(world_pos.xyz - uniforms.camera_pos);
     vec2 angle = vec2(acos(diff.z),atan(-diff.y,diff.x) + PI);
 
-    vertex_color = vec4(sh_color(angle).rgb,1);
+    vertex_color = sh_color(angle);
 }

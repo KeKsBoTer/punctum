@@ -1,5 +1,5 @@
 use approx::assert_ulps_eq;
-use nalgebra::{distance, vector, Matrix4, Point3, SimdComplexField, Vector3, Vector4};
+use nalgebra::{ vector, Matrix4, Point3, SimdComplexField, Vector3, Vector4};
 use std::{f32::consts::PI, time::Duration};
 use winit::{dpi::PhysicalPosition, event::*};
 
@@ -207,7 +207,7 @@ impl<F: BaseFloat> ViewFrustum<F> {
             self.far,
         ];
         for p in planes {
-            if p.dot(&point.to_homogeneous()) <= F::zero() {
+            if p.dot(&point.to_homogeneous()) < F::zero() {
                 return false;
             }
         }
@@ -227,7 +227,7 @@ impl<F: BaseFloat> ViewFrustum<F> {
         ];
         for p in planes {
             let d = p.dot(&center.to_homogeneous());
-            if d + radius <= F::zero() {
+            if d + radius < F::zero() {
                 return false;
             }
         }
@@ -330,11 +330,14 @@ impl Camera<PerspectiveProjection> {
     }
 
     pub fn adjust_znear_zfar(&mut self, bbox: &CubeBoundingBox<f32>) {
+        let transform_matrix = self.view;
         let radius = bbox.outer_radius();
-        let d = distance(&bbox.center, &self.position());
+        let center = bbox.center;
 
+        let d = -transform_matrix.transform_point(&center).z;
+
+        let mut znear = d - radius;
         let mut zfar = d + radius;
-        let mut znear = zfar - 2. * radius;
 
         if zfar <= 0. {
             zfar = 100.;

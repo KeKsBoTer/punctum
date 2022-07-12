@@ -1104,6 +1104,10 @@ name = "half"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
+dependencies = [
+ "bytemuck",
+ "num-traits",
+]
 
 [[package]]
 name = "hashbrown"
@@ -1337,6 +1341,12 @@ dependencies = [
  "cfg-if 1.0.0",
  "winapi",
 ]
+
+[[package]]
+name = "libm"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33a33a362ce288760ec6a508b94caaec573ae7d3bbbd91b87aa0bad4456839db"
 
 [[package]]
 name = "libz-sys"
@@ -1755,6 +1765,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a64b1ec5cda2586e284722486d802acf1f7dbdc623e2bfc57e65ca1cd099290"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -2138,10 +2149,10 @@ name = "punctum"
 version = "0.1.0"
 dependencies = [
  "approx",
- "ash",
  "bincode",
  "bytemuck",
  "egui_winit_vulkano",
+ "half",
  "image 0.24.1",
  "las",
  "nalgebra",

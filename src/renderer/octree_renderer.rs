@@ -102,7 +102,7 @@ impl OctreeRenderer {
         }
     }
 
-    pub fn frustum_culling(&self) {
+    pub fn frustum_culling(&self, render_sh: bool) {
         let u = {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.data.clone()
@@ -126,7 +126,9 @@ impl OctreeRenderer {
             .octree
             .visible_octants(&frustum)
             .into_par_iter()
-            .partition(|o| threshold_fn(&o.bbox) && o.octant.sh_approximation.is_some());
+            .partition(|o| {
+                render_sh && o.octant.sh_approximation.is_some() && threshold_fn(&o.bbox)
+            });
 
         if let Some(sh_renderer) = &self.sh_renderer {
             sh_renderer.frustum_culling(&visible_sh);

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use vulkano::{
     device::DeviceOwned,
-    image::{view::ImageView, AttachmentImage, ImageAccess},
+    image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage},
     render_pass::{Framebuffer as VulkanFramebuffer, FramebufferCreateInfo, RenderPass},
 };
 pub struct Framebuffer<I>
@@ -12,6 +12,7 @@ where
     buffer: Arc<vulkano::render_pass::Framebuffer>,
     image: Arc<I>,
     image_view: Arc<ImageView<I>>,
+    depth_buffer: Arc<ImageView<AttachmentImage>>,
 }
 
 impl<I> Framebuffer<I>
@@ -22,10 +23,14 @@ where
         let image_view = ImageView::new_default(image.clone()).unwrap();
 
         let depth_buffer = ImageView::new_default(
-            AttachmentImage::transient(
+            AttachmentImage::with_usage(
                 render_pass.device().clone(),
                 image.dimensions().width_height(),
                 vulkano::format::Format::D16_UNORM,
+                ImageUsage {
+                    transfer_source: true,
+                    ..ImageUsage::none()
+                },
             )
             .unwrap(),
         )
@@ -43,6 +48,7 @@ where
             buffer,
             image,
             image_view,
+            depth_buffer,
         }
     }
 
@@ -53,8 +59,13 @@ where
     pub fn image(&self) -> &Arc<I> {
         &self.image
     }
+
     pub fn image_view(&self) -> &Arc<ImageView<I>> {
         &self.image_view
+    }
+
+    pub fn depth_buffer(&self) -> &Arc<AttachmentImage> {
+        self.depth_buffer.image()
     }
 }
 

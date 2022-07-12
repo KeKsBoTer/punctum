@@ -52,7 +52,7 @@ impl Frame {
     }
 
     pub fn render(
-        &mut self,
+        &self,
         queue: Arc<Queue>,
         cb: Arc<SecondaryAutoCommandBuffer>,
         target_buffer: Option<Arc<CpuAccessibleBuffer<[u8]>>>,
