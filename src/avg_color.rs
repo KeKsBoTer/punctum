@@ -10,7 +10,7 @@ use vulkano::{
     image::{view::ImageView, ImageDimensions, ImageViewAbstract, StorageImage},
     pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
     sampler::Filter,
-    sync::{self, GpuFuture},
+    sync::GpuFuture,
 };
 
 mod cs {
@@ -21,8 +21,6 @@ mod cs {
 }
 
 pub struct ImageAvgColor {
-    device: Arc<Device>,
-    queue: Arc<Queue>,
     command_buffer: Arc<PrimaryAutoCommandBuffer>,
     target_buffer: Arc<CpuAccessibleBuffer<[[f32; 4]]>>,
     img_size: u32,
@@ -163,18 +161,14 @@ impl ImageAvgColor {
         let command_buffer = Arc::new(builder.build().unwrap());
 
         ImageAvgColor {
-            device,
-            queue,
             command_buffer,
             target_buffer,
             img_size: start_size,
         }
     }
 
-    pub fn calc_average_color(&self, cb_before: PrimaryAutoCommandBuffer) -> Rgba<u8> {
-        let future = sync::now(self.device.clone())
-            .then_execute(self.queue.clone(), cb_before)
-            .unwrap()
+    pub fn calc_average_color(&self, before: Box<dyn GpuFuture>) -> Rgba<u8> {
+        let future = before
             .then_execute_same_queue(self.command_buffer.clone())
             .unwrap()
             .then_signal_fence_and_flush()
@@ -212,6 +206,7 @@ mod tests {
         format::Format,
         image::{view::ImageView, ImageDimensions, StorageImage},
         instance::{Instance, InstanceCreateInfo},
+        sync::{self, GpuFuture},
     };
 
     use crate::{select_physical_device, ImageAvgColor};
@@ -286,10 +281,15 @@ mod tests {
 
         let command_buffer = builder.build().unwrap();
 
+        let future = sync::now(device.clone())
+            .then_execute(queue.clone(), command_buffer)
+            .unwrap()
+            .boxed();
+
         let avg_color_calc =
             ImageAvgColor::new(device.clone(), queue.clone(), src_img_view.clone(), 256);
 
-        let result = avg_color_calc.calc_average_color(command_buffer);
+        let result = avg_color_calc.calc_average_color(future);
 
         let src_buffer_content = buffer.read().unwrap();
 

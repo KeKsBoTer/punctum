@@ -15,8 +15,9 @@ use ply_rs::{
 };
 
 use crate::{
+    camera::Projection,
     vertex::{BaseColor, BaseFloat},
-    Octree, PointCloud, TeeReader, TeeWriter, Vertex,
+    Camera, Octree, PointCloud, TeeReader, TeeWriter, Vertex,
 };
 
 pub fn export_ply<F: BaseFloat, C: BaseColor>(output_file: &PathBuf, pc: &PointCloud<F, C>) {
@@ -110,4 +111,26 @@ pub fn save_octree_with_progress_bar<P: AsRef<Path>>(
 
     pb.finish_println("done!");
     Ok(())
+}
+
+pub fn load_cameras<P: AsRef<Path>, C: Projection + Clone>(
+    path: P,
+    proj: C,
+) -> io::Result<Vec<Camera<C>>> {
+    let mut f = std::fs::File::open(path)?;
+
+    // create a parser
+    let p = ply_rs::parser::Parser::<Vertex<f32, f32>>::new();
+
+    // use the parser: read the entire file
+    let in_ply = p.read_ply(&mut f).unwrap();
+
+    Ok(in_ply
+        .payload
+        .get("vertex")
+        .unwrap()
+        .clone()
+        .iter()
+        .map(|c| Camera::on_unit_sphere(c.position.into(), proj.clone()))
+        .collect::<Vec<Camera<C>>>())
 }

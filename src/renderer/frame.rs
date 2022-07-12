@@ -4,8 +4,7 @@ use egui_winit_vulkano::Gui;
 use vulkano::{
     buffer::CpuAccessibleBuffer,
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
-        SecondaryAutoCommandBuffer, SubpassContents,
+        AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
     image::{view::ImageView, ImageDimensions, StorageImage, SwapchainImage},
@@ -44,7 +43,7 @@ impl Frame {
         let fb = Framebuffer::new(image, render_pass);
         Frame {
             buffer: fb,
-            background_color: [0.; 4],
+            background_color: [0., 0., 1., 1.],
         }
     }
 
@@ -57,7 +56,7 @@ impl Frame {
         queue: Arc<Queue>,
         cb: Arc<SecondaryAutoCommandBuffer>,
         target_buffer: Option<Arc<CpuAccessibleBuffer<[u8]>>>,
-    ) -> PrimaryAutoCommandBuffer {
+    ) -> Box<dyn GpuFuture> {
         let fb = &self.buffer;
 
         let device = self.buffer.device();
@@ -84,7 +83,12 @@ impl Frame {
                 .copy_image_to_buffer(fb.image().clone(), buffer.clone())
                 .unwrap();
         }
-        return builder.build().unwrap();
+        let cb = builder.build().unwrap();
+
+        sync::now(device.clone())
+            .then_execute(queue.clone(), cb)
+            .unwrap()
+            .boxed()
     }
 }
 pub struct SurfaceFrame {

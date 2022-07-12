@@ -13,7 +13,8 @@ use ply_rs::{
     writer::Writer,
 };
 use punctum::{
-    OfflineRenderer, OrthographicCamera, PointCloud, PointCloudGPU, RenderSettings, Vertex,
+    load_cameras, OfflineRenderer, OrthographicProjection, PointCloud, PointCloudGPU,
+    RenderSettings, Vertex,
 };
 use rand::{
     distributions::WeightedIndex,
@@ -118,25 +119,6 @@ fn export_ply(
     .unwrap();
 }
 
-fn load_cameras() -> Vec<OrthographicCamera> {
-    let mut f = std::fs::File::open("sphere.ply").unwrap();
-
-    // create a parser
-    let p = ply_rs::parser::Parser::<Vertex<f32, f32>>::new();
-
-    // use the parser: read the entire file
-    let in_ply = p.read_ply(&mut f).unwrap();
-
-    in_ply
-        .payload
-        .get("vertex")
-        .unwrap()
-        .clone()
-        .iter()
-        .map(|c| OrthographicCamera::on_unit_sphere(c.position.into()))
-        .collect::<Vec<OrthographicCamera>>()
-}
-
 fn rand_point(generator: &mut StdRng, dist: &WeightedIndex<f32>) -> Point3<f32> {
     let to_pos = |i: usize| (i as f32 / POSITION_DIST.len() as f32) * 2. - 1.;
     loop {
@@ -161,7 +143,14 @@ fn angle_to_rgba(angle: f32) -> Vector4<f32> {
 fn main() {
     let opt = Opt::from_args();
 
-    let cameras = load_cameras();
+    let cameras = load_cameras(
+        "sphere.ply",
+        OrthographicProjection {
+            width: 2.,
+            height: 2.,
+        },
+    )
+    .unwrap();
 
     let pb = Arc::new(Mutex::new(ProgressBar::new(opt.num_samples as u64)));
     {
@@ -218,7 +207,7 @@ fn main() {
             .iter()
             .zip(cameras.clone())
             .map(|(color, cam)| Vertex {
-                position: *cam.position(),
+                position: cam.position(),
                 color: Vector4::from(color.0).cast() / 255.,
             })
             .collect();
