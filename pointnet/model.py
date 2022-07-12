@@ -7,11 +7,13 @@ from torch import Tensor, nn
 import torch.nn.functional as F
 
 
-def scatter_max(x:torch.Tensor,batch:torch.Tensor)->torch.Tensor:
-    batch_idx = batch.unsqueeze(-1).repeat(1,x.shape[1])
-    target:torch.Tensor = torch.zeros((batch_idx.max()+1,x.shape[1]),device=x.device)
+def scatter_max(x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
+    batch_idx = batch.unsqueeze(-1).repeat(1, x.shape[1])
+    target: torch.Tensor = torch.zeros(
+        (batch_idx.max() + 1, x.shape[1]), device=x.device
+    )
 
-    return target.scatter_reduce(0,batch_idx,x,reduce="amax")
+    return target.scatter_reduce(0, batch_idx, x, reduce="amax")
 
 
 class TNet(nn.Module):
@@ -129,7 +131,6 @@ class FeatureNet(nn.Module):
 
         x = x.squeeze(0).T
         x_max = scatter_max(x, batch)
-        x_max = x[0]
         return x_max
 
 
@@ -197,8 +198,8 @@ class PointNet(nn.Module):
         self.color_channels = color_channels
         self.use_spherical = use_spherical
         self.use_dropout = use_dropout
-        if use_dropout:
-            self.dropout = nn.Dropout(p=0.3)
+        if use_dropout is not None:
+            self.dropout = nn.Dropout(p=use_dropout)
         self.batch_norm = batch_norm
         if batch_norm:
             self.bn1 = nn.BatchNorm1d(s1)
@@ -222,13 +223,13 @@ class PointNet(nn.Module):
         x = self.feat(points, color, batch)
         if self.batch_norm:
             x = F.relu(self.bn1(self.fc1(x)))
-            if self.use_dropout:
+            if self.use_dropout is not None:
                 x = F.relu(self.bn2(self.dropout(self.fc2(x))))
             else:
                 x = F.relu(self.bn2(self.fc2(x)))
         else:
             x = F.relu(self.fc1(x))
-            if self.use_dropout:
+            if self.use_dropout is not None:
                 x = F.relu(self.dropout(self.fc2(x)))
             else:
                 x = F.relu(self.fc2(x))

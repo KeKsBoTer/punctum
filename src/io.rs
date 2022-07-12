@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use bincode::{serialize_into, serialized_size};
 use nalgebra::Vector4;
 use pbr::ProgressBar;
 use ply_rs::{
@@ -15,7 +16,7 @@ use ply_rs::{
 
 use crate::{
     vertex::{BaseColor, BaseFloat},
-    Octree, PointCloud, TeeReader, Vertex,
+    Octree, PointCloud, TeeReader, TeeWriter, Vertex,
 };
 
 pub fn export_ply<F: BaseFloat, C: BaseColor>(output_file: &PathBuf, pc: &PointCloud<F, C>) {
@@ -77,18 +78,36 @@ pub fn load_raw_coefs<P: AsRef<Path>>(path: P) -> io::Result<HashMap<u64, Vec<Ve
     Ok(coefs)
 }
 
-pub fn load_octree_with_progress_bar(path: &PathBuf) -> io::Result<Octree<f64, u8>> {
-    let in_file = File::open(path)?;
+pub fn load_octree_with_progress_bar<P: AsRef<Path>>(path: P) -> io::Result<Octree<f64, u8>> {
+    let p = path.as_ref();
+    let filename = p.to_str().unwrap();
+    let in_file = File::open(p)?;
 
     let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
 
     let mut buf = BufReader::new(in_file);
 
-    pb.message(&format!("decoding {}: ", path.to_str().unwrap()));
+    pb.message(&format!("decoding {}: ", filename));
 
     pb.set_units(pbr::Units::Bytes);
     let mut tee = TeeReader::new(&mut buf, &mut pb);
 
     let octree: Octree<f64, u8> = bincode::deserialize_from(&mut tee).unwrap();
     return Ok(octree);
+}
+
+pub fn save_octree_with_progress_bar<P: AsRef<Path>>(
+    path: P,
+    octree: &Octree<f64, u8>,
+) -> io::Result<()> {
+    let mut pb = ProgressBar::new(serialized_size(&octree).unwrap());
+    pb.set_units(pbr::Units::Bytes);
+
+    let out_file = File::create(path)?;
+    let mut out_writer = BufWriter::new(&out_file);
+    let mut tee = TeeWriter::new(&mut out_writer, &mut pb);
+    serialize_into(&mut tee, octree).unwrap();
+
+    pb.finish_println("done!");
+    Ok(())
 }

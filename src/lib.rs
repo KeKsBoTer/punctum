@@ -28,7 +28,9 @@ mod vertex;
 
 pub use avg_color::ImageAvgColor;
 pub use camera::{Camera, CameraController, OrthographicCamera, PerspectiveCamera};
-pub use io::{export_ply, load_octree_with_progress_bar, load_raw_coefs};
+pub use io::{
+    export_ply, load_octree_with_progress_bar, load_raw_coefs, save_octree_with_progress_bar,
+};
 pub use octree::{Node, Octree};
 pub use pointcloud::{CubeBoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{OctreeRenderer, PointCloudRenderer, SurfaceFrame, Viewport};

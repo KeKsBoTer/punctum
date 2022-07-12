@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from pointnet.dataset import OctantDataset, lm2flat_index
 from pointnet.sh import calc_sh, to_spherical
-from pointnet.pointclouds import Pointclouds,collate_batched
+from pointnet.pointclouds import Pointclouds, collate_batched
 
 from pointnet.model import PointNet
 
@@ -24,7 +24,7 @@ torch.backends.cudnn.benchmark = True
 
 def collate_batched_point_clouds(batch: List[Tuple[Pointclouds, torch.Tensor]]):
     coefs = torch.stack([x[1] for x in batch])
-    pcs = collate_batched([pc for pc,_ in batch])
+    pcs = collate_batched([pc for pc, _ in batch])
     return (pcs, coefs)
 
 
@@ -240,6 +240,10 @@ if __name__ == "__main__":
         "--epochs", type=int, default=100, help="number of training epochs",
     )
 
+    parser.add_argument(
+        "--checkpoint", type=str, default=None, help="checkpoint to load",
+    )
+
     args = parser.parse_args()
 
     batch_size = args.batch_size
@@ -253,7 +257,7 @@ if __name__ == "__main__":
     logger.info(f"loading dataset {ds_path}")
 
     selected_indices = torch.load(
-       "datasets/neuschwanstein/octants_1024max_var_sorted.pt"
+        "datasets/neuschwanstein/octants_1024max_var_sorted.pt"
     )[:100000]
 
     ds = OctantDataset(ds_path, preload=True, selected_samples=selected_indices)
@@ -271,7 +275,8 @@ if __name__ == "__main__":
         l_max, 4, batch_norm=True, use_dropout=0.05, use_spherical=False
     ).cuda()
 
-    # model = torch.load(f"logs/l_max=10 1024 complete/model.pt").cuda()
+    if args.checkpoint is not None:
+        model.load_state_dict(torch.load(args.checkpoint))
 
     coefs = torch.stack(
         [
@@ -414,6 +419,8 @@ if __name__ == "__main__":
                     writer_val.add_figure("coefficients/error_relative", fig3, step)
 
             step += 1
+        if epoch != 0 and epoch % 500 == 0:
+            torch.save(model.state_dict(), f"logs/{experiment_name}/model_{epoch}.pt")
 
     writer_train.close()
     writer_val.close()

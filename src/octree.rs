@@ -97,7 +97,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         id: u64,
         level: u32,
         max_node_size: usize,
-    ) -> usize {
+    ) -> u64 {
         let mut node = self;
         let mut bbox = bbox;
         let mut octants_created = 0;
@@ -220,7 +220,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
         };
     }
 
-    fn filled_octants(octants: &Box<[Node<F, C>; 8]>) -> usize {
+    fn filled_octants(octants: &Box<[Node<F, C>; 8]>) -> u64 {
         octants
             .iter()
             .map(|c| if let Node::Filled(_) = c { 1 } else { 0 })
@@ -236,6 +236,7 @@ pub struct Octree<F: BaseFloat, C: BaseColor> {
 
     depth: usize,
     num_points: u64,
+    num_octants: u64,
 }
 
 impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
@@ -246,34 +247,37 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
             bbox: CubeBoundingBox::new(center, size),
             depth: 0,
             num_points: 0,
+            num_octants: 0,
         }
     }
 
-    pub fn insert(&mut self, point: Vertex<F, C>) -> usize {
+    pub fn insert(&mut self, point: Vertex<F, C>) {
         self.num_points += 1;
         match &mut self.root {
             Node::Group(_) => {
-                return self.root.insert(point, self.bbox, 0, 0, self.max_node_size);
+                self.num_octants += self.root.insert(point, self.bbox, 0, 0, self.max_node_size);
             }
             Node::Filled(octant) => {
                 if octant.data.len() >= self.max_node_size {
                     let group = octant.split(&self.bbox, 0, self.max_node_size);
-                    let mut new_octants = Node::filled_octants(&group) - 1;
+                    self.num_octants += Node::filled_octants(&group) - 1;
                     self.root = Node::Group(group);
 
-                    new_octants += self.root.insert(point, self.bbox, 0, 0, self.max_node_size);
+                    self.num_octants +=
+                        self.root.insert(point, self.bbox, 0, 0, self.max_node_size);
 
-                    return new_octants;
+                    return;
                 } else {
                     octant.data.push(point);
-                    return 0;
+                    return;
                 }
             }
             Node::Empty => {
                 let mut new_vec = Vec::with_capacity(self.max_node_size);
                 new_vec.push(point);
                 self.root = Node::Filled(Octant::new(0, new_vec, None));
-                return 1;
+                self.num_octants = 1;
+                return;
             }
         }
     }
@@ -295,7 +299,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
     }
 
     pub fn num_octants(&self) -> u64 {
-        return self.into_iter().count() as u64;
+        self.num_octants
     }
 
     pub fn flat_points(&self) -> Vec<Vertex<F, C>> {
@@ -399,6 +403,7 @@ impl Into<Octree<f32, f32>> for Octree<f64, u8> {
             max_node_size: self.max_node_size,
             depth: self.depth,
             num_points: self.num_points,
+            num_octants: self.num_octants,
         }
     }
 }
