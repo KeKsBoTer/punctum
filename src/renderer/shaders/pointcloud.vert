@@ -38,7 +38,8 @@ out gl_PerVertex
 
 
 layout(location = 0) out vec4 vertex_color;
-layout(location = 1) out float pointSize;
+layout(location = 1) out vec4 vertex_pos;
+layout(location = 2) out float pointSize;
 
 void main() {
 
@@ -55,4 +56,5 @@ void main() {
     vertex_color = color;//vertices.v[gl_VertexIndex].color;
 
     pointSize = gl_PointSize;
+    vertex_pos = gl_Position;
 }

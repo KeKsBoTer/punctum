@@ -38,7 +38,8 @@ out gl_PerVertex
 };
 
 layout(location = 0) out vec4 vertex_color;
-layout(location = 1) out float pointSize;
+layout(location = 1) out vec4 vertex_pos;
+layout(location = 2) out float pointSize;
 
 vec4 sh_color(vec2 angle){
 
@@ -67,6 +68,7 @@ void main() {
     
     gl_PointSize = uniforms.point_size;
     pointSize = gl_PointSize;
+    vertex_pos = gl_Position;
 
     if(uniforms.highlight_sh){
         vertex_color = vec4(1.,0.,0.,1.);
