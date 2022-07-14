@@ -90,27 +90,27 @@ fn render_from_viewpoints(
         )
         .unwrap();
 
-        let depth_img = StorageImage::new(
-            device.clone(),
-            ImageDimensions::Dim2d {
-                width: render_size[0],
-                height: render_size[1],
-                array_layers: 1,
-            },
-            Format::R16_SFLOAT,
-            [queue.family()],
-        )
-        .unwrap();
+        // let depth_img = StorageImage::new(
+        //     device.clone(),
+        //     ImageDimensions::Dim2d {
+        //         width: render_size[0],
+        //         height: render_size[1],
+        //         array_layers: 1,
+        //     },
+        //     Format::D32_SFLOAT,
+        //     [queue.family()],
+        // )
+        // .unwrap();
 
-        let depth_buffer: Arc<CpuAccessibleBuffer<[f16]>> = unsafe {
-            CpuAccessibleBuffer::uninitialized_array(
-                device.clone(),
-                (target_img_size[0] * target_img_size[1]) as u64 * 2,
-                BufferUsage::transfer_destination(),
-                false,
-            )
-            .unwrap()
-        };
+        // let depth_buffer: Arc<CpuAccessibleBuffer<[f16]>> = unsafe {
+        //     CpuAccessibleBuffer::uninitialized_array(
+        //         device.clone(),
+        //         (target_img_size[0] * target_img_size[1]) as u64 * 4,
+        //         BufferUsage::transfer_destination(),
+        //         false,
+        //     )
+        //     .unwrap()
+        // };
 
         let mut images = Vec::with_capacity(cameras.len());
 
@@ -155,22 +155,9 @@ fn render_from_viewpoints(
                 .copy_image_to_buffer(target_image.clone(), target_buffer.clone())
                 .unwrap();
 
-            builder
-                .blit_image(
-                    frame.buffer.depth_buffer().clone(),
-                    [0, 0, 0],
-                    [render_size[0] as i32, render_size[1] as i32, 1],
-                    0,
-                    0,
-                    depth_img.clone(),
-                    [0, 0, 0],
-                    [render_size[0] as i32, render_size[1] as i32, 1],
-                    0,
-                    0,
-                    1,
-                    vulkano::sampler::Filter::Nearest,
-                )
-                .unwrap();
+            // builder
+            //     .copy_image_to_buffer(frame.buffer.depth_buffer().clone(), depth_buffer.clone())
+            //     .unwrap();
 
             let cb = builder.build().unwrap();
 
@@ -193,18 +180,18 @@ fn render_from_viewpoints(
             .unwrap();
             images.push((format!("renders/{}_{}.png", name, i), image));
 
-            let buffer_content = depth_buffer.read().unwrap();
-            let buf: Vec<u8> = buffer_content[..]
-                .iter()
-                .flat_map(|v| {
-                    let a = (v.to_f32() * 255.) as u8;
-                    vec![a, a, a, a]
-                })
-                .collect();
-            let image =
-                ImageBuffer::<Rgba<u8>, _>::from_vec(target_img_size[0], target_img_size[1], buf)
-                    .unwrap();
-            images.push((format!("renders/{}_{}_d.png", name, i), image));
+            // let buffer_content = depth_buffer.read().unwrap();
+            // let buf: Vec<u8> = buffer_content[..]
+            //     .iter()
+            //     .flat_map(|v| {
+            //         let a = (v.to_f32() * 255.) as u8;
+            //         vec![a, a, a, a]
+            //     })
+            //     .collect();
+            // let image =
+            //     ImageBuffer::<Rgba<u8>, _>::from_vec(target_img_size[0], target_img_size[1], buf)
+            //         .unwrap();
+            // images.push((format!("renders/{}_{}_d.png", name, i), image));
         }
         // do image saving in parallel
         images

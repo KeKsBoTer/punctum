@@ -4,7 +4,6 @@ use bytemuck::{Pod, Zeroable};
 use nalgebra::{Point3, RealField, Scalar, Vector4};
 use num_traits::{ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
-use vulkano::pipeline::graphics::vertex_input::{VertexMember, VertexMemberTy};
 
 use crate::ply::{Color, PlyType};
 use serde_big_array::BigArray;
@@ -74,20 +73,6 @@ impl From<Vertex<f32, f32>> for Vertex<f32, u8> {
 pub struct SHCoefficients<const T: usize>(#[serde(with = "BigArray")] [Vector4<f32>; T]);
 
 unsafe impl Pod for SHCoefficients<121> {}
-
-impl<const T: usize> Into<SHCoefficients<T>> for [Vector4<f32>; T] {
-    fn into(self) -> SHCoefficients<T> {
-        SHCoefficients(self)
-    }
-}
-
-unsafe impl<const T: usize> VertexMember for SHCoefficients<T> {
-    #[inline]
-    fn format() -> (VertexMemberTy, usize) {
-        let (ty, sz) = Vector4::<f32>::format();
-        (ty, sz * T)
-    }
-}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Zeroable)]
 #[repr(C)]

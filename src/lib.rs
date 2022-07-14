@@ -87,7 +87,7 @@ pub fn get_render_pass(
             depth: {
                 load: Clear,
                 store: DontCare,
-                format: vulkano::format::Format::D16_UNORM,
+                format: vulkano::format::Format::D32_SFLOAT,
                 samples: 1,
             }
         },

@@ -26,7 +26,7 @@ where
             AttachmentImage::with_usage(
                 render_pass.device().clone(),
                 image.dimensions().width_height(),
-                vulkano::format::Format::D16_UNORM,
+                vulkano::format::Format::D32_SFLOAT,
                 ImageUsage {
                     transfer_source: true,
                     ..ImageUsage::none()

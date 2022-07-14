@@ -10,7 +10,7 @@ vulkano = { version = "0.29.0", features = ["nalgebra"] }
 vulkano-shaders = { version = "0.29.0", features = ["shaderc-debug"] }
 vulkano-win = "0.29.0"
 winit = "0.26"
-half = { version = "1.8", features = ["bytemuck", "num-traits"] }
+half = { version = "1.8.2", features = ["bytemuck", "num-traits"] }
 
 nalgebra = { version = "0.30.1", features = ["serde-serialize", "bytemuck"] }
 bytemuck = { version = "1.5.1", features = ["derive"] }
@@ -31,7 +31,7 @@ structopt = "0.3"
 
 egui_winit_vulkano = "0.17.0"
 
-tch = "0.7.2"
+tch = "0.8.0"
 
 [profile.release]
 debug = 1
