@@ -36,9 +36,9 @@ struct Opt {
 
 struct GuiState {
     highlight_shs: bool,
-    render_octants: bool,
-    render_shs: bool,
-    frustum_culling: bool,
+    render_mode: CullingMode,
+    frustum_culling: Option<CullingMode>,
+    debug: bool,
 
     point_size: u32,
 }
@@ -47,10 +47,10 @@ impl GuiState {
     fn new(_gui: &mut Gui) -> Self {
         GuiState {
             highlight_shs: false,
-            render_octants: true,
-            render_shs: true,
-            frustum_culling: true,
+            render_mode: CullingMode::Mixed,
+            frustum_culling: Some(CullingMode::Mixed),
             point_size: 1,
+            debug: false,
         }
     }
 
@@ -67,11 +67,47 @@ impl GuiState {
             .resizable(false)
             .collapsible(true)
             .show(&egui_context, |ui| {
-                ui.checkbox(&mut self.highlight_shs, "Highlight SH Pixels");
-                ui.checkbox(&mut self.render_octants, "Render Octants");
-                ui.checkbox(&mut self.render_shs, "Render SH Points");
-                ui.checkbox(&mut self.frustum_culling, "Frustum Culling");
-                ui.add(egui::Slider::new(&mut self.point_size, 1..=20).text("Point Size"));
+                CollapsingHeader::new("Rendering")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.checkbox(&mut self.highlight_shs, "Highlight SH Pixels");
+                        ui.checkbox(&mut self.debug, "Debug");
+
+                        ui.horizontal(|ui| {
+                            ui.label("Mode:");
+                            ui.selectable_value(&mut self.render_mode, CullingMode::Mixed, "Mixed");
+                            ui.selectable_value(&mut self.render_mode, CullingMode::SHOnly, "SHs");
+                            ui.selectable_value(
+                                &mut self.render_mode,
+                                CullingMode::OctantsOnly,
+                                "Octants",
+                            );
+                        });
+                        ui.add(egui::Slider::new(&mut self.point_size, 1..=20).text("Point Size"));
+                    });
+                CollapsingHeader::new("Culling")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Mode:");
+                            ui.selectable_value(&mut self.frustum_culling, None, "Off");
+                            ui.selectable_value(
+                                &mut self.frustum_culling,
+                                Some(CullingMode::Mixed),
+                                "Mixed",
+                            );
+                            ui.selectable_value(
+                                &mut self.frustum_culling,
+                                Some(CullingMode::SHOnly),
+                                "SHs",
+                            );
+                            ui.selectable_value(
+                                &mut self.frustum_culling,
+                                Some(CullingMode::OctantsOnly),
+                                "Octants",
+                            );
+                        });
+                    });
             });
 
         egui::Window::new("Camera")
@@ -255,8 +291,8 @@ fn main() {
             let state = gui_state_clone.lock().unwrap();
             state.frustum_culling
         };
-        if frustum_culling {
-            renderer_clone.frustum_culling(CullingMode::Mixed);
+        if let Some(culling_mode) = frustum_culling {
+            renderer_clone.frustum_culling(culling_mode);
         }
         match rx.try_recv() {
             Ok(_) | Err(TryRecvError::Disconnected) => {
@@ -350,15 +386,14 @@ fn main() {
                 let ctx = gui.context();
                 state.layout(ctx, surface.window(), fps, &camera, &mut camera_controller);
             });
-            let render_octants = state.render_octants;
-            let render_shs = state.render_shs;
             renderer.set_point_size(state.point_size);
             renderer.set_highlight_sh(state.highlight_shs);
-            drop(state);
 
             renderer.set_camera(&camera);
             renderer.update_uniforms();
-            let pc_cb = renderer.render(render_octants, render_shs);
+            let pc_cb = renderer.render(state.render_mode, state.debug);
+            drop(state);
+
             frame.render(queue.clone(), pc_cb.clone(), &mut gui);
         }
         Event::LoopDestroyed => {

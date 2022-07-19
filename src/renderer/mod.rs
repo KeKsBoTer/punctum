@@ -1,3 +1,4 @@
+mod debug;
 mod frame;
 mod octree_renderer;
 mod pc_renderer;

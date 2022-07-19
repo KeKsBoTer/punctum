@@ -66,8 +66,7 @@ fn normalize_point<F: BaseFloat, C: BaseColor>(
     scale_factor: F,
 ) -> impl Fn(Vertex<F, C>) -> Vertex<F, C> {
     return move |v: Vertex<F, C>| Vertex {
-        position: (&v.position - &bbox.center.coords) * scale_factor
-            / (F::from_subset(&0.5) * bbox.size),
+        position: (&v.position - &bbox.center.coords) * scale_factor / bbox.size,
         color: v.color,
     };
 }
@@ -93,7 +92,7 @@ fn from_laz(
     let min_point = Point3::new(bounds.min.x, bounds.min.y, bounds.min.z);
     let max_point = Point3::new(bounds.max.x, bounds.max.y, bounds.max.z);
     let bb_size = max_point - min_point;
-    let max_size = bb_size[bb_size.imax()];
+    let max_size = bb_size.amax();
     let center = center(&min_point, &max_point);
 
     let bbox = CubeBoundingBox::new(center, max_size);
@@ -210,6 +209,17 @@ fn main() {
     let in_order = ids.iter().zip(ids.iter().skip(1)).find(|(a, b)| **a == **b);
     if let Some(duplicate) = in_order {
         panic!("duplicate id {:}!", duplicate.0);
+    }
+
+    for octant in octree.into_octant_iterator() {
+        for p in octant.octant.points() {
+            if !octant.bbox.contains(&p.position) {
+                panic!(
+                    "point {:?} not contained by its bounding box {:?}!",
+                    p, octant.bbox
+                );
+            }
+        }
     }
 
     println!(

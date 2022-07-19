@@ -1,6 +1,6 @@
 use std::{mem, sync::Arc};
 
-use nalgebra::{center, distance_squared, Matrix4, Point3, RealField, Vector3};
+use nalgebra::{center, convert, distance_squared, Matrix4, Point3, RealField, Vector3};
 use serde::{Deserialize, Serialize};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
@@ -147,7 +147,7 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
         Self { center, size }
     }
 
-    pub fn contains(&self, p: Point3<F>) -> bool {
+    pub fn contains(&self, p: &Point3<F>) -> bool {
         let half = F::from_subset(&0.5);
         let half_size = Vector3::new(self.size, self.size, self.size) * half;
         let min = self.center - half_size;
@@ -188,7 +188,7 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
     }
 
     pub fn corners(&self) -> [Point3<F>; 8] {
-        let size = self.size * F::from_subset(&0.5);
+        let size = self.size * convert(0.5);
         [
             self.center - Vector3::new(-size, -size, -size),
             self.center - Vector3::new(size, -size, -size),

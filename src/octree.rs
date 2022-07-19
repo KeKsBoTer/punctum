@@ -188,8 +188,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
             convert::<_, F>(y as f64 - 0.5),
             convert::<_, F>(z as f64 - 0.5),
         );
-        let sqrt3: F = convert::<_, F>(3.).sqrt();
-        let new_center: Point3<F> = bbox.center + offset * new_size * sqrt3;
+        let new_center: Point3<F> = bbox.center + offset * new_size;
         return (
             octant_i,
             CubeBoundingBox {
@@ -201,7 +200,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
 
     /// calculates the center and size of the i-th octant
     /// based on the current center and size of an octant
-    fn octant_box(i: usize, bbox: &CubeBoundingBox<F>) -> CubeBoundingBox<F> {
+    pub fn octant_box(i: usize, bbox: &CubeBoundingBox<F>) -> CubeBoundingBox<F> {
         let z = i / 4;
         let y = (i - 4 * z) / 2;
         let x = i % 2;
@@ -212,8 +211,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
             convert::<_, F>(y as f64 - 0.5),
             convert::<_, F>(z as f64 - 0.5),
         );
-        let sqrt3: F = convert::<_, F>(3.).sqrt();
-        let new_center: Point3<F> = bbox.center + offset * new_size * sqrt3;
+        let new_center: Point3<F> = bbox.center + offset * new_size;
         return CubeBoundingBox {
             center: new_center,
             size: new_size,

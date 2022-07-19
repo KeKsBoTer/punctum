@@ -34,7 +34,7 @@ use vulkano::{
     sync::{self, GpuFuture},
 };
 
-use super::UniformBuffer;
+use super::{debug::OctreeDebugRenderer, UniformBuffer};
 
 pub struct OctreeRenderer {
     device: Arc<Device>,
@@ -48,10 +48,11 @@ pub struct OctreeRenderer {
     subpass: Subpass,
     octant_renderer: OctantRenderer,
     sh_renderer: Option<SHRenderer>,
+    debug_renderer: OctreeDebugRenderer,
     screen_height: RwLock<u32>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CullingMode {
     Mixed,
     SHOnly,
@@ -93,8 +94,19 @@ impl OctreeRenderer {
         } else {
             None
         };
-        let octant_renderer =
-            OctantRenderer::new(device.clone(), subpass.clone(), viewport, octree.clone());
+        let octant_renderer = OctantRenderer::new(
+            device.clone(),
+            subpass.clone(),
+            viewport.clone(),
+            octree.clone(),
+        );
+
+        let debug_renderer = OctreeDebugRenderer::new(
+            device.clone(),
+            subpass.clone(),
+            viewport.clone(),
+            octree.clone(),
+        );
 
         Self {
             device,
@@ -105,6 +117,7 @@ impl OctreeRenderer {
             subpass,
             sh_renderer,
             octant_renderer,
+            debug_renderer,
             screen_height: RwLock::new(viewport_height),
         }
     }
@@ -150,17 +163,14 @@ impl OctreeRenderer {
         if let Some(sh_renderer) = &self.sh_renderer {
             sh_renderer.set_viewport(viewport.clone());
         }
-        self.octant_renderer.set_viewport(viewport);
+        self.octant_renderer.set_viewport(viewport.clone());
+        self.debug_renderer.set_viewport(viewport.clone());
 
         let mut screen_height = self.screen_height.write().unwrap();
         *screen_height = viewport_height;
     }
 
-    pub fn render(
-        &self,
-        render_octants: bool,
-        render_shs: bool,
-    ) -> Arc<SecondaryAutoCommandBuffer> {
+    pub fn render(&self, render_mode: CullingMode, debug: bool) -> Arc<SecondaryAutoCommandBuffer> {
         let uniform_buffer = {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.buffer().clone()
@@ -174,16 +184,29 @@ impl OctreeRenderer {
         )
         .unwrap();
 
-        if render_shs {
-            if let Some(sh_renderer) = &self.sh_renderer {
-                sh_renderer.render(uniform_buffer.clone(), &mut builder);
+        match render_mode {
+            CullingMode::Mixed => {
+                if let Some(sh_renderer) = &self.sh_renderer {
+                    sh_renderer.render(uniform_buffer.clone(), &mut builder);
+                }
+                self.octant_renderer
+                    .render(uniform_buffer.clone(), &mut builder);
+            }
+            CullingMode::SHOnly => {
+                if let Some(sh_renderer) = &self.sh_renderer {
+                    sh_renderer.render(uniform_buffer.clone(), &mut builder);
+                }
+            }
+            CullingMode::OctantsOnly => {
+                self.octant_renderer
+                    .render(uniform_buffer.clone(), &mut builder);
             }
         }
-        if render_octants {
-            self.octant_renderer
+
+        if debug {
+            self.debug_renderer
                 .render(uniform_buffer.clone(), &mut builder);
         }
-
         Arc::new(builder.build().unwrap())
     }
 
