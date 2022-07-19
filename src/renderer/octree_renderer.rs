@@ -51,6 +51,13 @@ pub struct OctreeRenderer {
     screen_height: RwLock<u32>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum CullingMode {
+    Mixed,
+    SHOnly,
+    OctantsOnly,
+}
+
 impl OctreeRenderer {
     pub fn new(
         device: Arc<Device>,
@@ -102,7 +109,7 @@ impl OctreeRenderer {
         }
     }
 
-    pub fn frustum_culling(&self, render_sh: bool) {
+    pub fn frustum_culling(&self, mode: CullingMode) {
         let u = {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.data.clone()
@@ -126,8 +133,10 @@ impl OctreeRenderer {
             .octree
             .visible_octants(&frustum)
             .into_par_iter()
-            .partition(|o| {
-                render_sh && o.octant.sh_approximation.is_some() && threshold_fn(&o.bbox)
+            .partition(|o| match mode {
+                CullingMode::Mixed => o.octant.sh_approximation.is_some() && threshold_fn(&o.bbox),
+                CullingMode::SHOnly => true,
+                CullingMode::OctantsOnly => false,
             });
 
         if let Some(sh_renderer) = &self.sh_renderer {

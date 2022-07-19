@@ -1,4 +1,6 @@
 use image::{ImageBuffer, Rgba};
+use nalgebra::Point3;
+use pbr::{MultiBar, Pipe, ProgressBar};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::f32::consts::PI;
 use std::path::PathBuf;
@@ -8,13 +10,12 @@ use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
 use vulkano::device::{Features, Queue};
 use vulkano::format::Format;
-use vulkano::half::f16;
 use vulkano::image::{ImageDimensions, StorageImage};
 use vulkano::sync::{self, GpuFuture};
 
 use punctum::{
-    get_render_pass, load_cameras, load_octree_with_progress_bar, select_physical_device, Frame,
-    Octree, OctreeRenderer, PerspectiveCamera, PerspectiveProjection, Viewport,
+    get_render_pass, load_cameras, load_octree_with_progress_bar, select_physical_device,
+    CullingMode, Frame, Octree, OctreeRenderer, PerspectiveCamera, PerspectiveProjection, Viewport,
 };
 use structopt::StructOpt;
 use vulkano::device::DeviceExtensions;
@@ -28,32 +29,44 @@ struct Opt {
     #[structopt(name = "input_octree", parse(from_os_str))]
     input: PathBuf,
 
+    #[structopt(name = "output_folder", parse(from_os_str))]
+    output_folder: PathBuf,
+
     #[structopt(long, default_value = "256")]
     img_size: u32,
+
+    #[structopt(long)]
+    parallel: bool,
 }
 
 fn render_from_viewpoints(
     name: String,
+    output_folder: PathBuf,
     device: Arc<Device>,
     queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     image_format: Format,
     render_size: [u32; 2],
     target_img_size: [u32; 2],
-    render_sh: bool,
+    culling_mode: CullingMode,
     highlight_sh: bool,
     octree: Arc<Octree<f32, f32>>,
     cameras: Vec<PerspectiveCamera>,
-) -> JoinHandle<()> {
-    thread::spawn(move || {
+    mut pbr: ProgressBar<Pipe>,
+    parallel: bool,
+) -> Option<JoinHandle<()>> {
+    let mut f = move || {
+        pbr.message(name.as_str());
+
         let viewport = Viewport::new(render_size);
 
-        let frame = Frame::new(
+        let mut frame = Frame::new(
             device.clone(),
             render_pass.clone(),
             image_format,
             render_size,
         );
+        frame.set_background([0., 0., 0., 0.]);
 
         let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
@@ -90,40 +103,19 @@ fn render_from_viewpoints(
         )
         .unwrap();
 
-        // let depth_img = StorageImage::new(
-        //     device.clone(),
-        //     ImageDimensions::Dim2d {
-        //         width: render_size[0],
-        //         height: render_size[1],
-        //         array_layers: 1,
-        //     },
-        //     Format::D32_SFLOAT,
-        //     [queue.family()],
-        // )
-        // .unwrap();
-
-        // let depth_buffer: Arc<CpuAccessibleBuffer<[f16]>> = unsafe {
-        //     CpuAccessibleBuffer::uninitialized_array(
-        //         device.clone(),
-        //         (target_img_size[0] * target_img_size[1]) as u64 * 4,
-        //         BufferUsage::transfer_destination(),
-        //         false,
-        //     )
-        //     .unwrap()
-        // };
-
         let mut images = Vec::with_capacity(cameras.len());
 
         renderer.set_highlight_sh(highlight_sh);
 
         for (i, camera) in cameras.iter().enumerate() {
             let mut camera = camera.clone();
-            camera.translate(camera.position().coords * 100. * 3f32.sqrt());
+            let c_pos = camera.view().transform_point(&Point3::origin());
+            camera.translate(c_pos.coords * 100. * 3f32.sqrt());
             camera.adjust_znear_zfar(octree.bbox());
 
             renderer.set_camera(&camera);
             renderer.update_uniforms();
-            renderer.frustum_culling(render_sh);
+            renderer.frustum_culling(culling_mode);
             let pc_cb = renderer.render(true, true);
 
             let future = frame.render(queue.clone(), pc_cb.clone(), None);
@@ -155,10 +147,6 @@ fn render_from_viewpoints(
                 .copy_image_to_buffer(target_image.clone(), target_buffer.clone())
                 .unwrap();
 
-            // builder
-            //     .copy_image_to_buffer(frame.buffer.depth_buffer().clone(), depth_buffer.clone())
-            //     .unwrap();
-
             let cb = builder.build().unwrap();
 
             sync::now(device.clone())
@@ -178,27 +166,24 @@ fn render_from_viewpoints(
                 buf.to_vec(),
             )
             .unwrap();
-            images.push((format!("renders/{}_{}.png", name, i), image));
+            images.push((output_folder.join(format!("{}_{}.png", name, i)), image));
 
-            // let buffer_content = depth_buffer.read().unwrap();
-            // let buf: Vec<u8> = buffer_content[..]
-            //     .iter()
-            //     .flat_map(|v| {
-            //         let a = (v.to_f32() * 255.) as u8;
-            //         vec![a, a, a, a]
-            //     })
-            //     .collect();
-            // let image =
-            //     ImageBuffer::<Rgba<u8>, _>::from_vec(target_img_size[0], target_img_size[1], buf)
-            //         .unwrap();
-            // images.push((format!("renders/{}_{}_d.png", name, i), image));
+            pbr.inc();
         }
         // do image saving in parallel
         images
             .par_iter()
             .map(|(filename, image)| image.save(filename).unwrap())
             .count();
-    })
+        pbr.finish()
+    };
+
+    if parallel {
+        Some(thread::spawn(f))
+    } else {
+        f();
+        None
+    }
 }
 
 fn main() {
@@ -252,61 +237,117 @@ fn main() {
     )
     .unwrap();
 
+    if !opt.output_folder.exists() {
+        std::fs::create_dir(opt.output_folder.clone()).unwrap();
+    }
+
+    let mb = MultiBar::new();
+    mb.println("Rendering:");
+
+    let p_render_sh = mb.create_bar(cameras.len() as u64);
+    let p_sh_only = mb.create_bar(cameras.len() as u64);
+    let p_render_no_sh = mb.create_bar(cameras.len() as u64);
+    let p_sh_mask = mb.create_bar(cameras.len() as u64);
+    let p_multi_sampling = mb.create_bar(cameras.len() as u64);
+
+    let pb_thread = thread::spawn(move || mb.listen());
+
     let render_sh = render_from_viewpoints(
         "render_sh".to_string(),
+        opt.output_folder.clone(),
         device.clone(),
         queue.clone(),
         render_pass.clone(),
         image_format,
         image_size,
         image_size,
-        true,
+        CullingMode::Mixed,
         false,
         octree.clone(),
         cameras.clone(),
+        p_render_sh,
+        opt.parallel,
+    );
+    let sh_only = render_from_viewpoints(
+        "sh_only".to_string(),
+        opt.output_folder.clone(),
+        device.clone(),
+        queue.clone(),
+        render_pass.clone(),
+        image_format,
+        image_size,
+        image_size,
+        CullingMode::SHOnly,
+        false,
+        octree.clone(),
+        cameras.clone(),
+        p_sh_only,
+        opt.parallel,
     );
     let render_no_sh = render_from_viewpoints(
         "render_no_sh".to_string(),
+        opt.output_folder.clone(),
         device.clone(),
         queue.clone(),
         render_pass.clone(),
         image_format,
         image_size,
         image_size,
-        false,
+        CullingMode::OctantsOnly,
         false,
         octree.clone(),
         cameras.clone(),
+        p_render_no_sh,
+        opt.parallel,
     );
     let sh_mask = render_from_viewpoints(
         "sh_mask".to_string(),
+        opt.output_folder.clone(),
         device.clone(),
         queue.clone(),
         render_pass.clone(),
         image_format,
         image_size,
         image_size,
-        true,
+        CullingMode::Mixed,
         true,
         octree.clone(),
         cameras.clone(),
+        p_sh_mask,
+        opt.parallel,
     );
+
     let multi_sampling = render_from_viewpoints(
         "multisampled".to_string(),
+        opt.output_folder.clone(),
         device.clone(),
         queue.clone(),
         render_pass.clone(),
         image_format,
         [image_size[0] * 4, image_size[1] * 4],
         image_size,
-        false,
+        CullingMode::Mixed,
         false,
         octree.clone(),
         cameras.clone(),
+        p_multi_sampling,
+        opt.parallel,
     );
 
-    render_sh.join().unwrap();
-    render_no_sh.join().unwrap();
-    sh_mask.join().unwrap();
-    multi_sampling.join().unwrap();
+    if let Some(t) = render_sh {
+        t.join().unwrap();
+    }
+    if let Some(t) = sh_only {
+        t.join().unwrap();
+    }
+    if let Some(t) = render_no_sh {
+        t.join().unwrap();
+    }
+    if let Some(t) = sh_mask {
+        t.join().unwrap();
+    }
+    if let Some(t) = multi_sampling {
+        t.join().unwrap();
+    }
+    pb_thread.join().unwrap();
 }

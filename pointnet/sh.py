@@ -163,7 +163,9 @@ def to_spherical(coords: torch.Tensor) -> torch.Tensor:
     Args:
         cords: [N,3] cartesian coordinates
     """
-    assert (coords.norm(p=2, dim=1) - 1 < 1e-8).all(), "must be of length 1"
+    assert (
+        coords.norm(p=2, dim=1) - 1 < 1e-8
+    ).all(), f"must be of length 1 but got ({coords.norm(p=2, dim=1) -1})"
 
     spherical = torch.empty((coords.shape[0], 2), device=coords.device)
 

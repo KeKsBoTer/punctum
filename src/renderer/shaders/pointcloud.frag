@@ -14,6 +14,5 @@ void main() {
             discard;
         }
     }
-    // f_color = vertex_color;
-    f_color = vec4(vec3(vertex_pos.z/vertex_pos.w),1.);
+    f_color = vertex_color;
 }

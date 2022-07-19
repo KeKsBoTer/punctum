@@ -24,7 +24,7 @@ use winit::event_loop::ControlFlow;
 
 use punctum::{
     get_render_pass, load_octree_with_progress_bar, select_physical_device, CameraController,
-    Octree, OctreeRenderer, PerspectiveCamera, SurfaceFrame, Viewport,
+    CullingMode, Octree, OctreeRenderer, PerspectiveCamera, SurfaceFrame, Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -244,7 +244,7 @@ fn main() {
     ));
 
     renderer.set_point_size(1);
-    renderer.frustum_culling(true);
+    renderer.frustum_culling(CullingMode::Mixed);
 
     let renderer_clone = renderer.clone();
     let gui_state_clone = gui_state.clone();
@@ -256,7 +256,7 @@ fn main() {
             state.frustum_culling
         };
         if frustum_culling {
-            renderer_clone.frustum_culling(true);
+            renderer_clone.frustum_culling(CullingMode::Mixed);
         }
         match rx.try_recv() {
             Ok(_) | Err(TryRecvError::Disconnected) => {

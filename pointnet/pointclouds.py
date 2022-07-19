@@ -6,7 +6,7 @@ import torch
 
 class Pointclouds:
     def __init__(
-        self, points: torch.Tensor, features: torch.Tensor, file_names: str, batch_index: torch.Tensor = None
+        self, points: torch.Tensor, features: torch.Tensor, file_names: list[str], batch_index: torch.Tensor = None
     ):
         assert (
             points.shape[0] == features.shape[0]

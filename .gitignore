@@ -26,3 +26,12 @@ logs*/
 sh_tests/
 tests/sh_errors
 **/*.las
+evaluation/error_8_1024max_64.png
+evaluation/error_8_1024max_256.png
+evaluation/error_16_1024max_64.png
+evaluation/error_1024max_256.png
+evaluation/error_1024max_512.png
+evaluation/samples_8_1024max_64.png
+evaluation/samples_8_1024max_256.png
+evaluation/samples_16_1024max_64.png
+evaluation/samples_1024max_256.png

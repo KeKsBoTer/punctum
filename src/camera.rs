@@ -1,5 +1,5 @@
 use approx::assert_ulps_eq;
-use nalgebra::{ vector, Matrix4, Point3, SimdComplexField, Vector3, Vector4};
+use nalgebra::{vector, Matrix4, Point3, SimdComplexField, Vector3, Vector4};
 use std::{f32::consts::PI, time::Duration};
 use winit::{dpi::PhysicalPosition, event::*};
 
@@ -64,7 +64,11 @@ impl<P: Projection> Camera<P> {
     }
 
     pub fn position(&self) -> Point3<f32> {
-        self.view.transform_point(&Point3::origin())
+        // TODO cache this, inverse is expensive
+        self.view
+            .try_inverse()
+            .unwrap()
+            .transform_point(&Point3::origin())
     }
 
     /// see https://d3cw3dd2w32x2b.cloudfront.net/wp-content/uploads/2012/07/euler-angles1.pdf

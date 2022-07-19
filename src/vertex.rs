@@ -72,6 +72,12 @@ impl From<Vertex<f32, f32>> for Vertex<f32, u8> {
 #[repr(C)]
 pub struct SHCoefficients<const T: usize>(#[serde(with = "BigArray")] [Vector4<f32>; T]);
 
+impl<const T: usize> Into<SHCoefficients<T>> for [Vector4<f32>; T] {
+    fn into(self) -> SHCoefficients<T> {
+        SHCoefficients(self)
+    }
+}
+
 unsafe impl Pod for SHCoefficients<121> {}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Zeroable)]

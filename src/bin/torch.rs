@@ -28,7 +28,7 @@ pub fn main() {
     let filename = opt.input;
 
     let device = tch::Device::Cuda(0);
-    let model = load_model("traced_model.pt", device);
+    let model = load_model("logs/100k top_variance l=5/traced_model.pt", device);
 
     let mut octree: Octree<f64, u8> = load_octree_with_progress_bar(&filename).unwrap();
 
@@ -37,7 +37,8 @@ pub fn main() {
     // TODO implement batching. rn we work with batchsize = 1
     for octant in octree.borrow_mut().into_iter() {
         let pc: &PointCloud<f64, u8> = octant.points().into();
-        let pc: PointCloud<f32, f32> = pc.into();
+        let mut pc: PointCloud<f32, f32> = pc.into();
+        pc.scale_to_unit_sphere();
         let centroid = pc.centroid();
 
         let raw_points = pc.points().as_bytes();

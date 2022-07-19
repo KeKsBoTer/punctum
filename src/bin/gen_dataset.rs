@@ -12,15 +12,14 @@ use ply_rs::{
     writer::Writer,
 };
 use punctum::{
-    load_cameras, Octree, OfflineRenderer, OrthographicProjection, PointCloud, PointCloudGPU,
-    RenderSettings, TeeReader, Vertex,
+    load_cameras, Octant, Octree, OfflineRenderer, OrthographicProjection, PointCloud,
+    PointCloudGPU, RenderSettings, TeeReader, Vertex,
 };
-use rayon::prelude::*;
 use std::path::PathBuf;
 use structopt::StructOpt;
 use vulkano::device::DeviceOwned;
 
-#[derive(StructOpt, Debug)]
+#[derive(StructOpt, Debug, Clone)]
 #[structopt(name = "Octree Builder")]
 struct Opt {
     #[structopt(name = "input_octree", parse(from_os_str))]
@@ -35,40 +34,6 @@ struct Opt {
     export_images: bool,
 }
 
-struct RenderPool {
-    workers: Vec<Arc<Mutex<OfflineRenderer>>>,
-    next: usize,
-    size: usize,
-}
-
-impl RenderPool {
-    fn new(size: usize) -> Self {
-        let rs = (0..size)
-            .map(|_| {
-                Arc::new(Mutex::new(OfflineRenderer::new(
-                    128,
-                    RenderSettings {
-                        point_size: 10,
-                        ..RenderSettings::default()
-                    },
-                    true,
-                )))
-            })
-            .collect::<Vec<Arc<Mutex<OfflineRenderer>>>>();
-        RenderPool {
-            workers: rs,
-            next: 0,
-            size,
-        }
-    }
-
-    fn get(&mut self) -> &Arc<Mutex<OfflineRenderer>> {
-        let item = self.workers.get(self.next).unwrap();
-        self.next = (self.next + 1) % self.size;
-        return item;
-    }
-}
-
 fn export_ply(
     output_file: &PathBuf,
     pc: PointCloud<f32, f32>,
@@ -77,7 +42,7 @@ fn export_ply(
     let mut file = BufWriter::new(File::create(output_file).unwrap());
 
     let mut ply = Ply::<punctum::Vertex<f32, u8>>::new();
-    ply.header.encoding = Encoding::Ascii;
+    ply.header.encoding = Encoding::BinaryLittleEndian;
 
     let mut elm_def_vertex = punctum::Vertex::<f32, u8>::element_def("vertex".to_string());
     elm_def_vertex.count = pc.points().len();
@@ -110,7 +75,7 @@ fn main() {
         std::fs::create_dir(opt.output_folder.clone()).unwrap();
     }
 
-    let octree = Arc::new({
+    let octree: Arc<Octree<f32, f32>> = Arc::new({
         let in_file = File::open(&opt.input).unwrap();
 
         let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
@@ -126,7 +91,7 @@ fn main() {
 
         pb.finish_println("done!");
 
-        octree
+        octree.into()
     });
 
     let cameras = load_cameras(
@@ -144,75 +109,90 @@ fn main() {
     }
 
     let num_workers = 12;
-    let render_pool = RenderPool::new(num_workers);
-    let render_pool = Arc::new(Mutex::new(render_pool));
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_workers)
+        .build_global()
+        .unwrap();
 
-    let pb_clone = pb.clone();
-    octree
-        .into_iter()
-        .par_bridge()
-        .into_par_iter()
-        .for_each(|node| {
-            let data_32: Vec<Vertex<f32, f32>> =
-                node.points().iter().map(|v| v.clone().into()).collect();
+    let octree_iter = octree.into_iter();
+    let all_octants = octree_iter.collect::<Vec<&Octant<f32, f32>>>();
 
-            let mut pc: PointCloud<f32, f32> = data_32.into();
-            pc.scale_to_unit_sphere();
+    let output_folder = opt.output_folder.as_path();
 
-            let renders: Vec<Rgba<u8>> = {
-                let renderer = {
-                    let mut r = render_pool.lock().unwrap();
-                    r.get().clone()
-                };
+    rayon::scope(|s| {
+        all_octants
+            .chunks(octree.num_octants() as usize / num_workers)
+            .map(|octants| {
+                let pb_clone = pb.clone();
+                let cameras = cameras.clone();
+                s.spawn(move |_| {
+                    let mut renderer = OfflineRenderer::new(
+                        128,
+                        RenderSettings {
+                            point_size: 10,
+                            ..RenderSettings::default()
+                        },
+                        true,
+                    );
 
-                let mut renderer = renderer.lock().unwrap();
+                    for octant in octants {
+                        let mut pc: PointCloud<f32, f32> = octant.points().clone().into();
+                        pc.scale_to_unit_sphere();
 
-                let device = renderer.device();
+                        let renders: Vec<Rgba<u8>> = {
+                            let device = renderer.device();
 
-                let pc_gpu = PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
+                            let pc_gpu =
+                                PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
 
-                let img_folder = opt.output_folder.join(format!("octant_{}", node.id()));
-                if opt.export_images && !img_folder.exists() {
-                    fs::create_dir(img_folder.clone()).unwrap();
-                }
+                            let img_folder = output_folder.join(format!("octant_{}", octant.id()));
+                            if opt.export_images && !img_folder.exists() {
+                                fs::create_dir(img_folder.clone()).unwrap();
+                            }
 
-                let renders = cameras
-                    .iter()
-                    .enumerate()
-                    .map(|(view_idx, c)| {
-                        let avg_color = renderer.render(c.clone(), &pc_gpu);
-                        if opt.export_images {
-                            let img = renderer.last_image();
+                            let renders = cameras
+                                .iter()
+                                .enumerate()
+                                .map(|(view_idx, c)| {
+                                    let avg_color = renderer.render(c.clone(), &pc_gpu);
+                                    if opt.export_images {
+                                        let img = renderer.last_image();
 
-                            img.save(img_folder.join(format!(
-                                "view_{}-{}r_{}g_{}b_{}a.png",
-                                view_idx,
-                                avg_color.0[0],
-                                avg_color.0[1],
-                                avg_color.0[2],
-                                avg_color.0[3],
-                            )))
-                            .unwrap();
-                        }
-                        return avg_color;
-                    })
-                    .collect();
+                                        img.save(img_folder.join(format!(
+                                            "view_{}-{}r_{}g_{}b_{}a.png",
+                                            view_idx,
+                                            avg_color.0[0],
+                                            avg_color.0[1],
+                                            avg_color.0[2],
+                                            avg_color.0[3],
+                                        )))
+                                        .unwrap();
+                                    }
+                                    return avg_color;
+                                })
+                                .collect();
 
-                renders
-            };
+                            renders
+                        };
 
-            let cam_colors: Vec<Vertex<f32, u8>> = renders
-                .iter()
-                .zip(cameras.clone())
-                .map(|(color, cam)| Vertex {
-                    position: cam.position(),
-                    color: Vector4::from(color.0),
+                        let cam_colors: Vec<Vertex<f32, u8>> = renders
+                            .iter()
+                            .zip(cameras.clone())
+                            .map(|(color, cam)| Vertex {
+                                position: cam.position(),
+                                color: Vector4::from(color.0),
+                            })
+                            .collect();
+
+                        let out_file = output_folder.join(format!("octant_{}.ply", octant.id()));
+                        export_ply(&out_file, pc, &cam_colors);
+
+                        let mut pb = pb_clone.lock().unwrap();
+                        pb.inc();
+                    }
                 })
-                .collect();
-
-            let out_file = opt.output_folder.join(format!("octant_{}.ply", node.id()));
-            export_ply(&out_file, pc, &cam_colors);
-            pb_clone.lock().unwrap().inc();
-        });
+            })
+            .count();
+    });
     pb.lock().unwrap().finish();
 }
