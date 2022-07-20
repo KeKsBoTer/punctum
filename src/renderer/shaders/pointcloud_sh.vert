@@ -49,7 +49,7 @@ vec4 sh_color(vec2 angle){
 
     vec4 color = vec4(0);
     for(int i=0;i<num_sh;i++){
-        vec4 coefs = sh.vertices[gl_VertexIndex].coefs[i];
+        vec4 coefs = sh.vertices[index].coefs[i];
         color += coefs * texture(img_shs, vec3(img_pos,i)).r;
     }
     return color;
