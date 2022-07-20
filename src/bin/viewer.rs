@@ -24,7 +24,7 @@ use winit::event_loop::ControlFlow;
 
 use punctum::{
     get_render_pass, load_octree_with_progress_bar, select_physical_device, CameraController,
-    CullingMode, Octree, OctreeRenderer, PerspectiveCamera, SurfaceFrame, Viewport,
+    CullingMode, Octree, OctreeRenderer, PerspectiveCamera, RenderMode, SurfaceFrame, Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -36,7 +36,7 @@ struct Opt {
 
 struct GuiState {
     highlight_shs: bool,
-    render_mode: CullingMode,
+    render_mode: RenderMode,
     frustum_culling: Option<CullingMode>,
     debug: bool,
 
@@ -47,7 +47,7 @@ impl GuiState {
     fn new(_gui: &mut Gui) -> Self {
         GuiState {
             highlight_shs: false,
-            render_mode: CullingMode::Mixed,
+            render_mode: RenderMode::Both,
             frustum_culling: Some(CullingMode::Mixed),
             point_size: 1,
             debug: false,
@@ -75,11 +75,11 @@ impl GuiState {
 
                         ui.horizontal(|ui| {
                             ui.label("Mode:");
-                            ui.selectable_value(&mut self.render_mode, CullingMode::Mixed, "Mixed");
-                            ui.selectable_value(&mut self.render_mode, CullingMode::SHOnly, "SHs");
+                            ui.selectable_value(&mut self.render_mode, RenderMode::Both, "Both");
+                            ui.selectable_value(&mut self.render_mode, RenderMode::SHOnly, "SHs");
                             ui.selectable_value(
                                 &mut self.render_mode,
-                                CullingMode::OctantsOnly,
+                                RenderMode::OctantsOnly,
                                 "Octants",
                             );
                         });

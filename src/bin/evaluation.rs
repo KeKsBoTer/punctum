@@ -15,7 +15,8 @@ use vulkano::sync::{self, GpuFuture};
 
 use punctum::{
     get_render_pass, load_cameras, load_octree_with_progress_bar, select_physical_device,
-    CullingMode, Frame, Octree, OctreeRenderer, PerspectiveCamera, PerspectiveProjection, Viewport,
+    CullingMode, Frame, Octree, OctreeRenderer, PerspectiveCamera, PerspectiveProjection,
+    RenderMode, Viewport,
 };
 use structopt::StructOpt;
 use vulkano::device::DeviceExtensions;
@@ -116,7 +117,7 @@ fn render_from_viewpoints(
             renderer.set_camera(&camera);
             renderer.update_uniforms();
             renderer.frustum_culling(culling_mode);
-            let pc_cb = renderer.render(true, true);
+            let pc_cb = renderer.render(RenderMode::Both, false);
 
             let future = frame.render(queue.clone(), pc_cb.clone(), None);
 

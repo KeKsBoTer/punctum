@@ -59,6 +59,13 @@ pub enum CullingMode {
     OctantsOnly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RenderMode {
+    Both,
+    SHOnly,
+    OctantsOnly,
+}
+
 impl OctreeRenderer {
     pub fn new(
         device: Arc<Device>,
@@ -170,7 +177,7 @@ impl OctreeRenderer {
         *screen_height = viewport_height;
     }
 
-    pub fn render(&self, render_mode: CullingMode, debug: bool) -> Arc<SecondaryAutoCommandBuffer> {
+    pub fn render(&self, render_mode: RenderMode, debug: bool) -> Arc<SecondaryAutoCommandBuffer> {
         let uniform_buffer = {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.buffer().clone()
@@ -185,19 +192,19 @@ impl OctreeRenderer {
         .unwrap();
 
         match render_mode {
-            CullingMode::Mixed => {
+            RenderMode::Both => {
                 if let Some(sh_renderer) = &self.sh_renderer {
                     sh_renderer.render(uniform_buffer.clone(), &mut builder);
                 }
                 self.octant_renderer
                     .render(uniform_buffer.clone(), &mut builder);
             }
-            CullingMode::SHOnly => {
+            RenderMode::SHOnly => {
                 if let Some(sh_renderer) = &self.sh_renderer {
                     sh_renderer.render(uniform_buffer.clone(), &mut builder);
                 }
             }
-            CullingMode::OctantsOnly => {
+            RenderMode::OctantsOnly => {
                 self.octant_renderer
                     .render(uniform_buffer.clone(), &mut builder);
             }

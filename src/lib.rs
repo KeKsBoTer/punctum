@@ -38,7 +38,7 @@ pub use io::{
 pub use octree::{Node, Octant, Octree, OctreeIterator};
 pub use pointcloud::{CubeBoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{
-    CullingMode, Frame, OctreeRenderer, PointCloudRenderer, SurfaceFrame, Viewport,
+    CullingMode, Frame, OctreeRenderer, PointCloudRenderer, RenderMode, SurfaceFrame, Viewport,
 };
 pub use tee::{TeeReader, TeeWriter};
 pub use vertex::{BaseColor, BaseFloat, SHCoefficients, SHVertex, Vertex};
