@@ -312,10 +312,7 @@ impl SHRenderer {
 
         let sh_vertex_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
-            BufferUsage {
-                storage_buffer: true,
-                ..BufferUsage::default()
-            },
+            BufferUsage::storage_buffer(),
             false,
             shs,
         )
@@ -392,20 +389,19 @@ impl SHRenderer {
 
         sh_vertices.sort_by_key(|v| v.index);
 
-        let new_len = sh_vertices.len() as u32;
-        if new_len > 0 {
+        if sh_vertices.len() > 0 {
             let new_buffer = CpuAccessibleBuffer::from_iter(
                 self.device.clone(),
-                BufferUsage {
-                    vertex_buffer: true,
-                    ..BufferUsage::default()
-                },
+                BufferUsage::vertex_buffer(),
                 false,
                 sh_vertices,
             )
             .unwrap();
             let mut sh_index_buffer = self.sh_index_buffer.write().unwrap();
             *sh_index_buffer = Some(new_buffer);
+        } else {
+            let mut sh_index_buffer = self.sh_index_buffer.write().unwrap();
+            *sh_index_buffer = None;
         }
     }
 

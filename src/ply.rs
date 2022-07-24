@@ -28,7 +28,7 @@ impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
             ("blue", ply::Property::UChar(v)) => self.color[2] = C::from_u8(v),
             ("alpha", ply::Property::UChar(v)) => self.color[3] = C::from_u8(v),
             ("vertex_indices", _) => {} // ignore
-            (k, _) => panic!("Vertex: Unexpected key/value combination: key: {}", k),
+            (_, _) => {}
         };
     }
 

@@ -2,6 +2,7 @@
 
 from functools import lru_cache, reduce, wraps
 from math import pi, sqrt
+import math
 from operator import mul
 from typing import Dict, Callable, Tuple
 
@@ -164,7 +165,7 @@ def to_spherical(coords: torch.Tensor) -> torch.Tensor:
         cords: [N,3] cartesian coordinates
     """
     assert (
-        coords.norm(p=2, dim=1) - 1 < 1e-8
+        coords.norm(p=2, dim=1) - 1 < 1e-6
     ).all(), f"must be of length 1 but got ({coords.norm(p=2, dim=1) -1})"
 
     spherical = torch.empty((coords.shape[0], 2), device=coords.device)
@@ -184,10 +185,10 @@ def flat2lm_index(i: int) -> Tuple[int, int]:
     return l, -m
 
 
-def evalute_sh(coefs: int, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+def evalute_sh(coefs: torch.Tensor, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     device = coefs.device
-    l_max = coefs.shape[0] - 1
-    Y = torch.zeros((*x.shape, 3), device=device)
+    l_max = int(math.sqrt(coefs.shape[0])) - 1
+    Y = torch.zeros((*x.shape, coefs.shape[-1]), device=device)
     clear_spherical_harmonics_cache()
     for l in range(l_max + 1):
         y_lm = get_spherical_harmonics(l, x, y)

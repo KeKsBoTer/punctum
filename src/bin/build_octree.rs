@@ -215,8 +215,10 @@ fn main() {
         for p in octant.octant.points() {
             if !octant.bbox.contains(&p.position) {
                 panic!(
-                    "point {:?} not contained by its bounding box {:?}!",
-                    p, octant.bbox
+                    "point {:?} not contained by its bounding box (min: {:?}, max: {:?})",
+                    p,
+                    octant.bbox.min_corner(),
+                    octant.bbox.max_corner()
                 );
             }
         }

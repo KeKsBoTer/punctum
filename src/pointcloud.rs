@@ -152,7 +152,14 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
         let half_size = Vector3::new(self.size, self.size, self.size) * half;
         let min = self.center - half_size;
         let max = self.center + half_size;
-        min.x <= p.x && min.y <= p.y && min.z <= p.z && max.x >= p.x && max.y >= p.y && max.z >= p.z
+
+        let eps = convert(1e-8);
+        min.x - p.x < eps
+            && min.y - p.y < eps
+            && min.z - p.z < eps
+            && p.x - max.x < eps
+            && p.y - max.y < eps
+            && p.z - max.z < eps
     }
 
     fn elm_min(p1: &Point3<F>, p2: &Point3<F>) -> Point3<F> {
@@ -227,8 +234,8 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
     }
 
     pub fn outer_radius(&self) -> F {
-        let two = F::from_subset(&2.);
-        let three = F::from_subset(&3.);
+        let two = convert(2.);
+        let three: F = convert(3.);
         let radius = (self.size / two) * three.sqrt();
         return radius;
     }
@@ -241,5 +248,14 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
         );
         let size = self.size.to_f64().unwrap();
         CubeBoundingBox { center, size }
+    }
+
+    pub fn min_corner(&self) -> Point3<F> {
+        let size = self.size * convert(0.5);
+        self.center - Vector3::new(-size, -size, -size)
+    }
+    pub fn max_corner(&self) -> Point3<F> {
+        let size = self.size * convert(0.5);
+        self.center - Vector3::new(size, size, size)
     }
 }

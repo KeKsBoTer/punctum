@@ -81,7 +81,7 @@ class FeatureNet(nn.Module):
     """ Global feature extraction network used in PointNet"""
 
     def __init__(
-        self, color_channels: int, batch_norm: bool = False, layer_sizes=[32, 128, 256],
+        self, batch_norm: bool = False, layer_sizes=[32, 128, 256],
     ):
         super(FeatureNet, self).__init__()
         # self.tnet = TNet()
@@ -90,7 +90,7 @@ class FeatureNet(nn.Module):
         #    3 + color_channels, mapping_size=rfft_dim
         # )
         s1, s2, s3 = layer_sizes
-        self.conv1 = torch.nn.Conv1d(3 + color_channels, s1, 1, bias=not batch_norm)
+        self.conv1 = torch.nn.Conv1d(3 + 3, s1, 1, bias=not batch_norm)
         self.conv2 = torch.nn.Conv1d(s1, s2, 1, bias=not batch_norm)
         self.conv3 = torch.nn.Conv1d(s2, s3, 1, bias=not batch_norm)
 
@@ -189,7 +189,7 @@ class PointNet(nn.Module):
         layer_sizes=[128, 64],
     ):
         super(PointNet, self).__init__()
-        self.feat = FeatureNet(color_channels, batch_norm)
+        self.feat = FeatureNet(batch_norm)
         s1, s2 = layer_sizes
         self.fc1 = nn.Linear(256, s1, bias=not batch_norm)
         self.fc2 = nn.Linear(s1, s2, bias=not batch_norm)

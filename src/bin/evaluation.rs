@@ -111,12 +111,13 @@ fn render_from_viewpoints(
         for (i, camera) in cameras.iter().enumerate() {
             let mut camera = camera.clone();
             let c_pos = camera.view().transform_point(&Point3::origin());
-            camera.translate(c_pos.coords * 100. * 3f32.sqrt());
+            camera.translate(c_pos.coords * 50. * 3f32.sqrt());
             camera.adjust_znear_zfar(octree.bbox());
 
             renderer.set_camera(&camera);
             renderer.update_uniforms();
             renderer.frustum_culling(culling_mode);
+
             let pc_cb = renderer.render(RenderMode::Both, false);
 
             let future = frame.render(queue.clone(), pc_cb.clone(), None);
@@ -246,7 +247,6 @@ fn main() {
     mb.println("Rendering:");
 
     let p_render_sh = mb.create_bar(cameras.len() as u64);
-    let p_sh_only = mb.create_bar(cameras.len() as u64);
     let p_render_no_sh = mb.create_bar(cameras.len() as u64);
     let p_sh_mask = mb.create_bar(cameras.len() as u64);
     let p_multi_sampling = mb.create_bar(cameras.len() as u64);
@@ -267,22 +267,6 @@ fn main() {
         octree.clone(),
         cameras.clone(),
         p_render_sh,
-        opt.parallel,
-    );
-    let sh_only = render_from_viewpoints(
-        "sh_only".to_string(),
-        opt.output_folder.clone(),
-        device.clone(),
-        queue.clone(),
-        render_pass.clone(),
-        image_format,
-        image_size,
-        image_size,
-        CullingMode::SHOnly,
-        false,
-        octree.clone(),
-        cameras.clone(),
-        p_sh_only,
         opt.parallel,
     );
     let render_no_sh = render_from_viewpoints(
@@ -336,9 +320,6 @@ fn main() {
     );
 
     if let Some(t) = render_sh {
-        t.join().unwrap();
-    }
-    if let Some(t) = sh_only {
         t.join().unwrap();
     }
     if let Some(t) = render_no_sh {
