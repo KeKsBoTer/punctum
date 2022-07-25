@@ -358,6 +358,50 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
             Node::Empty => Vec::new(),
         }
     }
+
+    pub fn get<'a>(&'a self, id: u64) -> Option<&'a Octant<F, C>> {
+        let mut node = &self.root;
+        let mut level = 0;
+        loop {
+            match node {
+                Node::Group(children) => {
+                    let index = (id >> (3 * level)) & 7;
+                    node = &children[index as usize];
+                    level += 1;
+                }
+                Node::Filled(octant) => {
+                    if octant.id == id {
+                        return Some(octant);
+                    } else {
+                        return None;
+                    }
+                }
+                Node::Empty => return None,
+            }
+        }
+    }
+
+    pub fn get_mut<'a>(&'a mut self, id: u64) -> Option<&'a mut Octant<F, C>> {
+        let mut node = &mut self.root;
+        let mut level = 0;
+        loop {
+            match node {
+                Node::Group(children) => {
+                    let index = (id >> (3 * level)) & 7;
+                    node = &mut children[index as usize];
+                    level += 1;
+                }
+                Node::Filled(octant) => {
+                    if octant.id == id {
+                        return Some(octant);
+                    } else {
+                        return None;
+                    }
+                }
+                Node::Empty => return None,
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

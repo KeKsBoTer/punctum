@@ -1,4 +1,4 @@
-#version 450
+#version 460
 
 // 32 bits floating point PI
 const float PI = 3.14159265358979323846264338327950288;

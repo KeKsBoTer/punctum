@@ -1,6 +1,6 @@
 use bincode::{serialize_into, serialized_size};
 use pbr::ProgressBar;
-use std::{borrow::BorrowMut, fs::File, io::BufWriter, path::PathBuf};
+use std::{borrow::BorrowMut, collections::HashMap, fs::File, io::BufWriter, path::PathBuf};
 use tch::{kind, IndexOp, Kind, Tensor};
 use vulkano::buffer::BufferContents;
 
@@ -28,18 +28,22 @@ pub fn main() {
     let filename = opt.input;
 
     let device = tch::Device::Cuda(0);
-    let model = load_model("logs/100k top_variance l=5/traced_model.pt", device);
+    let model = load_model("traced_model_gpu.pt", device);
 
     let mut octree: Octree<f64, u8> = load_octree_with_progress_bar(&filename).unwrap();
 
     let mut pb = ProgressBar::new(octree.num_octants());
 
-    // TODO implement batching. rn we work with batchsize = 1
-    for octant in octree.borrow_mut().into_iter() {
+    let mut points = Vec::new();
+    let mut colors = Vec::new();
+    let mut batch_indices = Vec::new();
+
+    let mut sh_coefs = HashMap::new();
+
+    for octant in octree.into_iter() {
         let pc: &PointCloud<f64, u8> = octant.points().into();
         let mut pc: PointCloud<f32, f32> = pc.into();
         pc.scale_to_unit_sphere();
-        let centroid = pc.centroid();
 
         let raw_points = pc.points().as_bytes();
         let vertex_data =
@@ -47,22 +51,52 @@ pub fn main() {
                 .to(device);
 
         let pos = vertex_data.i((.., ..3));
-        let color = vertex_data.i((.., 3..));
+        let color = vertex_data.i((.., 3..6));
 
-        let batch = Tensor::zeros(&[pc.points().len() as i64], kind::INT64_CUDA);
+        let batch_idx = batch_indices.len() as i64;
+        let batch = Tensor::ones(&[pc.points().len() as i64], kind::INT64_CUDA) * batch_idx;
 
-        let coefs = model.forward_ts(&[&pos, &color, &batch]).unwrap();
-        let f_coefs = Vec::<f32>::from(&coefs.get(0));
-        let mut new_coefs = [Vector4::<f32>::zeros(); 121];
-        for (i, v) in f_coefs.iter().enumerate() {
-            new_coefs[i / 4][i % 4] = *v;
+        points.push(pos);
+        colors.push(color);
+        batch_indices.push(batch);
+
+        if batch_idx == 512 {
+            let pos_batch = Tensor::cat(points.as_slice(), 0);
+            let color_batch = Tensor::cat(colors.as_slice(), 0);
+            let batch_batch = Tensor::cat(batch_indices.as_slice(), 0);
+
+            let coefs = model
+                .forward_ts(&[&pos_batch, &color_batch, &batch_batch])
+                .unwrap();
+
+            for idx in 0..batch_indices.len() {
+                let c = coefs.get(idx as i64);
+                let mut new_coefs = [Vector4::<f32>::zeros(); 121];
+
+                let f_coefs = Vec::<f32>::from(&c);
+                for (i, v) in f_coefs.iter().enumerate() {
+                    new_coefs[i / 4][i % 4] = *v;
+                }
+                sh_coefs.insert(octant.id(), new_coefs);
+            }
+
+            points.clear();
+            colors.clear();
+            batch_indices.clear();
+            // octant.sh_approximation = Some(SHVertex::new(centroid.cast(), new_coefs.into()));
         }
-
-        octant.sh_approximation = Some(SHVertex::new(centroid.cast(), new_coefs.into()));
-
         pb.inc();
     }
     println!("");
+
+    println!("updating octree...");
+    for octant in octree.borrow_mut().into_iter() {
+        let pc: &PointCloud<f64, u8> = octant.points().into();
+        let pc: PointCloud<f32, f32> = pc.into();
+        let centroid = pc.centroid();
+        let new_coefs = sh_coefs.get(&octant.id()).unwrap();
+        octant.sh_approximation = Some(SHVertex::new(centroid.cast(), (*new_coefs).into()));
+    }
 
     {
         let mut pb = ProgressBar::new(serialized_size(&octree).unwrap());

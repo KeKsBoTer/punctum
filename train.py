@@ -25,18 +25,9 @@ torch.backends.cudnn.benchmark = True
 
 def unpack_pointclouds(pcs: Pointclouds):
     vertices = pcs.points_packed().cuda()
-    color = pcs.features_packed().cuda().float() / 255.0
+    color = pcs.features_packed().cuda()
     batch = pcs.packed_to_cloud_idx().cuda()
     return vertices, color, batch
-
-
-def weighted_l2_loss(weights: torch.Tensor):
-    def loss(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        diff = prediction[:, 1:] - target[:, 1:]
-        l2 = diff.square().sum(-1)
-        return (l2 * weights.to(prediction.device)).mean()
-
-    return loss
 
 
 def camera_loss(l_max: int, positions: torch.Tensor):
@@ -77,6 +68,7 @@ class CoefNormalizer:
     def __init__(self, mean: torch.Tensor, std: torch.Tensor):
         self.mean = mean
         self.std = std
+        self.std[self.std.abs() < 1e-6] = 0
 
     def normalize(self, x: torch.Tensor) -> torch.Tensor:
         return (x - self.mean) / self.std
@@ -280,21 +272,29 @@ if __name__ == "__main__":
         pin_memory_device="cuda:0",
     )
 
+    coefs_samples = torch.stack(
+        [
+            ds_train[i][1][: lm2flat_index(l_max, l_max) + 1]
+            for i in torch.randint(0, len(ds_train), (10000,))
+        ]
+    )
+
+    coef_transform = CoefNormalizer(
+        coefs_samples.mean(0).cuda(), coefs_samples.std(0).cuda()
+    )
+
     model = PointNet(
-        l_max, 4, batch_norm=True, use_dropout=0.05, use_spherical=False
+        l_max,
+        4,
+        batch_norm=True,
+        use_dropout=0.1,
+        use_spherical=False,
+        coef_mean=coef_transform.mean,
+        coef_std=coef_transform.std,
     ).cuda()
 
     if args.checkpoint is not None:
         model.load_state_dict(torch.load(args.checkpoint))
-
-    coefs = torch.stack(
-        [
-            ds_train[i][1][: lm2flat_index(l_max, l_max) + 1]
-            for i in torch.randint(0, len(ds_train), (1000,))
-        ]
-    )
-
-    coef_transform = CoefNormalizer(coefs.mean(0).cuda(), coefs.std(0).cuda())
 
     cameras_pos = camera_positions("sphere.ply")
 
@@ -313,6 +313,9 @@ if __name__ == "__main__":
     scheduler = OneCycleLR(
         optimizer, max_lr=1e-2, steps_per_epoch=len(data_loader_train), epochs=epochs
     )
+
+    coef_loss_weight = 1e-5
+
     step = 0
     for epoch in range(epochs):
 
@@ -335,18 +338,19 @@ if __name__ == "__main__":
             vertices, color, batch = unpack_pointclouds(pcs)
 
             pred_coefs = model(vertices, color, batch)
+            c_loss = loss_fn(pred_coefs, target_coefs)
+
+            pred_coefs_n = coef_transform.normalize(pred_coefs)
             target_coefs_n = coef_transform.normalize(target_coefs)
-            c_loss = loss_fn(coef_transform.denormalize(pred_coefs), target_coefs)
-            coef_loss = coef_loss_fn(pred_coefs, target_coefs_n)
-            train_loss = c_loss + coef_loss * 1e-5
+            coef_loss = coef_loss_fn(pred_coefs_n, target_coefs_n)
+
+            train_loss = c_loss + coef_loss * coef_loss_weight
             train_loss.backward()
 
             optimizer.step()
             scheduler.step()
 
-            writer_train.add_scalar(
-                "loss/camera", train_loss.item(), step, new_style=True
-            )
+            writer_train.add_scalar("loss/camera", c_loss.item(), step, new_style=True)
             writer_train.add_scalar("loss/coef", coef_loss.item(), step, new_style=True)
             writer_train.add_scalar(
                 "loss/total", train_loss.item(), step, new_style=True
@@ -358,15 +362,11 @@ if __name__ == "__main__":
 
             if save_plot:
                 fig = plot_samples(
-                    coef_transform.denormalize(pred_coefs.detach()),
-                    target_coefs.detach(),
-                    pcs,
-                    l_max,
+                    pred_coefs.detach(), target_coefs.detach(), pcs, l_max,
                 )
                 writer_train.add_figure("samples", fig, step)
                 fig1, fig2, fig3 = plot_coefs(
-                    coef_transform.denormalize(pred_coefs.detach()),
-                    target_coefs.detach(),
+                    pred_coefs.detach(), target_coefs.detach(),
                 )
                 writer_train.add_figure("coefficients/distribution", fig1, step)
                 writer_train.add_figure("coefficients/error", fig2, step)
@@ -382,11 +382,14 @@ if __name__ == "__main__":
                 vertices, color, batch = unpack_pointclouds(pcs)
                 target_coefs = coefs[:, : lm2flat_index(l_max, l_max) + 1].cuda()
                 pred_coefs = model(vertices, color, batch)
-                target_coefs_n = coef_transform.normalize(target_coefs)
 
-                c_loss = loss_fn(coef_transform.denormalize(pred_coefs), target_coefs)
-                coef_loss = coef_loss_fn(pred_coefs, target_coefs_n)
-                val_loss = c_loss + coef_loss * 1e-5
+                c_loss = loss_fn(pred_coefs, target_coefs)
+
+                target_coefs_n = coef_transform.normalize(target_coefs)
+                pred_coefs_n = coef_transform.normalize(pred_coefs)
+                coef_loss = coef_loss_fn(pred_coefs_n, target_coefs_n)
+
+                val_loss = c_loss + coef_loss * coef_loss_weight
 
                 writer_val.add_scalar(
                     "loss/camera", c_loss.item(), step, new_style=True
@@ -402,26 +405,22 @@ if __name__ == "__main__":
 
                 if save_plot:
                     fig = plot_samples(
-                        coef_transform.denormalize(pred_coefs.detach()),
-                        target_coefs.detach(),
-                        pcs,
-                        l_max,
+                        pred_coefs.detach(), target_coefs.detach(), pcs, l_max,
                     )
                     writer_val.add_figure("samples", fig, step)
                     fig1, fig2, fig3 = plot_coefs(
-                        coef_transform.denormalize(pred_coefs.detach()),
-                        target_coefs.detach(),
+                        pred_coefs.detach(), target_coefs.detach(),
                     )
                     writer_val.add_figure("coefficients/distribution", fig1, step)
                     writer_val.add_figure("coefficients/error", fig2, step)
                     writer_val.add_figure("coefficients/error_relative", fig3, step)
 
             step += 1
-        if epoch != 0 and epoch % 500 == 0:
-            torch.save(model.state_dict(), f"logs/{experiment_name}/model_{epoch}.pt")
+        if epoch != 0 and epoch % 50 == 0:
+            torch.save(model.state_dict(), f"logs/{experiment_name}/model_weights_{epoch}.pt")
 
     writer_train.close()
     writer_val.close()
 
-    torch.save(model.state_dict(), f"logs/{experiment_name}/model.pt")
+    torch.save(model.state_dict(), f"logs/{experiment_name}/model_weights.pt")
 

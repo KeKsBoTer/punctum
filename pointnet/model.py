@@ -2,6 +2,7 @@
 Based on https://github.com/fxia22/pointnet.pytorch
 """
 
+from pickle import FALSE
 import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
@@ -10,8 +11,8 @@ import torch.nn.functional as F
 def scatter_max(x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
     batch_idx = batch.unsqueeze(-1).repeat(1, x.shape[1])
     target: torch.Tensor = torch.zeros(
-        (batch_idx.max() + 1, x.shape[1]), device=x.device
-    )
+        (batch_idx.max() + 1, x.shape[1])
+    ,device=x.get_device())
 
     return target.scatter_reduce(0, batch_idx, x, reduce="amax")
 
@@ -186,6 +187,8 @@ class PointNet(nn.Module):
         batch_norm: bool = False,
         use_dropout: bool = False,
         use_spherical: bool = False,
+        coef_mean: torch.Tensor = None,
+        coef_std: torch.Tensor = None,
         layer_sizes=[128, 64],
     ):
         super(PointNet, self).__init__()
@@ -198,12 +201,20 @@ class PointNet(nn.Module):
         self.color_channels = color_channels
         self.use_spherical = use_spherical
         self.use_dropout = use_dropout
-        if use_dropout is not None:
+        if use_dropout != False:
             self.dropout = nn.Dropout(p=use_dropout)
         self.batch_norm = batch_norm
         if batch_norm:
             self.bn1 = nn.BatchNorm1d(s1)
             self.bn2 = nn.BatchNorm1d(s2)
+
+        if coef_mean is None:
+            coef_mean = torch.zeros(((l + 1) ** 2, color_channels))
+        if coef_std is None:
+            coef_std = torch.ones(((l + 1) ** 2, color_channels))
+
+        self.coef_mean = nn.parameter.Parameter(coef_mean, requires_grad=False)
+        self.coef_std = nn.parameter.Parameter(coef_std, requires_grad=False)
 
     def forward(
         self, points: torch.Tensor, color: torch.Tensor, batch: torch.Tensor
@@ -212,28 +223,31 @@ class PointNet(nn.Module):
 
         Args:
             points (torch.Tensor[N,3]): vertex positions
-            color (torch.Tensor[N,C]): colors
+            color (torch.Tensor[N,3]): colors
             batch (torch.Tensor[N]): tensor indicating the batch number of each point
 
         Returns:
-            torch.Tensor[B,K,3]: coefficients
+            torch.Tensor[B,K,C]: coefficients
         """
         if self.use_spherical:
             points = to_spherical(points)
         x = self.feat(points, color, batch)
         if self.batch_norm:
             x = F.relu(self.bn1(self.fc1(x)))
-            if self.use_dropout is not None:
+            if self.use_dropout != False:
                 x = F.relu(self.bn2(self.dropout(self.fc2(x))))
             else:
                 x = F.relu(self.bn2(self.fc2(x)))
         else:
             x = F.relu(self.fc1(x))
-            if self.use_dropout is not None:
+            if self.use_dropout != False:
                 x = F.relu(self.dropout(self.fc2(x)))
             else:
                 x = F.relu(self.fc2(x))
 
         x: torch.Tensor = self.fc3(x)
         x = x.reshape(-1, (self.l + 1) ** 2, self.color_channels)
+
+        x = x * self.coef_std + self.coef_mean
+
         return x
