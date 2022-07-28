@@ -6,14 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-vulkano = { version = "0.29.0", features = ["nalgebra"] }
-vulkano-shaders = { version = "0.29.0", features = ["shaderc-debug"] }
-vulkano-win = "0.29.0"
+vulkano = { version = "0.30.0", features = ["nalgebra"] }
+vulkano-shaders = { version = "0.30.0", features = ["shaderc-debug"] }
+vulkano-win = "0.30.0"
 winit = "0.26"
 half = { version = "1.8.2", features = ["bytemuck", "num-traits"] }
 
-nalgebra = { version = "0.30.1", features = ["serde-serialize", "bytemuck"] }
-bytemuck = { version = "1.5.1", features = ["derive"] }
+nalgebra = { version = "0.31.0", features = ["serde-serialize", "bytemuck"] }
+bytemuck = { version = "1.8.0", features = ["derive"] }
 ply-rs = "0.1.3"
 image = "0.24"
 rayon = "1.1"
@@ -29,7 +29,7 @@ pbr = { version = "1.0.4" }
 num-traits = "0.2.14"
 structopt = "0.3"
 
-egui_winit_vulkano = "0.17.0"
+egui_winit_vulkano = "0.18.0"
 
 tch = "0.8.0"
 

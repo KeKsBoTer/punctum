@@ -7,6 +7,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 use vulkano::device::Features;
+use vulkano::format::Format;
 
 use structopt::StructOpt;
 use vulkano::device::DeviceExtensions;
@@ -223,9 +224,7 @@ fn main() {
         // Which physical device to connect to.
         physical_device,
         DeviceCreateInfo {
-            enabled_extensions: physical_device
-                .required_extensions()
-                .union(&device_extensions),
+            enabled_extensions: device_extensions,
 
             queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
             enabled_features: Features {
@@ -239,10 +238,14 @@ fn main() {
 
     let queue = queues.next().unwrap();
 
-    let swapchain_format = physical_device
-        .surface_formats(&surface, Default::default())
-        .unwrap()[0]
-        .0;
+    // let swapchain_format = physical_device
+    //     .surface_formats(&surface, Default::default())
+    //     .unwrap()[0]
+    //     .0;
+
+    let swapchain_format = Format::B8G8R8A8_SRGB;
+
+    println!("{:?}", swapchain_format);
 
     let render_pass = get_render_pass(device.clone(), swapchain_format);
 

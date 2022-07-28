@@ -42,7 +42,7 @@ impl Swapchain {
 
                 image_usage: ImageUsage {
                     color_attachment: true,
-                    transfer_destination: true,
+                    transfer_dst: true,
                     ..ImageUsage::none()
                 },
                 ..Default::default()

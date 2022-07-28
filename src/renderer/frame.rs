@@ -4,7 +4,8 @@ use egui_winit_vulkano::Gui;
 use vulkano::{
     buffer::CpuAccessibleBuffer,
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer, SubpassContents,
+        AutoCommandBufferBuilder, CommandBufferUsage, CopyImageToBufferInfo, RenderPassBeginInfo,
+        SecondaryAutoCommandBuffer, SubpassContents,
     },
     device::{physical::PhysicalDevice, Device, DeviceOwned, Queue},
     image::{view::ImageView, ImageDimensions, StorageImage, SwapchainImage},
@@ -70,9 +71,11 @@ impl Frame {
 
         builder
             .begin_render_pass(
-                fb.vulkan_fb().clone(),
+                RenderPassBeginInfo {
+                    clear_values: vec![Some(self.background_color.into()), Some(1f32.into())],
+                    ..RenderPassBeginInfo::framebuffer(fb.vulkan_fb().clone())
+                },
                 SubpassContents::SecondaryCommandBuffers,
-                vec![self.background_color.into(), 1f32.into()],
             )
             .unwrap();
 
@@ -80,7 +83,10 @@ impl Frame {
         builder.end_render_pass().unwrap();
         if let Some(buffer) = target_buffer {
             builder
-                .copy_image_to_buffer(fb.image().clone(), buffer.clone())
+                .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
+                    fb.image().clone(),
+                    buffer.clone(),
+                ))
                 .unwrap();
         }
         let cb = builder.build().unwrap();
@@ -167,9 +173,11 @@ impl SurfaceFrame {
 
         builder
             .begin_render_pass(
-                fb.vulkan_fb().clone(),
+                RenderPassBeginInfo {
+                    clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into()), Some(1f32.into())],
+                    ..RenderPassBeginInfo::framebuffer(fb.vulkan_fb().clone())
+                },
                 SubpassContents::SecondaryCommandBuffers,
-                vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()],
             )
             .unwrap();
 

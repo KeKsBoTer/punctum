@@ -81,10 +81,10 @@ fn with_progress_bar<T>(total: u64) -> impl FnMut(T) -> T {
     };
 }
 
-fn from_laz(
-    reader: &mut Reader,
+fn from_laz<'a>(
+    reader: &'a mut Reader,
 ) -> (
-    impl Iterator<Item = Vertex<f64, u8>> + '_,
+    impl Iterator<Item = Vertex<f64, u8>> + 'a,
     CubeBoundingBox<f64>,
 ) {
     let bounds = reader.header().bounds();

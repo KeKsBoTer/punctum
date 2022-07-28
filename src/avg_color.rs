@@ -3,13 +3,15 @@ use std::sync::Arc;
 use image::Rgba;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer},
+    command_buffer::{
+        AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, CopyImageToBufferInfo,
+        PrimaryAutoCommandBuffer,
+    },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, Queue},
     format::Format,
     image::{view::ImageView, ImageDimensions, ImageViewAbstract, StorageImage},
     pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
-    sampler::Filter,
     sync::GpuFuture,
 };
 
@@ -60,7 +62,7 @@ impl ImageAvgColor {
 
         let target_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
-            BufferUsage::transfer_destination(),
+            BufferUsage::transfer_dst(),
             false,
             (0..1).map(|_| [0f32; 4]),
         )
@@ -98,23 +100,13 @@ impl ImageAvgColor {
         )
         .unwrap();
 
-        let size = start_size as i32;
         // convert image type from rgba8 to rgba32f by using blit command
+
         builder
-            .blit_image(
+            .blit_image(BlitImageInfo::images(
                 src_img.image(),
-                [0, 0, 0],
-                [size, size, 1],
-                0,
-                0,
                 images[0].image().clone(),
-                [0, 0, 0],
-                [size, size, 1],
-                0,
-                0,
-                1,
-                Filter::Nearest,
-            )
+            ))
             .unwrap();
         builder.bind_pipeline_compute(compute_pipeline.clone());
 
@@ -152,10 +144,10 @@ impl ImageAvgColor {
         }
 
         builder
-            .copy_image_to_buffer(
+            .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
                 images.last().unwrap().image().clone(),
                 target_buffer.clone(),
-            )
+            ))
             .unwrap();
 
         let command_buffer = Arc::new(builder.build().unwrap());
@@ -201,7 +193,7 @@ mod tests {
     use rayon::{iter::ParallelIterator, slice::ParallelSlice};
     use vulkano::{
         buffer::{BufferUsage, CpuAccessibleBuffer},
-        command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
+        command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferToImageInfo},
         device::{Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo},
         format::Format,
         image::{view::ImageView, ImageDimensions, StorageImage},
@@ -227,9 +219,7 @@ mod tests {
             // Which physical device to connect to.
             physical_device,
             DeviceCreateInfo {
-                enabled_extensions: physical_device
-                    .required_extensions()
-                    .union(&device_extensions),
+                enabled_extensions: device_extensions,
 
                 queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
 
@@ -249,7 +239,7 @@ mod tests {
 
         let buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
-            BufferUsage::transfer_source(),
+            BufferUsage::transfer_src(),
             false,
             img.to_rgba8()
                 .pixels()
@@ -276,7 +266,10 @@ mod tests {
         .unwrap();
 
         builder
-            .copy_buffer_to_image(buffer.clone(), src_img.clone())
+            .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+                buffer.clone(),
+                src_img.clone(),
+            ))
             .unwrap();
 
         let command_buffer = builder.build().unwrap();

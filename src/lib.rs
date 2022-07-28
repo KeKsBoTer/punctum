@@ -141,9 +141,7 @@ impl OfflineRenderer {
             // Which physical device to connect to.
             physical_device,
             DeviceCreateInfo {
-                enabled_extensions: physical_device
-                    .required_extensions()
-                    .union(&device_extensions),
+                enabled_extensions: device_extensions,
 
                 queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
 
@@ -176,7 +174,7 @@ impl OfflineRenderer {
             Some(
                 CpuAccessibleBuffer::from_iter(
                     device.clone(),
-                    BufferUsage::transfer_destination(),
+                    BufferUsage::transfer_dst(),
                     false,
                     (0..img_size * img_size * 4).map(|_| 0u8),
                 )

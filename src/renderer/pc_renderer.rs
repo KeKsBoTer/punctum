@@ -8,7 +8,10 @@ use nalgebra::Matrix4;
 use std::sync::Arc;
 use vulkano::{
     buffer::{BufferUsage, CpuBufferPool, DeviceLocalBuffer, TypedBufferAccess},
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
+    command_buffer::{
+        AutoCommandBufferBuilder, CommandBufferInheritanceInfo, CommandBufferUsage, CopyBufferInfo,
+        SecondaryAutoCommandBuffer,
+    },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, Queue},
     memory::pool::StdMemoryPool,
@@ -51,6 +54,7 @@ pub struct PointCloudRenderer {
 
     pipeline: Arc<GraphicsPipeline>,
     set: Arc<PersistentDescriptorSet>,
+    subpass: Subpass,
 
     uniform_buffer_pool: Arc<CpuBufferPool<vs::ty::UniformData, Arc<StdMemoryPool>>>,
     uniform_buffer: Arc<DeviceLocalBuffer<vs::ty::UniformData>>,
@@ -74,14 +78,14 @@ impl PointCloudRenderer {
         let pipeline = PointCloudRenderer::build_pipeline(
             vs.clone(),
             fs.clone(),
-            subpass,
+            subpass.clone(),
             viewport,
             device.clone(),
         );
 
         let uniform_buffer: Arc<DeviceLocalBuffer<vs::ty::UniformData>> = DeviceLocalBuffer::new(
             device.clone(),
-            BufferUsage::uniform_buffer_transfer_destination(),
+            BufferUsage::uniform_buffer_transfer_dst(),
             None,
         )
         .unwrap();
@@ -99,6 +103,7 @@ impl PointCloudRenderer {
             queue,
             pipeline,
             set,
+            subpass,
             uniform_buffer_pool: pool,
             uniform_buffer,
             uniform_data: vs::ty::UniformData::default(),
@@ -135,7 +140,7 @@ impl PointCloudRenderer {
         self.pipeline = PointCloudRenderer::build_pipeline(
             self.vs.clone(),
             self.fs.clone(),
-            self.pipeline.subpass().clone(),
+            self.subpass.clone(),
             viewport,
             self.pipeline.device().clone(),
         );
@@ -146,11 +151,14 @@ impl PointCloudRenderer {
         queue: Arc<Queue>,
         point_cloud: &PointCloudGPU,
     ) -> Arc<SecondaryAutoCommandBuffer> {
-        let mut builder = AutoCommandBufferBuilder::secondary_graphics(
+        let mut builder = AutoCommandBufferBuilder::secondary(
             queue.device().clone(),
             queue.family(),
             CommandBufferUsage::OneTimeSubmit,
-            self.pipeline.subpass().clone(),
+            CommandBufferInheritanceInfo {
+                render_pass: Some(self.subpass.clone().into()),
+                ..Default::default()
+            },
         )
         .unwrap();
 
@@ -181,7 +189,10 @@ impl PointCloudRenderer {
         .unwrap();
 
         builder
-            .copy_buffer(new_uniform_buffer, self.uniform_buffer.clone())
+            .copy_buffer(CopyBufferInfo::buffers(
+                new_uniform_buffer,
+                self.uniform_buffer.clone(),
+            ))
             .unwrap();
 
         let cb = builder.build().unwrap();

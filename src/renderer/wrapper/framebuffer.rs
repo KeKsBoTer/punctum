@@ -17,7 +17,7 @@ where
 
 impl<I> Framebuffer<I>
 where
-    I: ImageAccess + 'static,
+    I: ImageAccess + std::fmt::Debug + 'static,
 {
     pub fn new(image: Arc<I>, render_pass: Arc<RenderPass>) -> Self {
         let image_view = ImageView::new_default(image.clone()).unwrap();
@@ -28,7 +28,7 @@ where
                 image.dimensions().width_height(),
                 vulkano::format::Format::D32_SFLOAT,
                 ImageUsage {
-                    transfer_source: true,
+                    transfer_src: true,
                     ..ImageUsage::none()
                 },
             )

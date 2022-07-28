@@ -14,7 +14,10 @@ use std::{
 };
 use vulkano::{
     buffer::{BufferAccess, BufferUsage, CpuAccessibleBuffer},
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SecondaryAutoCommandBuffer},
+    command_buffer::{
+        AutoCommandBufferBuilder, CommandBufferInheritanceInfo, CommandBufferUsage,
+        SecondaryAutoCommandBuffer,
+    },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{Device, Queue},
     format::Format,
@@ -183,11 +186,14 @@ impl OctreeRenderer {
             uniforms.buffer().clone()
         };
 
-        let mut builder = AutoCommandBufferBuilder::secondary_graphics(
+        let mut builder = AutoCommandBufferBuilder::secondary(
             self.device.clone(),
             self.queue.family(),
             CommandBufferUsage::OneTimeSubmit,
-            self.subpass.clone(),
+            CommandBufferInheritanceInfo {
+                render_pass: Some(self.subpass.clone().into()),
+                ..Default::default()
+            },
         )
         .unwrap();
 
@@ -270,6 +276,7 @@ struct SHRenderer {
 
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
+    subpass: Subpass,
 
     sh_index_buffer: RwLock<Option<Arc<CpuAccessibleBuffer<[IndexVertex]>>>>,
     sh_mapping: HashMap<u64, u32>,
@@ -291,7 +298,7 @@ impl SHRenderer {
         let pipeline = build_pipeline::<IndexVertex>(
             vs.clone(),
             fs.clone(),
-            subpass,
+            subpass.clone(),
             viewport,
             device.clone(),
         );
@@ -333,6 +340,7 @@ impl SHRenderer {
             pipeline: RwLock::new(pipeline),
             vs,
             fs,
+            subpass,
             sh_index_buffer: RwLock::new(None),
             sh_mapping,
             sh_set,
@@ -410,7 +418,7 @@ impl SHRenderer {
         *pipeline = build_pipeline::<IndexVertex>(
             self.vs.clone(),
             self.fs.clone(),
-            pipeline.subpass().clone(),
+            self.subpass.clone(),
             viewport,
             pipeline.device().clone(),
         );
@@ -471,6 +479,7 @@ struct OctantRenderer {
 
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
+    subpass: Subpass,
 
     /// list of visible octants
     visible_octants: RwLock<Vec<(u32, u32)>>,
@@ -494,7 +503,7 @@ impl OctantRenderer {
         let pipeline = build_pipeline::<Vertex<f32, f32>>(
             vs.clone(),
             fs.clone(),
-            subpass,
+            subpass.clone(),
             viewport,
             device.clone(),
         );
@@ -529,6 +538,7 @@ impl OctantRenderer {
             pipeline: RwLock::new(pipeline),
             vs,
             fs,
+            subpass,
             visible_octants: RwLock::new(Vec::new()),
 
             vertex_buffer,
@@ -618,7 +628,7 @@ impl OctantRenderer {
         *pipeline = build_pipeline::<Vertex<f32, f32>>(
             self.vs.clone(),
             self.fs.clone(),
-            pipeline.subpass().clone(),
+            self.subpass.clone(),
             viewport,
             pipeline.device().clone(),
         );

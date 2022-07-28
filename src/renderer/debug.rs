@@ -46,6 +46,7 @@ pub struct OctreeDebugRenderer {
 
     fs: Arc<ShaderModule>,
     vs: Arc<ShaderModule>,
+    subpass: Subpass,
 
     /// all octree vertices in one block of memory
     vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>>,
@@ -65,7 +66,7 @@ impl OctreeDebugRenderer {
         let pipeline = build_pipeline::<Vertex<f32, f32>>(
             vs.clone(),
             fs.clone(),
-            subpass,
+            subpass.clone(),
             viewport,
             device.clone(),
         );
@@ -131,6 +132,7 @@ impl OctreeDebugRenderer {
             pipeline: RwLock::new(pipeline),
             vs,
             fs,
+            subpass,
             vertex_buffer,
             index_buffer,
         }
@@ -179,7 +181,7 @@ impl OctreeDebugRenderer {
         *pipeline = build_pipeline::<Vertex<f32, f32>>(
             self.vs.clone(),
             self.fs.clone(),
-            pipeline.subpass().clone(),
+            self.subpass.clone(),
             viewport,
             pipeline.device().clone(),
         );

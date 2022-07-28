@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
+use vulkano::command_buffer::{
+    AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, CopyImageToBufferInfo,
+};
 use vulkano::device::{Features, Queue};
 use vulkano::format::Format;
 use vulkano::image::{ImageDimensions, StorageImage};
@@ -86,7 +88,7 @@ fn render_from_viewpoints(
                 device.clone(),
                 (target_img_size[0] * target_img_size[1]) as u64
                     * image_format.block_size().unwrap(),
-                BufferUsage::transfer_destination(),
+                BufferUsage::transfer_dst(),
                 false,
             )
             .unwrap()
@@ -129,24 +131,16 @@ fn render_from_viewpoints(
             )
             .unwrap();
 
+            let mut blit_info =
+                BlitImageInfo::images(frame.buffer.image().clone(), target_image.clone());
+            blit_info.filter = vulkano::sampler::Filter::Linear;
+
+            builder.blit_image(blit_info).unwrap();
             builder
-                .blit_image(
-                    frame.buffer.image().clone(),
-                    [0, 0, 0],
-                    [render_size[0] as i32, render_size[1] as i32, 1],
-                    0,
-                    0,
+                .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
                     target_image.clone(),
-                    [0, 0, 0],
-                    [target_img_size[0] as i32, target_img_size[1] as i32, 1],
-                    0,
-                    0,
-                    1,
-                    vulkano::sampler::Filter::Linear,
-                )
-                .unwrap();
-            builder
-                .copy_image_to_buffer(target_image.clone(), target_buffer.clone())
+                    target_buffer.clone(),
+                ))
                 .unwrap();
 
             let cb = builder.build().unwrap();
@@ -206,9 +200,7 @@ fn main() {
         // Which physical device to connect to.
         physical_device,
         DeviceCreateInfo {
-            enabled_extensions: physical_device
-                .required_extensions()
-                .union(&device_extensions),
+            enabled_extensions: device_extensions,
 
             queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
             enabled_features: Features {
