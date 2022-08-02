@@ -3,7 +3,7 @@ use crate::{
     octree::OctreeIter,
     sh::calc_sh_grid,
     vertex::{IndexVertex, Vertex},
-    CubeBoundingBox, Octree, Viewport,
+    CubeBoundingBox, Octree, SHVertex, Viewport,
 };
 use nalgebra::{distance, Matrix4, Point3};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -24,7 +24,8 @@ use vulkano::{
     image::{view::ImageView, ImageDimensions, ImmutableImage},
     pipeline::{
         graphics::{
-            depth_stencil::DepthStencilState,
+            color_blend::ColorBlendState,
+            depth_stencil::{CompareOp, DepthState, DepthStencilState},
             input_assembly::{InputAssemblyState, PrimitiveTopology},
             vertex_input::BuffersDefinition,
             viewport::ViewportState,
@@ -163,7 +164,7 @@ impl OctreeRenderer {
             });
 
         if let Some(sh_renderer) = &self.sh_renderer {
-            sh_renderer.frustum_culling(&visible_sh);
+            sh_renderer.frustum_culling(&visible_sh, u.camera_pos.into());
         }
         self.octant_renderer.frustum_culling(&visible_octants);
     }
@@ -282,6 +283,8 @@ struct SHRenderer {
     sh_mapping: HashMap<u64, u32>,
 
     sh_set: Arc<PersistentDescriptorSet>,
+
+    sh_points: Vec<SHVertex<f32, 121>>,
 }
 
 impl SHRenderer {
@@ -295,7 +298,7 @@ impl SHRenderer {
         let vs = vs_sh::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
-        let pipeline = build_pipeline::<IndexVertex>(
+        let pipeline = Self::build_pipeline(
             vs.clone(),
             fs.clone(),
             subpass.clone(),
@@ -306,14 +309,14 @@ impl SHRenderer {
         let (sh_images, sh_sampler) = Self::calc_sh_images(device.clone(), queue.clone(), 128, 10);
 
         let num_octants = octree.num_octants() as usize;
-        let mut shs = Vec::with_capacity(num_octants);
+        let mut sh_points = Vec::with_capacity(num_octants);
         let mut sh_mapping = HashMap::with_capacity(num_octants);
         for (i, octant) in octree
             .into_iter()
             .filter(|o| o.sh_approximation.is_some())
             .enumerate()
         {
-            shs.push(octant.sh_approximation.unwrap());
+            sh_points.push(octant.sh_approximation.unwrap());
             sh_mapping.insert(octant.id(), i as u32);
         }
 
@@ -321,7 +324,7 @@ impl SHRenderer {
             device.clone(),
             BufferUsage::storage_buffer(),
             false,
-            shs,
+            sh_points.clone(),
         )
         .unwrap();
 
@@ -344,6 +347,7 @@ impl SHRenderer {
             sh_index_buffer: RwLock::new(None),
             sh_mapping,
             sh_set,
+            sh_points,
         }
     }
 
@@ -380,7 +384,11 @@ impl SHRenderer {
         }
     }
 
-    pub fn frustum_culling<'a>(&self, visible_octants: &Vec<OctreeIter<'a, f32, f32>>) {
+    pub fn frustum_culling<'a>(
+        &self,
+        visible_octants: &Vec<OctreeIter<'a, f32, f32>>,
+        camera_pos: Point3<f32>,
+    ) {
         // calculate indices to all visible sh vertices
         let mut sh_vertices: Vec<IndexVertex> = visible_octants
             .par_iter()
@@ -395,7 +403,10 @@ impl SHRenderer {
             })
             .collect();
 
-        sh_vertices.sort_by_key(|v| v.index);
+        sh_vertices.sort_by_key(|v| {
+            let d = distance(&camera_pos, &self.sh_points[v.index as usize].position);
+            -(d * 100000.) as i64
+        });
 
         if sh_vertices.len() > 0 {
             let new_buffer = CpuAccessibleBuffer::from_iter(
@@ -415,7 +426,7 @@ impl SHRenderer {
 
     pub fn set_viewport(&self, viewport: Viewport) {
         let mut pipeline = self.pipeline.write().unwrap();
-        *pipeline = build_pipeline::<IndexVertex>(
+        *pipeline = Self::build_pipeline(
             self.vs.clone(),
             self.fs.clone(),
             self.subpass.clone(),
@@ -460,6 +471,39 @@ impl SHRenderer {
 
         return (sh_images_view, sampler);
     }
+
+    fn build_pipeline(
+        vs: Arc<ShaderModule>,
+        fs: Arc<ShaderModule>,
+        subpass: Subpass,
+        viewport: Viewport,
+        device: Arc<Device>,
+    ) -> Arc<GraphicsPipeline> {
+        GraphicsPipeline::start()
+            .vertex_input_state(BuffersDefinition::new().vertex::<IndexVertex>())
+            .vertex_shader(vs.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState {
+                topology: PartialStateMode::Fixed(PrimitiveTopology::PointList),
+                primitive_restart_enable: StateMode::Fixed(false),
+            })
+            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+                viewport.into()
+            ]))
+            .fragment_shader(fs.entry_point("main").unwrap(), ())
+            .depth_stencil_state(DepthStencilState {
+                depth: Some(DepthState {
+                    enable_dynamic: false,
+                    compare_op: StateMode::Fixed(CompareOp::Less),
+                    write_enable: StateMode::Fixed(false),
+                }),
+                depth_bounds: Default::default(),
+                stencil: Default::default(),
+            })
+            .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
+            .render_pass(subpass)
+            .build(device.clone())
+            .unwrap()
+    }
 }
 
 mod vs {
@@ -500,7 +544,7 @@ impl OctantRenderer {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
-        let pipeline = build_pipeline::<Vertex<f32, f32>>(
+        let pipeline = Self::build_pipeline(
             vs.clone(),
             fs.clone(),
             subpass.clone(),
@@ -625,7 +669,7 @@ impl OctantRenderer {
 
     fn set_viewport(&self, viewport: Viewport) {
         let mut pipeline = self.pipeline.write().unwrap();
-        *pipeline = build_pipeline::<Vertex<f32, f32>>(
+        *pipeline = Self::build_pipeline(
             self.vs.clone(),
             self.fs.clone(),
             self.subpass.clone(),
@@ -633,28 +677,28 @@ impl OctantRenderer {
             pipeline.device().clone(),
         );
     }
-}
 
-fn build_pipeline<V: vulkano::pipeline::graphics::vertex_input::Vertex>(
-    vs: Arc<ShaderModule>,
-    fs: Arc<ShaderModule>,
-    subpass: Subpass,
-    viewport: Viewport,
-    device: Arc<Device>,
-) -> Arc<GraphicsPipeline> {
-    GraphicsPipeline::start()
-        .vertex_input_state(BuffersDefinition::new().vertex::<V>())
-        .vertex_shader(vs.entry_point("main").unwrap(), ())
-        .input_assembly_state(InputAssemblyState {
-            topology: PartialStateMode::Fixed(PrimitiveTopology::PointList),
-            primitive_restart_enable: StateMode::Fixed(false),
-        })
-        .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
-            viewport.into()
-        ]))
-        .fragment_shader(fs.entry_point("main").unwrap(), ())
-        .depth_stencil_state(DepthStencilState::simple_depth_test())
-        .render_pass(subpass)
-        .build(device.clone())
-        .unwrap()
+    fn build_pipeline(
+        vs: Arc<ShaderModule>,
+        fs: Arc<ShaderModule>,
+        subpass: Subpass,
+        viewport: Viewport,
+        device: Arc<Device>,
+    ) -> Arc<GraphicsPipeline> {
+        GraphicsPipeline::start()
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex<f32, f32>>())
+            .vertex_shader(vs.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState {
+                topology: PartialStateMode::Fixed(PrimitiveTopology::PointList),
+                primitive_restart_enable: StateMode::Fixed(false),
+            })
+            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+                viewport.into()
+            ]))
+            .fragment_shader(fs.entry_point("main").unwrap(), ())
+            .depth_stencil_state(DepthStencilState::simple_depth_test())
+            .render_pass(subpass)
+            .build(device.clone())
+            .unwrap()
+    }
 }

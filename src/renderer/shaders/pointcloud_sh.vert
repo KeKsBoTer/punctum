@@ -78,5 +78,13 @@ void main() {
     vec3 diff = normalize(world_pos.xyz - uniforms.camera_pos);
     vec2 angle = vec2(acos(diff.z),atan(-diff.y,diff.x) + PI);
 
-    vertex_color = vec4(sh_color(angle).rgb,1);
+    vec4 dir_color = sh_color(angle);
+
+    // alpha correction
+    // we calculated the alpha value on the whole image 
+    // but only the circle is relevant so we need to correct for it
+    // TODO: change this in sh coef calculation (model & dataset)
+    dir_color.a /= 0.5*0.5*PI;
+    
+    vertex_color = dir_color;
 }
