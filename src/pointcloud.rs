@@ -153,7 +153,7 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
         let min = self.center - half_size;
         let max = self.center + half_size;
 
-        let eps = convert(1e-8);
+        let eps = convert(1e-6);
         min.x - p.x < eps
             && min.y - p.y < eps
             && min.z - p.z < eps
@@ -252,10 +252,10 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
 
     pub fn min_corner(&self) -> Point3<F> {
         let size = self.size * convert(0.5);
-        self.center - Vector3::new(-size, -size, -size)
+        self.center - Vector3::new(size, size, size)
     }
     pub fn max_corner(&self) -> Point3<F> {
         let size = self.size * convert(0.5);
-        self.center - Vector3::new(size, size, size)
+        self.center + Vector3::new(size, size, size)
     }
 }

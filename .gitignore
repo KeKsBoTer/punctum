@@ -35,3 +35,11 @@ evaluation/samples_8_1024max_64.png
 evaluation/samples_8_1024max_256.png
 evaluation/samples_16_1024max_64.png
 evaluation/samples_1024max_256.png
+evaluation/error_8_1024max_128.png
+evaluation/error_16_8192max_64.png
+evaluation/error_16_8192max_128.png
+evaluation/samples_8_1024max_128.png
+evaluation/samples_16_8192max_64.png
+evaluation/samples_16_8192max_128.png
+evaluation/samples_1024max_512.png
+evaluation/samples_1024max_model_256.png

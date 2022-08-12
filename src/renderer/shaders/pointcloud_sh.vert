@@ -64,6 +64,11 @@ void main() {
     vec4 camera_pos = uniforms.view * world_pos;
     gl_Position = uniforms.proj * camera_pos;
 
+    // depth correction
+    // use use a OpenGL style projection matrix
+    // this matrix normalizes the depth to [-1,1]
+    // but vulkan uses [0,1] for the depth buffer, so we correct for this
+    // TODO fix this in projection matrix calculation
     gl_Position.z = (gl_Position.z + gl_Position.w) / 2.0;
     
     gl_PointSize = uniforms.point_size;
