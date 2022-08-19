@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use nalgebra::Vector4;
+use nalgebra::Vector3;
 use vulkano::{
     buffer::{BufferAccess, BufferUsage, CpuAccessibleBuffer},
     command_buffer::{AutoCommandBufferBuilder, SecondaryAutoCommandBuffer},
@@ -79,7 +79,7 @@ impl OctreeDebugRenderer {
         for octant in octree.into_octant_iterator() {
             vertices.extend(octant.bbox.corners().map(|p| Vertex {
                 position: p.cast(),
-                color: Vector4::new(1.0, 1., 0., 1.0),
+                color: Vector3::new(1.0, 1., 0.),
             }));
             indices.extend_from_slice(&[
                 // front

@@ -54,10 +54,10 @@ fn lpmv(l: u64, m: i64, x: f32) -> f32 {
     return y;
 }
 
-fn phi_independent_part(l: u64, m: i64, thata: f32) -> f32 {
+fn phi_independent_part(l: u64, m: i64, theta: f32) -> f32 {
     let m_abs = m.abs() as u64;
     let norm = ((2 * l + 1) as f32 / (4. * PI)).sqrt();
-    let p = norm * lpmv(l, m_abs as i64, thata.cos());
+    let p = norm * lpmv(l, m_abs as i64, theta.cos());
     return p;
 }
 
@@ -75,6 +75,11 @@ fn get_spherical_harmonics_element(l: u64, m: i64, phi: f32, p: f32) -> f32 {
             return pre * (phi * m_abs as f32).cos();
         }
     }
+}
+
+pub fn sh_at_point(l: u64, m: i64, phi: f32, theta: f32) -> f32 {
+    let p = phi_independent_part(l, m, theta);
+    return get_spherical_harmonics_element(l, m, phi, p);
 }
 
 #[inline]
@@ -128,9 +133,7 @@ pub fn calc_sh_sparse(l_max: u64, coords: Vec<Vector2<f32>>) -> Vec<Vec<f32>> {
                 .map(|pos| {
                     let theta = pos.x;
                     let phi = pos.y;
-                    let p = phi_independent_part(l, m, theta);
-                    let value = get_spherical_harmonics_element(l as u64, m as i64, phi, p);
-                    return value;
+                    return sh_at_point(l, m, phi, theta);
                 })
                 .collect::<Vec<f32>>()
         })

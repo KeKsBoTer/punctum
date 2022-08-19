@@ -12,11 +12,11 @@ use crate::{
 pub struct Octant<F: BaseFloat, C: BaseColor> {
     id: u64,
     data: Vec<Vertex<F, C>>,
-    pub sh_approximation: Option<SHVertex<F, 121>>,
+    pub sh_approximation: Option<SHVertex<F>>,
 }
 
 impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
-    fn new(id: u64, data: Vec<Vertex<F, C>>, sh_approximation: Option<SHVertex<F, 121>>) -> Self {
+    fn new(id: u64, data: Vec<Vertex<F, C>>, sh_approximation: Option<SHVertex<F>>) -> Self {
         Self {
             id,
             data,

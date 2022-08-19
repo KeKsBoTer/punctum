@@ -31,14 +31,29 @@ struct Opt {
     output_octree: PathBuf,
 }
 
-fn read_coefs<P: AsRef<Path>>(path: P) -> io::Result<SHCoefficients<121>> {
+fn read_coefs<P: AsRef<Path>, const T: usize>(path: P) -> io::Result<SHCoefficients<T>> {
     let mut ply_file = std::fs::File::open(path)?;
     let p = Parser::<DefaultElement>::new();
 
     let ply = p.read_ply(&mut ply_file).unwrap();
 
     let coefs = ply.payload.get("sh_coefficients").unwrap();
-    let mut new_coefs = [Vector4::<f32>::zeros(); 121];
+    if coefs.len() < T {
+        println!(
+            "WARN: '{:}' has only degree {} but expected {}",
+            path.as_ref().to_string_lossy(),
+            coefs.len(),
+            T
+        );
+    } else if coefs.len() > T {
+        panic!(
+            "'{:}' has only degree {} but expected {}",
+            path.as_ref().to_string_lossy(),
+            coefs.len(),
+            T
+        );
+    }
+    let mut new_coefs = [Vector4::<f32>::zeros(); T];
     for c in coefs {
         let l = if let Property::UChar(l) = c.get("l").unwrap() {
             *l
@@ -82,10 +97,11 @@ pub fn main() {
             pb.lock().unwrap().inc();
             (octant.id(), sh_approximation)
         })
-        .collect::<HashMap<u64, SHVertex<f64, 121>>>();
+        .collect::<HashMap<u64, SHVertex<f64>>>();
 
     for octant in octree.borrow_mut().into_iter() {
-        octant.sh_approximation = Some(*sh_coefs.get(&octant.id()).unwrap());
+        let c = *sh_coefs.get(&octant.id()).unwrap();
+        octant.sh_approximation = Some(c);
     }
 
     save_octree_with_progress_bar(opt.output_octree, &octree).unwrap();

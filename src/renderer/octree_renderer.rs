@@ -53,7 +53,6 @@ pub struct OctreeRenderer {
     octant_renderer: OctantRenderer,
     sh_renderer: Option<SHRenderer>,
     debug_renderer: OctreeDebugRenderer,
-    screen_height: RwLock<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -80,7 +79,6 @@ impl OctreeRenderer {
         camera: &Camera<impl Projection>,
     ) -> Self {
         let world = Matrix4::identity();
-        let viewport_height = viewport.size()[1] as u32;
 
         let uniforms = RwLock::new(UniformBuffer::new(
             device.clone(),
@@ -129,11 +127,10 @@ impl OctreeRenderer {
             sh_renderer,
             octant_renderer,
             debug_renderer,
-            screen_height: RwLock::new(viewport_height),
         }
     }
 
-    pub fn frustum_culling(&self, mode: CullingMode) {
+    pub fn frustum_culling(&self, mode: CullingMode, threshold: f32) {
         let u = {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.data.clone()
@@ -142,13 +139,12 @@ impl OctreeRenderer {
         let frustum = self.frustum.read().unwrap();
 
         let camera_fov = PI / 2.;
-        let screen_height = self.screen_height.read().unwrap().clone();
         let cam_pos: Point3<f32> = u.camera_pos.into();
         let threshold_fn = |bbox: &CubeBoundingBox<f64>| {
             let d = distance(&bbox.center, &cam_pos.cast());
             let radius = bbox.outer_radius();
             let a = 2. * (radius / d).atan();
-            return a / camera_fov <= 1. / screen_height as f64;
+            return a / camera_fov <= threshold as f64;
         };
 
         // divide octants into the ones that are fully rendered and the
@@ -170,15 +166,11 @@ impl OctreeRenderer {
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
-        let viewport_height = viewport.size()[1] as u32;
         if let Some(sh_renderer) = &self.sh_renderer {
             sh_renderer.set_viewport(viewport.clone());
         }
         self.octant_renderer.set_viewport(viewport.clone());
         self.debug_renderer.set_viewport(viewport.clone());
-
-        let mut screen_height = self.screen_height.write().unwrap();
-        *screen_height = viewport_height;
     }
 
     pub fn render(&self, render_mode: RenderMode, debug: bool) -> Arc<SecondaryAutoCommandBuffer> {
@@ -200,11 +192,11 @@ impl OctreeRenderer {
 
         match render_mode {
             RenderMode::Both => {
+                self.octant_renderer
+                    .render(uniform_buffer.clone(), &mut builder);
                 if let Some(sh_renderer) = &self.sh_renderer {
                     sh_renderer.render(uniform_buffer.clone(), &mut builder);
                 }
-                self.octant_renderer
-                    .render(uniform_buffer.clone(), &mut builder);
             }
             RenderMode::SHOnly => {
                 if let Some(sh_renderer) = &self.sh_renderer {
@@ -232,6 +224,11 @@ impl OctreeRenderer {
     pub fn set_highlight_sh(&self, highlight_sh: bool) {
         let mut uniforms = self.uniforms.write().unwrap();
         uniforms.data.highlight_sh = highlight_sh as u32;
+    }
+
+    pub fn set_transparency(&self, transparency: bool) {
+        let mut uniforms = self.uniforms.write().unwrap();
+        uniforms.data.transparency = transparency as u32;
     }
 
     pub fn update_uniforms(&self) {
@@ -284,7 +281,7 @@ struct SHRenderer {
 
     sh_set: Arc<PersistentDescriptorSet>,
 
-    sh_points: Vec<SHVertex<f32, 121>>,
+    sh_points: Vec<SHVertex<f32>>,
 }
 
 impl SHRenderer {

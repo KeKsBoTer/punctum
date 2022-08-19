@@ -1,6 +1,7 @@
 use egui_winit_vulkano::egui::{CollapsingHeader, Context, Visuals};
 use egui_winit_vulkano::{egui, Gui};
 use nalgebra::{Point3, Vector3};
+use std::borrow::BorrowMut;
 use std::path::PathBuf;
 use std::sync::mpsc::TryRecvError;
 use std::sync::{mpsc, Arc, Mutex};
@@ -25,7 +26,8 @@ use winit::event_loop::ControlFlow;
 
 use punctum::{
     get_render_pass, load_octree_with_progress_bar, select_physical_device, CameraController,
-    CullingMode, Octree, OctreeRenderer, PerspectiveCamera, RenderMode, SurfaceFrame, Viewport,
+    CullingMode, Octree, OctreeRenderer, PerspectiveCamera, PointCloud, RenderMode, SHCoefficients,
+    SHVertex, SurfaceFrame, Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -39,7 +41,9 @@ struct GuiState {
     highlight_shs: bool,
     render_mode: RenderMode,
     frustum_culling: Option<CullingMode>,
+    lod_threshold: f32,
     debug: bool,
+    sh_transparency: bool,
 
     point_size: u32,
 }
@@ -51,7 +55,9 @@ impl GuiState {
             render_mode: RenderMode::Both,
             frustum_culling: Some(CullingMode::Mixed),
             point_size: 1,
+            lod_threshold: 0.01,
             debug: false,
+            sh_transparency: false,
         }
     }
 
@@ -73,6 +79,7 @@ impl GuiState {
                     .show(ui, |ui| {
                         ui.checkbox(&mut self.highlight_shs, "Highlight SH Pixels");
                         ui.checkbox(&mut self.debug, "Debug");
+                        ui.checkbox(&mut self.sh_transparency, "SH Transparency");
 
                         ui.horizontal(|ui| {
                             ui.label("Mode:");
@@ -108,6 +115,7 @@ impl GuiState {
                                 "Octants",
                             );
                         });
+                        ui.add(egui::DragValue::new(&mut self.lod_threshold).speed(0.001));
                     });
             });
 
@@ -194,7 +202,18 @@ fn main() {
     let opt = Opt::from_args();
     let filename = opt.input;
 
-    let octree: Octree<f32, f32> = load_octree_with_progress_bar(&filename).unwrap().into();
+    let mut octree: Octree<f32, f32> = load_octree_with_progress_bar(&filename).unwrap().into();
+
+    // use average color
+    for o in octree.borrow_mut().into_iter() {
+        let pc: &PointCloud<f32, f32> = o.points().into();
+        let (centroid, mean_color) = pc.centroid_and_color();
+        o.sh_approximation = Some(SHVertex::new(
+            centroid,
+            SHCoefficients::new_from_color(mean_color),
+        ))
+    }
+
     let octree = Arc::new(octree);
 
     let required_extensions = vulkano_win::required_extensions();
@@ -283,19 +302,19 @@ fn main() {
     ));
 
     renderer.set_point_size(1);
-    renderer.frustum_culling(CullingMode::Mixed);
+    renderer.frustum_culling(CullingMode::Mixed, window_size.height as f32);
 
     let renderer_clone = renderer.clone();
     let gui_state_clone = gui_state.clone();
 
     let (tx, rx) = mpsc::channel();
     let frustum_culling_thread = thread::spawn(move || loop {
-        let frustum_culling = {
+        let (frustum_culling, lod_threshold) = {
             let state = gui_state_clone.lock().unwrap();
-            state.frustum_culling
+            (state.frustum_culling, state.lod_threshold)
         };
         if let Some(culling_mode) = frustum_culling {
-            renderer_clone.frustum_culling(culling_mode);
+            renderer_clone.frustum_culling(culling_mode, lod_threshold);
         }
         match rx.try_recv() {
             Ok(_) | Err(TryRecvError::Disconnected) => {
@@ -391,6 +410,7 @@ fn main() {
             });
             renderer.set_point_size(state.point_size);
             renderer.set_highlight_sh(state.highlight_shs);
+            renderer.set_transparency(state.sh_transparency);
 
             renderer.set_camera(&camera);
             renderer.update_uniforms();

@@ -2,7 +2,7 @@ use std::{fs::File, io::BufWriter, time::Duration};
 
 use bincode::{serialize_into, serialized_size};
 use las::{point::Point, Read as LasRead, Reader};
-use nalgebra::{center, Point3, Vector4};
+use nalgebra::{center, Point3, Vector3};
 use pbr::ProgressBar;
 use ply_rs::parser::Parser;
 use punctum::{BaseColor, BaseFloat, CubeBoundingBox, Octree, TeeWriter, Vertex};
@@ -52,11 +52,10 @@ fn las_point_to_vertex(point: Point) -> Vertex<f64, u8> {
     let color = point.color.unwrap();
     Vertex {
         position: Point3::new(point.x, point.y, point.z),
-        color: Vector4::new(
+        color: Vector3::new(
             (color.red / 256) as u8, // 65536 = 2**16
             (color.green / 256) as u8,
             (color.blue / 256) as u8,
-            255,
         ),
     }
 }

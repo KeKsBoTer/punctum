@@ -4,7 +4,8 @@
 const float PI = 3.14159265358979323846264338327950288;
 
 //layout(constant_id=0)
-const int num_coefs = 121;
+const uint num_coefs = 25;
+
 
 layout(location = 0) in uint index;
 
@@ -16,12 +17,13 @@ layout(set = 0, binding = 0) uniform UniformData {
     vec3 camera_pos;
     uint point_size;
     bool highlight_sh;
+    bool transparency;
 } uniforms;
 
 
 struct SHVertex{
     vec3 pos;
-    vec4 coefs[121];
+    vec4 coefs[num_coefs];
 };
 
 
@@ -45,7 +47,7 @@ vec4 sh_color(vec2 angle){
 
     ivec3 img_size = textureSize(img_shs,0);
     vec2 img_pos = vec2(angle.y / (2*PI),angle.x / PI);
-    int num_sh = min(img_size.z,num_coefs);
+    uint num_sh = min(uint(img_size.z),num_coefs);
 
     vec4 color = vec4(0);
     for(int i=0;i<num_sh;i++){
@@ -85,11 +87,14 @@ void main() {
 
     vec4 dir_color = sh_color(angle);
 
-    // alpha correction
-    // we calculated the alpha value on the whole image 
-    // but only the circle is relevant so we need to correct for it
-    // TODO: change this in sh coef calculation (model & dataset)
-    dir_color.a /= 0.5*0.5*PI;
+    if (uniforms.transparency)
+        // alpha correction
+        // we calculated the alpha value on the whole image 
+        // but only the circle is relevant so we need to correct for it
+        // TODO: change this in sh coef calculation (model & dataset)
+        dir_color.a /= 0.5*0.5*PI;
+    else
+        dir_color.a = 1;
     
     vertex_color = dir_color;
 }
