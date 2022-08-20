@@ -4,10 +4,11 @@ use bytemuck::{Pod, Zeroable};
 use nalgebra::{Point3, RealField, Scalar, Vector3, Vector4};
 use num_traits::{ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
+use vulkano::pipeline::graphics::vertex_input::{VertexMember, VertexMemberTy};
 
 use crate::{
     ply::{Color, PlyType},
-    sh::sh_at_point,
+    sh::SH_0,
 };
 use serde_big_array::BigArray;
 
@@ -20,11 +21,29 @@ impl<T: Scalar + ToPrimitive + Default + RealField + PlyType + Copy + Zeroable +
 {
 }
 
+pub trait NormColor {
+    fn to_norm(&self) -> f32;
+}
+
+impl NormColor for u8 {
+    fn to_norm(&self) -> f32 {
+        (*self as f32) / 255.
+    }
+}
+impl NormColor for f32 {
+    fn to_norm(&self) -> f32 {
+        *self
+    }
+}
+
 pub trait BaseColor:
-    Scalar + Default + Color + Zero + PlyType + Copy + Zeroable + AddAssign
+    Scalar + Default + Color + Zero + PlyType + Copy + Zeroable + AddAssign + NormColor
 {
 }
-impl<T: Scalar + Zero + Color + Default + PlyType + Copy + Zeroable + AddAssign> BaseColor for T {}
+impl<T: Scalar + Zero + Color + Default + PlyType + Copy + Zeroable + AddAssign + NormColor>
+    BaseColor for T
+{
+}
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Zeroable)]
 #[repr(C)]
@@ -73,15 +92,30 @@ impl From<Vertex<f32, f32>> for Vertex<f32, u8> {
 #[repr(C)]
 pub struct SHCoefficients<const T: usize = 25>(#[serde(with = "BigArray")] [Vector4<f32>; T]);
 
+unsafe impl<const T: usize> VertexMember for SHCoefficients<T> {
+    #[inline]
+    fn format() -> (VertexMemberTy, usize) {
+        let (ty, sz) = Vector4::<f32>::format();
+        (ty, sz * T)
+    }
+}
+
 impl<const T: usize> SHCoefficients<T> {
     pub fn new_from_color(color: Vector3<f32>) -> Self {
         let mut coefs = [Vector4::zeros(); T];
-        let sh_factor = sh_at_point(0, 0, 0., 0.);
-        coefs[0].x = color.x / sh_factor;
-        coefs[0].y = color.y / sh_factor;
-        coefs[0].z = color.z / sh_factor;
-        coefs[0].w = 1. / sh_factor;
+        coefs[0].x = color.x / SH_0;
+        coefs[0].y = color.y / SH_0;
+        coefs[0].z = color.z / SH_0;
+        coefs[0].w = 1. / SH_0;
         SHCoefficients(coefs)
+    }
+
+    pub fn update_color(&mut self, color: Vector3<f32>, num_before: usize) {
+        let n_new = 1. / ((num_before + 1) as f32);
+        let n_old = num_before as f32 * n_new;
+        self.0[0].x = self.0[0].x * n_old + color.x / SH_0 * n_new;
+        self.0[0].x = self.0[0].y * n_old + color.y / SH_0 * n_new;
+        self.0[0].x = self.0[0].z * n_old + color.z / SH_0 * n_new;
     }
 }
 
@@ -119,6 +153,14 @@ impl<F: BaseFloat> SHVertex<F> {
             coefficients,
         }
     }
+
+    pub fn new_with_color(position: Point3<F>, size: F, color: Vector3<f32>) -> Self {
+        Self {
+            position,
+            size,
+            coefficients: SHCoefficients::new_from_color(color),
+        }
+    }
 }
 
 impl<F: BaseFloat> Default for SHVertex<F> {
@@ -132,11 +174,4 @@ impl<F: BaseFloat> Default for SHVertex<F> {
 }
 
 unsafe impl Pod for SHVertex<f32> {}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Zeroable, Pod, Default)]
-#[repr(C)]
-pub struct IndexVertex {
-    pub index: u32,
-}
-
-vulkano::impl_vertex!(IndexVertex, index);
+vulkano::impl_vertex!(SHVertex<f32>, position, size, coefficients);

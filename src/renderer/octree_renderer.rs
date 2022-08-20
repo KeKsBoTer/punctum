@@ -2,7 +2,7 @@ use crate::{
     camera::{Camera, Projection, ViewFrustum},
     octree::OctreeIter,
     sh::calc_sh_grid,
-    vertex::{IndexVertex, Vertex},
+    vertex::Vertex,
     CubeBoundingBox, Octree, SHVertex, Viewport,
 };
 use nalgebra::{distance, Matrix4, Point3};
@@ -51,12 +51,12 @@ pub struct OctreeRenderer {
 
     subpass: Subpass,
     octant_renderer: OctantRenderer,
-    sh_renderer: Option<SHRenderer>,
+    sh_renderer: SHRenderer,
     debug_renderer: OctreeDebugRenderer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CullingMode {
+pub enum LoDMode {
     Mixed,
     SHOnly,
     OctantsOnly,
@@ -92,17 +92,12 @@ impl OctreeRenderer {
         ));
         let frustum = RwLock::new(camera.extract_planes_from_projmat(true));
 
-        let sh_renderer = if octree.into_iter().any(|o| o.sh_approximation.is_some()) {
-            Some(SHRenderer::new(
-                device.clone(),
-                queue.clone(),
-                subpass.clone(),
-                viewport.clone(),
-                octree.clone(),
-            ))
-        } else {
-            None
-        };
+        let sh_renderer = SHRenderer::new(
+            device.clone(),
+            queue.clone(),
+            subpass.clone(),
+            viewport.clone(),
+        );
         let octant_renderer = OctantRenderer::new(
             device.clone(),
             subpass.clone(),
@@ -130,7 +125,7 @@ impl OctreeRenderer {
         }
     }
 
-    pub fn frustum_culling(&self, mode: CullingMode, threshold: f32) {
+    pub fn update_lod(&self, mode: LoDMode, threshold: f32) {
         let u = {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.data.clone()
@@ -154,21 +149,18 @@ impl OctreeRenderer {
             .visible_octants(&frustum)
             .into_par_iter()
             .partition(|o| match mode {
-                CullingMode::Mixed => o.octant.sh_approximation.is_some() && threshold_fn(&o.bbox),
-                CullingMode::SHOnly => true,
-                CullingMode::OctantsOnly => false,
+                LoDMode::Mixed => threshold_fn(&o.bbox),
+                LoDMode::SHOnly => true,
+                LoDMode::OctantsOnly => false,
             });
 
-        if let Some(sh_renderer) = &self.sh_renderer {
-            sh_renderer.frustum_culling(&visible_sh, u.camera_pos.into());
-        }
-        self.octant_renderer.frustum_culling(&visible_octants);
+        self.sh_renderer
+            .update_lod(&visible_sh, u.camera_pos.into());
+        self.octant_renderer.update_lod(&visible_octants);
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
-        if let Some(sh_renderer) = &self.sh_renderer {
-            sh_renderer.set_viewport(viewport.clone());
-        }
+        self.sh_renderer.set_viewport(viewport.clone());
         self.octant_renderer.set_viewport(viewport.clone());
         self.debug_renderer.set_viewport(viewport.clone());
     }
@@ -194,14 +186,12 @@ impl OctreeRenderer {
             RenderMode::Both => {
                 self.octant_renderer
                     .render(uniform_buffer.clone(), &mut builder);
-                if let Some(sh_renderer) = &self.sh_renderer {
-                    sh_renderer.render(uniform_buffer.clone(), &mut builder);
-                }
+                self.sh_renderer
+                    .render(uniform_buffer.clone(), &mut builder);
             }
             RenderMode::SHOnly => {
-                if let Some(sh_renderer) = &self.sh_renderer {
-                    sh_renderer.render(uniform_buffer.clone(), &mut builder);
-                }
+                self.sh_renderer
+                    .render(uniform_buffer.clone(), &mut builder);
             }
             RenderMode::OctantsOnly => {
                 self.octant_renderer
@@ -276,12 +266,9 @@ struct SHRenderer {
     vs: Arc<ShaderModule>,
     subpass: Subpass,
 
-    sh_index_buffer: RwLock<Option<Arc<CpuAccessibleBuffer<[IndexVertex]>>>>,
-    sh_mapping: HashMap<u64, u32>,
+    sh_vertex_buffer: RwLock<Option<Arc<CpuAccessibleBuffer<[SHVertex<f32>]>>>>,
 
     sh_set: Arc<PersistentDescriptorSet>,
-
-    sh_points: Vec<SHVertex<f32>>,
 }
 
 impl SHRenderer {
@@ -290,7 +277,6 @@ impl SHRenderer {
         queue: Arc<Queue>,
         subpass: Subpass,
         viewport: Viewport,
-        octree: Arc<Octree<f32, f32>>,
     ) -> Self {
         let vs = vs_sh::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
@@ -305,33 +291,14 @@ impl SHRenderer {
 
         let (sh_images, sh_sampler) = Self::calc_sh_images(device.clone(), queue.clone(), 128, 10);
 
-        let num_octants = octree.num_octants() as usize;
-        let mut sh_points = Vec::with_capacity(num_octants);
-        let mut sh_mapping = HashMap::with_capacity(num_octants);
-        for (i, octant) in octree
-            .into_iter()
-            .filter(|o| o.sh_approximation.is_some())
-            .enumerate()
-        {
-            sh_points.push(octant.sh_approximation.unwrap());
-            sh_mapping.insert(octant.id(), i as u32);
-        }
-
-        let sh_vertex_buffer = CpuAccessibleBuffer::from_iter(
-            device.clone(),
-            BufferUsage::storage_buffer(),
-            false,
-            sh_points.clone(),
-        )
-        .unwrap();
-
         let set_layouts = pipeline.layout().set_layouts();
         let sh_set = PersistentDescriptorSet::new(
             set_layouts.get(1).unwrap().clone(),
-            [
-                WriteDescriptorSet::image_view_sampler(0, sh_images.clone(), sh_sampler.clone()),
-                WriteDescriptorSet::buffer(1, sh_vertex_buffer.clone()),
-            ],
+            [WriteDescriptorSet::image_view_sampler(
+                0,
+                sh_images.clone(),
+                sh_sampler.clone(),
+            )],
         )
         .unwrap();
 
@@ -341,10 +308,8 @@ impl SHRenderer {
             vs,
             fs,
             subpass,
-            sh_index_buffer: RwLock::new(None),
-            sh_mapping,
+            sh_vertex_buffer: RwLock::new(None),
             sh_set,
-            sh_points,
         }
     }
 
@@ -371,7 +336,7 @@ impl SHRenderer {
                 [set.clone(), self.sh_set.clone()].to_vec(),
             );
 
-        let vertex_indices = self.sh_index_buffer.read().unwrap();
+        let vertex_indices = self.sh_vertex_buffer.read().unwrap();
         if vertex_indices.is_some() {
             let indices = vertex_indices.as_ref().unwrap();
             builder
@@ -381,27 +346,19 @@ impl SHRenderer {
         }
     }
 
-    pub fn frustum_culling<'a>(
+    pub fn update_lod<'a>(
         &self,
         visible_octants: &Vec<OctreeIter<'a, f32, f32>>,
         camera_pos: Point3<f32>,
     ) {
         // calculate indices to all visible sh vertices
-        let mut sh_vertices: Vec<IndexVertex> = visible_octants
+        let mut sh_vertices: Vec<SHVertex<f32>> = visible_octants
             .par_iter()
-            .filter_map(|octant| {
-                if octant.octant.sh_approximation.is_some() {
-                    Some(IndexVertex {
-                        index: *self.sh_mapping.get(&octant.octant.id()).unwrap(),
-                    })
-                } else {
-                    None
-                }
-            })
+            .map(|octant| octant.octant.sh_rep().clone())
             .collect();
 
         sh_vertices.sort_by_key(|v| {
-            let d = distance(&camera_pos, &self.sh_points[v.index as usize].position);
+            let d = distance(&camera_pos, &v.position);
             -(d * 100000.) as i64
         });
 
@@ -413,10 +370,10 @@ impl SHRenderer {
                 sh_vertices,
             )
             .unwrap();
-            let mut sh_index_buffer = self.sh_index_buffer.write().unwrap();
+            let mut sh_index_buffer = self.sh_vertex_buffer.write().unwrap();
             *sh_index_buffer = Some(new_buffer);
         } else {
-            let mut sh_index_buffer = self.sh_index_buffer.write().unwrap();
+            let mut sh_index_buffer = self.sh_vertex_buffer.write().unwrap();
             *sh_index_buffer = None;
         }
     }
@@ -477,7 +434,7 @@ impl SHRenderer {
         device: Arc<Device>,
     ) -> Arc<GraphicsPipeline> {
         GraphicsPipeline::start()
-            .vertex_input_state(BuffersDefinition::new().vertex::<IndexVertex>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<SHVertex<f32>>())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState {
                 topology: PartialStateMode::Fixed(PrimitiveTopology::PointList),
@@ -628,7 +585,7 @@ impl OctantRenderer {
         builder.draw(last_len, 1, last_offset, 0).unwrap();
     }
 
-    pub fn frustum_culling<'a>(&self, visible_octants: &Vec<OctreeIter<'a, f32, f32>>) {
+    pub fn update_lod<'a>(&self, visible_octants: &Vec<OctreeIter<'a, f32, f32>>) {
         let mut new_octants: Vec<(u32, u32)> = visible_octants
             .par_iter()
             .map(|oc| {

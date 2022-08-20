@@ -1,7 +1,7 @@
 use nalgebra::Vector2;
 use num_traits::Float;
 use rayon::prelude::*;
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_2_SQRT_PI, PI};
 
 fn semifactorial(x: u64) -> u64 {
     let mut result = 1;
@@ -139,6 +139,9 @@ pub fn calc_sh_sparse(l_max: u64, coords: Vec<Vector2<f32>>) -> Vec<Vec<f32>> {
         })
         .collect::<Vec<Vec<f32>>>()
 }
+
+pub const SH_0: f32 = 0.25 * FRAC_2_SQRT_PI;
+
 #[cfg(test)]
 mod tests {
     use image::{io::Reader as ImageReader, ImageBuffer, Luma};

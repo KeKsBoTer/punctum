@@ -26,7 +26,7 @@ use winit::event_loop::ControlFlow;
 
 use punctum::{
     get_render_pass, load_octree_with_progress_bar, select_physical_device, CameraController,
-    CullingMode, Octree, OctreeRenderer, PerspectiveCamera, PointCloud, RenderMode, SHCoefficients,
+    LoDMode, Octree, OctreeRenderer, PerspectiveCamera, PointCloud, RenderMode, SHCoefficients,
     SHVertex, SurfaceFrame, Viewport,
 };
 
@@ -40,7 +40,7 @@ struct Opt {
 struct GuiState {
     highlight_shs: bool,
     render_mode: RenderMode,
-    frustum_culling: Option<CullingMode>,
+    frustum_culling: Option<LoDMode>,
     lod_threshold: f32,
     debug: bool,
     sh_transparency: bool,
@@ -53,7 +53,7 @@ impl GuiState {
         GuiState {
             highlight_shs: false,
             render_mode: RenderMode::Both,
-            frustum_culling: Some(CullingMode::Mixed),
+            frustum_culling: Some(LoDMode::Mixed),
             point_size: 1,
             lod_threshold: 0.01,
             debug: false,
@@ -101,17 +101,17 @@ impl GuiState {
                             ui.selectable_value(&mut self.frustum_culling, None, "Off");
                             ui.selectable_value(
                                 &mut self.frustum_culling,
-                                Some(CullingMode::Mixed),
+                                Some(LoDMode::Mixed),
                                 "Mixed",
                             );
                             ui.selectable_value(
                                 &mut self.frustum_culling,
-                                Some(CullingMode::SHOnly),
+                                Some(LoDMode::SHOnly),
                                 "SHs",
                             );
                             ui.selectable_value(
                                 &mut self.frustum_culling,
-                                Some(CullingMode::OctantsOnly),
+                                Some(LoDMode::OctantsOnly),
                                 "Octants",
                             );
                         });
@@ -204,15 +204,17 @@ fn main() {
 
     let mut octree: Octree<f32, f32> = load_octree_with_progress_bar(&filename).unwrap().into();
 
-    // use average color
-    for o in octree.borrow_mut().into_iter() {
-        let pc: &PointCloud<f32, f32> = o.points().into();
-        let (centroid, mean_color) = pc.centroid_and_color();
-        o.sh_approximation = Some(SHVertex::new(
-            centroid,
-            SHCoefficients::new_from_color(mean_color),
-        ))
-    }
+    // // use average color
+    // for o in octree.borrow_mut().into_iter() {
+    //     let pc: &PointCloud<f32, f32> = o.points().into();
+    //     let (centroid, mean_color) = pc.centroid_and_color();
+    //     o.sh_rep = SHVertex::new(
+    //         centroid,
+    //         // TODO calc
+    //         1.0,
+    //         SHCoefficients::new_from_color(mean_color),
+    //     )
+    // }
 
     let octree = Arc::new(octree);
 
@@ -302,7 +304,7 @@ fn main() {
     ));
 
     renderer.set_point_size(1);
-    renderer.frustum_culling(CullingMode::Mixed, window_size.height as f32);
+    renderer.update_lod(LoDMode::Mixed, window_size.height as f32);
 
     let renderer_clone = renderer.clone();
     let gui_state_clone = gui_state.clone();
@@ -314,7 +316,7 @@ fn main() {
             (state.frustum_culling, state.lod_threshold)
         };
         if let Some(culling_mode) = frustum_culling {
-            renderer_clone.frustum_culling(culling_mode, lod_threshold);
+            renderer_clone.update_lod(culling_mode, lod_threshold);
         }
         match rx.try_recv() {
             Ok(_) | Err(TryRecvError::Disconnected) => {
