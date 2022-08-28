@@ -1,7 +1,6 @@
 use egui_winit_vulkano::egui::{CollapsingHeader, Context, Visuals};
 use egui_winit_vulkano::{egui, Gui};
 use nalgebra::{Point3, Vector3};
-use std::borrow::BorrowMut;
 use std::path::PathBuf;
 use std::sync::mpsc::TryRecvError;
 use std::sync::{mpsc, Arc, Mutex};
@@ -26,8 +25,7 @@ use winit::event_loop::ControlFlow;
 
 use punctum::{
     get_render_pass, load_octree_with_progress_bar, select_physical_device, CameraController,
-    LoDMode, Octree, OctreeRenderer, PerspectiveCamera, PointCloud, RenderMode, SHCoefficients,
-    SHVertex, SurfaceFrame, Viewport,
+    LoDMode, Octree, OctreeRenderer, PerspectiveCamera, RenderMode, SurfaceFrame, Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -202,20 +200,7 @@ fn main() {
     let opt = Opt::from_args();
     let filename = opt.input;
 
-    let mut octree: Octree<f32, f32> = load_octree_with_progress_bar(&filename).unwrap().into();
-
-    // // use average color
-    // for o in octree.borrow_mut().into_iter() {
-    //     let pc: &PointCloud<f32, f32> = o.points().into();
-    //     let (centroid, mean_color) = pc.centroid_and_color();
-    //     o.sh_rep = SHVertex::new(
-    //         centroid,
-    //         // TODO calc
-    //         1.0,
-    //         SHCoefficients::new_from_color(mean_color),
-    //     )
-    // }
-
+    let octree: Octree<f32, f32> = load_octree_with_progress_bar(&filename).unwrap().into();
     let octree = Arc::new(octree);
 
     let required_extensions = vulkano_win::required_extensions();
@@ -265,8 +250,6 @@ fn main() {
     //     .0;
 
     let swapchain_format = Format::B8G8R8A8_SRGB;
-
-    println!("{:?}", swapchain_format);
 
     let render_pass = get_render_pass(device.clone(), swapchain_format);
 

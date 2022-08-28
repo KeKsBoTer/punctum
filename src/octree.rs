@@ -52,7 +52,7 @@ impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
                         next_id(self.id, level, octant_i),
                         new_vec,
                         SHVertex::new_with_color(
-                            v.position,
+                            bbox_child.center,
                             bbox_child.size,
                             Vector3::new(
                                 v.color.x.to_norm(),
@@ -74,8 +74,13 @@ impl<F: BaseFloat, C: BaseColor> Octant<F, C> {
     pub fn id(&self) -> u64 {
         self.id
     }
+
     pub fn sh_rep(&self) -> &SHVertex<F> {
         &self.sh_rep
+    }
+
+    pub fn level(&self) -> u32 {
+        (u32::BITS - self.id.leading_zeros()) / 3
     }
 }
 
@@ -143,7 +148,7 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
                         id,
                         new_vec,
                         SHVertex::new_with_color(
-                            point.position,
+                            bbox.center,
                             bbox.size,
                             Vector3::new(
                                 point.color.x.to_norm(),
@@ -155,23 +160,6 @@ impl<F: BaseFloat, C: BaseColor> Node<F, C> {
                     return octants_created + 1;
                 }
             }
-        }
-    }
-
-    fn traverse<'a, A: FnMut(&'a Octant<F, C>, CubeBoundingBox<f64>)>(
-        &'a self,
-        f: &mut A,
-        bbox: CubeBoundingBox<f64>,
-    ) {
-        match self {
-            Node::Group(group) => {
-                for (i, node) in group.iter().enumerate() {
-                    let bbox_new = Node::<f64, C>::octant_box(i, &bbox);
-                    node.traverse(f, bbox_new);
-                }
-            }
-            Node::Filled(octant) => f(octant, bbox),
-            Node::Empty => {}
         }
     }
 
@@ -300,7 +288,7 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
                     0,
                     new_vec,
                     SHVertex::new_with_color(
-                        point.position,
+                        self.bbox.center,
                         self.bbox.size,
                         Vector3::new(
                             point.color.x.to_norm(),
@@ -313,10 +301,6 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
                 return;
             }
         }
-    }
-
-    pub fn traverse<'a, A: FnMut(&'a Octant<F, C>, CubeBoundingBox<f64>)>(&'a self, mut f: A) {
-        self.root.traverse(&mut f, self.bbox.to_f64());
     }
 
     pub fn depth(&self) -> usize {
@@ -345,29 +329,27 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
         self.max_node_size
     }
 
-    pub fn into_octant_iterator<'a>(&'a self) -> std::vec::IntoIter<OctreeIter<'a, F, C>> {
-        let mut result = vec![];
-        self.traverse(|octant, bbox| result.push(OctreeIter { octant, bbox }));
-
-        result.into_iter()
+    pub fn into_octant_iterator<'a>(&'a self) -> BBoxOctreeIterator<'a, F, C> {
+        let mut stack = Vec::new();
+        stack.push((&self.root, self.bbox));
+        BBoxOctreeIterator { stack: stack }
     }
 
     pub fn visible_octants<'a>(&'a self, frustum: &ViewFrustum<F>) -> Vec<OctreeIter<'a, F, C>> {
-        let frustum = frustum.to_f64();
         match &self.root {
             Node::Group(root) => {
                 let mut visible_octants = Vec::new();
-                let mut queue = vec![(root, self.bbox.to_f64())];
+                let mut queue = vec![(root, self.bbox)];
                 while let Some((node, bbox)) = queue.pop() {
                     if bbox.within_frustum(&frustum) {
                         for (i, child) in node.iter().enumerate() {
                             match child {
                                 Node::Group(children) => {
-                                    let bbox_child = Node::<f64, C>::octant_box(i, &bbox);
+                                    let bbox_child = Node::<F, C>::octant_box(i, &bbox);
                                     queue.push((children, bbox_child));
                                 }
                                 Node::Filled(child) => {
-                                    let bbox_child = Node::<f64, C>::octant_box(i, &bbox);
+                                    let bbox_child = Node::<F, C>::octant_box(i, &bbox);
                                     if bbox_child.within_frustum(&frustum) {
                                         visible_octants.push(OctreeIter {
                                             octant: child,
@@ -383,9 +365,11 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
                 return visible_octants;
             }
             Node::Filled(octant) => {
-                let bbox = self.bbox.to_f64();
-                if bbox.within_frustum(&frustum) {
-                    vec![OctreeIter { octant, bbox }]
+                if self.bbox.within_frustum(&frustum) {
+                    vec![OctreeIter {
+                        octant,
+                        bbox: self.bbox,
+                    }]
                 } else {
                     Vec::new()
                 }
@@ -437,12 +421,6 @@ impl<F: BaseFloat, C: BaseColor> Octree<F, C> {
             }
         }
     }
-}
-
-#[derive(Clone, Copy)]
-pub struct OctreeIter<'a, F: BaseFloat, C: BaseColor> {
-    pub octant: &'a Octant<F, C>,
-    pub bbox: CubeBoundingBox<f64>,
 }
 
 impl Into<Node<f32, f32>> for Node<f64, u8> {
@@ -551,6 +529,41 @@ impl<'a, F: BaseFloat, C: BaseColor> Iterator for OctreeIterator<'a, F, C> {
                     }
                 }
                 Node::Filled(octant) => return Some(octant),
+                Node::Empty => {
+                    panic!("unreachable")
+                }
+            }
+        }
+        None
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct OctreeIter<'a, F: BaseFloat, C: BaseColor> {
+    pub octant: &'a Octant<F, C>,
+    pub bbox: CubeBoundingBox<F>,
+}
+
+pub struct BBoxOctreeIterator<'a, F: BaseFloat, C: BaseColor> {
+    stack: Vec<(&'a Node<F, C>, CubeBoundingBox<F>)>,
+}
+
+impl<'a, F: BaseFloat, C: BaseColor> Iterator for BBoxOctreeIterator<'a, F, C> {
+    type Item = OctreeIter<'a, F, C>;
+
+    fn next(&mut self) -> Option<OctreeIter<'a, F, C>> {
+        while let Some((node, bbox)) = self.stack.pop() {
+            match node {
+                Node::Group(group) => {
+                    for (i, child_node) in group.iter().enumerate() {
+                        if let Node::Empty = child_node {
+                        } else {
+                            let bbox_child = Node::<F, C>::octant_box(i, &bbox);
+                            self.stack.push((child_node, bbox_child));
+                        }
+                    }
+                }
+                Node::Filled(octant) => return Some(OctreeIter { octant, bbox }),
                 Node::Empty => {
                     panic!("unreachable")
                 }

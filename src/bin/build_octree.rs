@@ -198,7 +198,7 @@ fn main() {
     };
 
     // we check that all ids are unqiue
-    // if not the three is to deep (or something is wrong in the code :P)
+    // if not the tree is to deep (or something is wrong in the code :P)
     let mut ids = octree
         .into_iter()
         .map(|octant| octant.id())
@@ -220,6 +220,14 @@ fn main() {
                     octant.bbox.max_corner()
                 );
             }
+        }
+        if !octant.bbox.contains(&octant.octant.sh_rep.position) {
+            panic!(
+                "sh rep {:?} not contained by its bounding box (min: {:?}, max: {:?})",
+                octant.octant.sh_rep.position,
+                octant.bbox.min_corner(),
+                octant.bbox.max_corner()
+            );
         }
     }
 

@@ -48,6 +48,15 @@ vec4 sh_color(vec2 angle){
     return color;
 }
 
+float calc_point_size(vec2 screen_pos,float cam_distance){
+    float a = length(vec2(screen_pos.x*16/9,screen_pos.y)-0.5);
+    
+    float screen_p = 2* atan(size/(2*cam_distance));
+    float fovy = PI;
+
+    return 2 * screen_p/fovy * 1080; //* (1 +  2*tan(0.5*a*fovy/2));
+}
+
 void main() {
     // absolute position within world
     vec4 world_pos = uniforms.world * vec4(position,1);
@@ -57,19 +66,17 @@ void main() {
     gl_Position = uniforms.proj * camera_pos;
 
     // depth correction
-    // use use a OpenGL style projection matrix
+    // we use a OpenGL style projection matrix
     // this matrix normalizes the depth to [-1,1]
     // but vulkan uses [0,1] for the depth buffer, so we correct for this
     // TODO fix this in projection matrix calculation
     gl_Position.z = (gl_Position.z + gl_Position.w) / 2.0;
 
-    vec3 d = world_pos.xyz - uniforms.camera_pos;
+    vec2 screen_pos = gl_Position.xy/gl_Position.w;
+    vec3 d = camera_pos.xyz;
     float cam_distance = length(d);
-    
-    float screen_p = 2* atan(size/(2*cam_distance));
-    float fov = PI/2;
 
-    gl_PointSize = screen_p/fov * 1080;
+    gl_PointSize = calc_point_size(screen_pos,cam_distance);
     pointSize = gl_PointSize;
     vertex_pos = gl_Position;
 

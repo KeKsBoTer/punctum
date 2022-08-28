@@ -5,11 +5,11 @@ use crate::{
     vertex::Vertex,
     CubeBoundingBox, Octree, SHVertex, Viewport,
 };
-use nalgebra::{distance, Matrix4, Point3};
+use nalgebra::{distance, distance_squared, Matrix4, Point3};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashMap,
-    f64::consts::PI,
+    f32::consts::PI,
     sync::{Arc, RwLock},
 };
 use vulkano::{
@@ -135,11 +135,11 @@ impl OctreeRenderer {
 
         let camera_fov = PI / 2.;
         let cam_pos: Point3<f32> = u.camera_pos.into();
-        let threshold_fn = |bbox: &CubeBoundingBox<f64>| {
+        let threshold_fn = |bbox: &CubeBoundingBox<f32>| {
             let d = distance(&bbox.center, &cam_pos.cast());
             let radius = bbox.outer_radius();
             let a = 2. * (radius / d).atan();
-            return a / camera_fov <= threshold as f64;
+            return a / camera_fov <= threshold;
         };
 
         // divide octants into the ones that are fully rendered and the
@@ -166,9 +166,9 @@ impl OctreeRenderer {
     }
 
     pub fn render(&self, render_mode: RenderMode, debug: bool) -> Arc<SecondaryAutoCommandBuffer> {
-        let uniform_buffer = {
+        let (uniform_buffer, uniform_data) = {
             let uniforms = self.uniforms.read().unwrap();
-            uniforms.buffer().clone()
+            (uniforms.buffer().clone(), uniforms.data.clone())
         };
 
         let mut builder = AutoCommandBufferBuilder::secondary(
@@ -186,12 +186,18 @@ impl OctreeRenderer {
             RenderMode::Both => {
                 self.octant_renderer
                     .render(uniform_buffer.clone(), &mut builder);
-                self.sh_renderer
-                    .render(uniform_buffer.clone(), &mut builder);
+                self.sh_renderer.render(
+                    uniform_buffer.clone(),
+                    &mut builder,
+                    uniform_data.transparency != 0,
+                );
             }
             RenderMode::SHOnly => {
-                self.sh_renderer
-                    .render(uniform_buffer.clone(), &mut builder);
+                self.sh_renderer.render(
+                    uniform_buffer.clone(),
+                    &mut builder,
+                    uniform_data.transparency != 0,
+                );
             }
             RenderMode::OctantsOnly => {
                 self.octant_renderer
@@ -317,6 +323,7 @@ impl SHRenderer {
         &self,
         uniforms: Arc<dyn BufferAccess>,
         builder: &mut AutoCommandBufferBuilder<SecondaryAutoCommandBuffer>,
+        transparency: bool,
     ) {
         let pipeline = self.pipeline.read().unwrap();
         let set_layouts = pipeline.layout().set_layouts();
@@ -336,12 +343,14 @@ impl SHRenderer {
                 [set.clone(), self.sh_set.clone()].to_vec(),
             );
 
-        let vertex_indices = self.sh_vertex_buffer.read().unwrap();
-        if vertex_indices.is_some() {
-            let indices = vertex_indices.as_ref().unwrap();
+        builder.set_depth_write_enable(!transparency);
+
+        let sh_vertex_buffer = self.sh_vertex_buffer.read().unwrap();
+        if sh_vertex_buffer.is_some() {
+            let vertex_buffer = sh_vertex_buffer.as_ref().unwrap();
             builder
-                .bind_vertex_buffers(0, indices.clone())
-                .draw(indices.into_buffer_slice().len() as u32, 1, 0, 0)
+                .bind_vertex_buffers(0, vertex_buffer.clone())
+                .draw(vertex_buffer.into_buffer_slice().len() as u32, 1, 0, 0)
                 .unwrap();
         }
     }
@@ -358,10 +367,9 @@ impl SHRenderer {
             .collect();
 
         sh_vertices.sort_by_key(|v| {
-            let d = distance(&camera_pos, &v.position);
+            let d = distance_squared(&camera_pos, &v.position);
             -(d * 100000.) as i64
         });
-
         if sh_vertices.len() > 0 {
             let new_buffer = CpuAccessibleBuffer::from_iter(
                 self.device.clone(),
@@ -448,7 +456,7 @@ impl SHRenderer {
                 depth: Some(DepthState {
                     enable_dynamic: false,
                     compare_op: StateMode::Fixed(CompareOp::Less),
-                    write_enable: StateMode::Fixed(false),
+                    write_enable: StateMode::Dynamic,
                 }),
                 depth_bounds: Default::default(),
                 stencil: Default::default(),
