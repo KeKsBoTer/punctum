@@ -200,7 +200,7 @@ fn main() {
     let opt = Opt::from_args();
     let filename = opt.input;
 
-    let octree: Octree<f32, f32> = load_octree_with_progress_bar(&filename).unwrap().into();
+    let octree: Octree<f32> = load_octree_with_progress_bar(&filename).unwrap().into();
     let octree = Arc::new(octree);
 
     let required_extensions = vulkano_win::required_extensions();

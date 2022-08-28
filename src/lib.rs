@@ -41,7 +41,7 @@ pub use renderer::{
     Frame, LoDMode, OctreeRenderer, PointCloudRenderer, RenderMode, SurfaceFrame, Viewport,
 };
 pub use tee::{TeeReader, TeeWriter};
-pub use vertex::{BaseColor, BaseFloat, SHCoefficients, SHVertex, Vertex};
+pub use vertex::{BaseFloat, SHCoefficients, SHVertex, Vertex};
 
 pub fn select_physical_device<'a>(
     instance: &'a Arc<Instance>,

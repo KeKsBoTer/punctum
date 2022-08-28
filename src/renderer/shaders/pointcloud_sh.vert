@@ -9,7 +9,7 @@ const uint num_coefs = 25;
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in float size;
-layout(location = 2) in vec4 coefficients[num_coefs];
+layout(location = 2) in vec3 coefficients[num_coefs];
 
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 world;
@@ -34,15 +34,15 @@ layout(location = 0) out vec4 vertex_color;
 layout(location = 1) out vec4 vertex_pos;
 layout(location = 2) out float pointSize;
 
-vec4 sh_color(vec2 angle){
+vec3 sh_color(vec2 angle){
 
     ivec3 img_size = textureSize(img_shs,0);
     vec2 img_pos = vec2(angle.y / (2*PI),angle.x / PI);
     uint num_sh = min(uint(img_size.z),num_coefs);
 
-    vec4 color = vec4(0);
+    vec3 color = vec3(0);
     for(int i=0;i<num_sh;i++){
-        vec4 coefs = coefficients[i];
+        vec3 coefs = coefficients[i];
         color += coefs * texture(img_shs, vec3(img_pos,i)).r;
     }
     return color;
@@ -88,16 +88,7 @@ void main() {
     vec3 camera_normal = d/cam_distance;
     vec2 angle = vec2(acos(camera_normal.z),atan(-camera_normal.y,camera_normal.x) + PI);
 
-    vec4 dir_color = sh_color(angle);
-
-    if (uniforms.transparency)
-        // alpha correction
-        // we calculated the alpha value on the whole image 
-        // but only the circle is relevant so we need to correct for it
-        // TODO: change this in sh coef calculation (model & dataset)
-        dir_color.a /= 0.5*0.5*PI;
-    else
-        dir_color.a = 1;
+    vec3 dir_color = sh_color(angle);
     
-    vertex_color = dir_color;
+    vertex_color = vec4(dir_color,1.);
 }

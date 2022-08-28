@@ -15,21 +15,19 @@ use ply_rs::{
 };
 
 use crate::{
-    camera::Projection,
-    vertex::{BaseColor, BaseFloat},
-    Camera, Octree, PointCloud, TeeReader, TeeWriter, Vertex,
+    camera::Projection, vertex::BaseFloat, Camera, Octree, PointCloud, TeeReader, TeeWriter, Vertex,
 };
 
-pub fn export_ply<F: BaseFloat, C: BaseColor>(output_file: &PathBuf, pc: &PointCloud<F, C>) {
+pub fn export_ply<F: BaseFloat>(output_file: &PathBuf, pc: &PointCloud<F>) {
     let mut file = BufWriter::new(File::create(output_file).unwrap());
 
-    let mut ply = Ply::<Vertex<F, C>>::new();
-    let mut elm_def = Vertex::<F, C>::element_def("vertex".to_string());
+    let mut ply = Ply::<Vertex<F>>::new();
+    let mut elm_def = Vertex::<F>::element_def("vertex".to_string());
     elm_def.count = pc.points().len();
     ply.header.encoding = Encoding::BinaryLittleEndian;
     ply.header.elements.add(elm_def.clone());
 
-    let w = Writer::<Vertex<F, C>>::new();
+    let w = Writer::<Vertex<F>>::new();
     w.write_header(&mut file, &ply.header).unwrap();
     w.write_payload_of_element(
         &mut file,
@@ -79,7 +77,7 @@ pub fn load_raw_coefs<P: AsRef<Path>>(path: P) -> io::Result<HashMap<u64, Vec<Ve
     Ok(coefs)
 }
 
-pub fn load_octree_with_progress_bar<P: AsRef<Path>>(path: P) -> io::Result<Octree<f64, u8>> {
+pub fn load_octree_with_progress_bar<P: AsRef<Path>>(path: P) -> io::Result<Octree<f64>> {
     let p = path.as_ref();
     let filename = p.to_str().unwrap();
     let in_file = File::open(p)?;
@@ -93,13 +91,13 @@ pub fn load_octree_with_progress_bar<P: AsRef<Path>>(path: P) -> io::Result<Octr
     pb.set_units(pbr::Units::Bytes);
     let mut tee = TeeReader::new(&mut buf, &mut pb);
 
-    let octree: Octree<f64, u8> = bincode::deserialize_from(&mut tee).unwrap();
+    let octree: Octree<f64> = bincode::deserialize_from(&mut tee).unwrap();
     return Ok(octree);
 }
 
 pub fn save_octree_with_progress_bar<P: AsRef<Path>>(
     path: P,
-    octree: &Octree<f64, u8>,
+    octree: &Octree<f64>,
 ) -> io::Result<()> {
     let mut pb = ProgressBar::new(serialized_size(&octree).unwrap());
     pb.set_units(pbr::Units::Bytes);
@@ -120,7 +118,7 @@ pub fn load_cameras<P: AsRef<Path>, C: Projection + Clone>(
     let mut f = std::fs::File::open(path)?;
 
     // create a parser
-    let p = ply_rs::parser::Parser::<Vertex<f32, f32>>::new();
+    let p = ply_rs::parser::Parser::<Vertex<f32>>::new();
 
     // use the parser: read the entire file
     let in_ply = p.read_ply(&mut f).unwrap();

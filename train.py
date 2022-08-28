@@ -4,6 +4,7 @@ from os import path
 from typing import Tuple
 
 import torch
+import numpy as np
 import torch.utils.data as data
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
@@ -13,13 +14,11 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from pointnet.dataset import OctantDataset, collate_batched_point_clouds, lm2flat_index
+from pointnet.loss import camera_loss, l2_loss
 from pointnet.model import PointNet
 from pointnet.pointclouds import Pointclouds
 from pointnet.sh import calc_sh
-from pointnet.loss import l2_loss, camera_loss
 from pointnet.utils import camera_positions
-
-# torch.backends.cudnn.benchmark = True
 
 
 class CoefNormalizer:
@@ -183,7 +182,7 @@ if __name__ == "__main__":
     epochs = args.epochs
     experiment_name = args.name
 
-    num_color_channels = 4
+    num_color_channels = 3
 
     logging.basicConfig(level=logging.INFO)
     logger.info(f"loading dataset {ds_path}")

@@ -34,32 +34,28 @@ struct Opt {
     export_images: bool,
 }
 
-fn export_ply(
-    output_file: &PathBuf,
-    pc: PointCloud<f32, f32>,
-    observed_colors: &Vec<Vertex<f32, u8>>,
-) {
+fn export_ply(output_file: &PathBuf, pc: PointCloud<f32>, observed_colors: &Vec<Vertex<f32>>) {
     let mut file = BufWriter::new(File::create(output_file).unwrap());
 
-    let mut ply = Ply::<punctum::Vertex<f32, u8>>::new();
+    let mut ply = Ply::<punctum::Vertex<f32>>::new();
     ply.header.encoding = Encoding::BinaryLittleEndian;
 
-    let mut elm_def_vertex = punctum::Vertex::<f32, u8>::element_def("vertex".to_string());
+    let mut elm_def_vertex = punctum::Vertex::<f32>::element_def("vertex".to_string());
     elm_def_vertex.count = pc.points().len();
     ply.header.elements.add(elm_def_vertex.clone());
 
-    let mut elm_def_camera = Vertex::<f32, u8>::element_def("camera".to_string());
+    let mut elm_def_camera = Vertex::<f32>::element_def("camera".to_string());
     elm_def_camera.count = observed_colors.len();
     ply.header.elements.add(elm_def_camera.clone());
 
-    let w = Writer::<punctum::Vertex<f32, u8>>::new();
+    let w = Writer::<punctum::Vertex<f32>>::new();
     w.write_header(&mut file, &ply.header).unwrap();
 
     let points_u8 = pc
         .points()
         .iter()
         .map(|p| (*p).into())
-        .collect::<Vec<Vertex<f32, u8>>>();
+        .collect::<Vec<Vertex<f32>>>();
 
     w.write_payload_of_element(&mut file, &points_u8, &elm_def_vertex, &ply.header)
         .unwrap();
@@ -75,7 +71,7 @@ fn main() {
         std::fs::create_dir(opt.output_folder.clone()).unwrap();
     }
 
-    let octree: Arc<Octree<f32, f32>> = Arc::new({
+    let octree: Arc<Octree<f32>> = Arc::new({
         let in_file = File::open(&opt.input).unwrap();
 
         let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
@@ -87,7 +83,7 @@ fn main() {
         pb.set_units(pbr::Units::Bytes);
         let mut tee = TeeReader::new(&mut buf, &mut pb);
 
-        let octree: Octree<f64, u8> = bincode::deserialize_from(&mut tee).unwrap();
+        let octree: Octree<f64> = bincode::deserialize_from(&mut tee).unwrap();
 
         pb.finish_println("done!");
 
@@ -115,7 +111,7 @@ fn main() {
         .unwrap();
 
     let octree_iter = octree.into_iter();
-    let all_octants = octree_iter.collect::<Vec<&Octant<f32, f32>>>();
+    let all_octants = octree_iter.collect::<Vec<&Octant<f32>>>();
 
     let output_folder = opt.output_folder.as_path();
 
@@ -136,7 +132,7 @@ fn main() {
                     );
 
                     for octant in octants {
-                        let mut pc: PointCloud<f32, f32> = octant.points().clone().into();
+                        let mut pc: PointCloud<f32> = octant.points().clone().into();
                         pc.scale_to_unit_sphere();
 
                         let renders: Vec<Rgba<u8>> = {
@@ -175,12 +171,12 @@ fn main() {
                             renders
                         };
 
-                        let cam_colors: Vec<Vertex<f32, u8>> = renders
+                        let cam_colors: Vec<Vertex<f32>> = renders
                             .iter()
                             .zip(cameras.clone())
                             .map(|(color, cam)| Vertex {
                                 position: cam.position(),
-                                color: Vector3::from(color.0[0..3]),
+                                color: Vector3::new(color.0[0], color.0[1], color.0[2]),
                             })
                             .collect();
 

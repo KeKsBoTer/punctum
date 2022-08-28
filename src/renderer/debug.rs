@@ -49,7 +49,7 @@ pub struct OctreeDebugRenderer {
     subpass: Subpass,
 
     /// all octree vertices in one block of memory
-    vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>>,
+    vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32>]>>,
     index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
 }
 
@@ -58,12 +58,12 @@ impl OctreeDebugRenderer {
         device: Arc<Device>,
         subpass: Subpass,
         viewport: Viewport,
-        octree: Arc<Octree<f32, f32>>,
+        octree: Arc<Octree<f32>>,
     ) -> Self {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
 
-        let pipeline = build_pipeline::<Vertex<f32, f32>>(
+        let pipeline = build_pipeline::<Vertex<f32>>(
             vs.clone(),
             fs.clone(),
             subpass.clone(),
@@ -71,14 +71,13 @@ impl OctreeDebugRenderer {
             device.clone(),
         );
 
-        let mut vertices: Vec<Vertex<f32, f32>> =
-            Vec::with_capacity(octree.num_octants() as usize * 8);
+        let mut vertices: Vec<Vertex<f32>> = Vec::with_capacity(octree.num_octants() as usize * 8);
         let mut indices = Vec::with_capacity(octree.num_octants() as usize * 24);
         let mut index: u32 = 0;
         for octant in octree.into_octant_iterator() {
             vertices.extend(octant.bbox.corners().map(|p| Vertex {
                 position: p,
-                color: Vector3::new(1., 1., 0.),
+                color: Vector3::new(255, 255, 0),
             }));
             let new_indices = [
                 // front
@@ -177,7 +176,7 @@ impl OctreeDebugRenderer {
 
     pub fn set_viewport(&self, viewport: Viewport) {
         let mut pipeline = self.pipeline.write().unwrap();
-        *pipeline = build_pipeline::<Vertex<f32, f32>>(
+        *pipeline = build_pipeline::<Vertex<f32>>(
             self.vs.clone(),
             self.fs.clone(),
             self.subpass.clone(),

@@ -47,7 +47,7 @@ pub struct OctreeRenderer {
     uniforms: RwLock<UniformBuffer<vs::ty::UniformData>>,
     frustum: RwLock<ViewFrustum<f32>>,
 
-    octree: Arc<Octree<f32, f32>>,
+    octree: Arc<Octree<f32>>,
 
     subpass: Subpass,
     octant_renderer: OctantRenderer,
@@ -75,7 +75,7 @@ impl OctreeRenderer {
         queue: Arc<Queue>,
         subpass: Subpass,
         viewport: Viewport,
-        octree: Arc<Octree<f32, f32>>,
+        octree: Arc<Octree<f32>>,
         camera: &Camera<impl Projection>,
     ) -> Self {
         let world = Matrix4::identity();
@@ -357,7 +357,7 @@ impl SHRenderer {
 
     pub fn update_lod<'a>(
         &self,
-        visible_octants: &Vec<OctreeIter<'a, f32, f32>>,
+        visible_octants: &Vec<OctreeIter<'a, f32>>,
         camera_pos: Point3<f32>,
     ) {
         // calculate indices to all visible sh vertices
@@ -491,7 +491,7 @@ struct OctantRenderer {
     visible_octants: RwLock<Vec<(u32, u32)>>,
 
     /// all octree vertices in one block of memory
-    vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>>,
+    vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32>]>>,
     /// maps octant ids to (location,size) in vertex_buffer
     vertex_mapping: HashMap<u64, (u32, u32)>,
 }
@@ -501,7 +501,7 @@ impl OctantRenderer {
         device: Arc<Device>,
         subpass: Subpass,
         viewport: Viewport,
-        octree: Arc<Octree<f32, f32>>,
+        octree: Arc<Octree<f32>>,
     ) -> Self {
         let vs = vs::load(device.clone()).expect("failed to create shader module");
         let fs = fs::load(device.clone()).expect("failed to create shader module");
@@ -516,7 +516,7 @@ impl OctantRenderer {
 
         // upload all vertices to GPU into one large buffer
         // stores memory mapping in hash map for later access
-        let vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32, f32>]>> = unsafe {
+        let vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32>]>> = unsafe {
             CpuAccessibleBuffer::uninitialized_array(
                 device.clone(),
                 octree.num_points(),
@@ -531,9 +531,9 @@ impl OctantRenderer {
         {
             let mut vertices = vertex_buffer.write().unwrap();
             for octant in octree.into_iter() {
-                let octant_size = octant.points().len();
+                let octant_size = octant.points().0.len();
                 vertex_mapping.insert(octant.id(), (offset, octant_size as u32));
-                for (i, p) in octant.points().iter().enumerate() {
+                for (i, p) in octant.points().0.iter().enumerate() {
                     vertices[offset as usize + i] = *p;
                 }
                 offset += octant_size as u32;
@@ -593,7 +593,7 @@ impl OctantRenderer {
         builder.draw(last_len, 1, last_offset, 0).unwrap();
     }
 
-    pub fn update_lod<'a>(&self, visible_octants: &Vec<OctreeIter<'a, f32, f32>>) {
+    pub fn update_lod<'a>(&self, visible_octants: &Vec<OctreeIter<'a, f32>>) {
         let mut new_octants: Vec<(u32, u32)> = visible_octants
             .par_iter()
             .map(|oc| {
@@ -648,7 +648,7 @@ impl OctantRenderer {
         device: Arc<Device>,
     ) -> Arc<GraphicsPipeline> {
         GraphicsPipeline::start()
-            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex<f32, f32>>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex<f32>>())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState {
                 topology: PartialStateMode::Fixed(PrimitiveTopology::PointList),
