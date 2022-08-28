@@ -90,7 +90,7 @@ unsafe impl Pod for SHCoefficients {}
 #[repr(C)]
 pub struct SHVertex<F: BaseFloat> {
     pub position: Point3<F>,
-    pub size: F,
+    pub radius: F,
     pub coefficients: SHCoefficients,
 }
 
@@ -98,7 +98,7 @@ impl Into<SHVertex<f32>> for SHVertex<f64> {
     fn into(self) -> SHVertex<f32> {
         SHVertex {
             position: self.position.cast(),
-            size: self.size as f32,
+            radius: self.radius as f32,
             coefficients: self.coefficients.clone(),
         }
     }
@@ -108,7 +108,7 @@ impl<F: BaseFloat> SHVertex<F> {
     pub fn new(position: Point3<F>, size: F, coefficients: SHCoefficients) -> Self {
         Self {
             position,
-            size,
+            radius: size,
             coefficients,
         }
     }
@@ -116,7 +116,7 @@ impl<F: BaseFloat> SHVertex<F> {
     pub fn new_with_color(position: Point3<F>, size: F, color: Vector3<f32>) -> Self {
         Self {
             position,
-            size,
+            radius: size,
             coefficients: SHCoefficients::new_from_color(color),
         }
     }
@@ -126,11 +126,11 @@ impl<F: BaseFloat> Default for SHVertex<F> {
     fn default() -> Self {
         Self {
             position: Point3::origin(),
-            size: F::from_subset(&1.),
+            radius: F::from_subset(&1.),
             coefficients: SHCoefficients::zeroed(),
         }
     }
 }
 
 unsafe impl Pod for SHVertex<f32> {}
-vulkano::impl_vertex!(SHVertex<f32>, position, size, coefficients);
+vulkano::impl_vertex!(SHVertex<f32>, position, radius, coefficients);

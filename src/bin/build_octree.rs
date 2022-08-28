@@ -2,10 +2,10 @@ use std::{borrow::BorrowMut, fs::File, io::BufWriter, time::Duration};
 
 use bincode::{serialize_into, serialized_size};
 use las::{point::Point, Read as LasRead, Reader};
-use nalgebra::{center, distance_squared, Point3, Vector3};
+use nalgebra::{center, distance, distance_squared, Point3, Vector3};
 use pbr::ProgressBar;
 use ply_rs::parser::Parser;
-use punctum::{BaseFloat, CubeBoundingBox, Octree, SHCoefficients, TeeWriter, Vertex};
+use punctum::{BaseFloat, CubeBoundingBox, Octree, SHCoefficients, SHVertex, TeeWriter, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -191,7 +191,7 @@ fn main() {
         let pc = leaf_node.points();
         let (centroid, avg_color) = pc.centroid_and_color();
 
-        let size = leaf_node
+        let radius = leaf_node
             .points()
             .0
             .iter()
@@ -200,8 +200,55 @@ fn main() {
             .unwrap();
 
         leaf_node.sh_rep.position = centroid;
-        leaf_node.sh_rep.size = size.sqrt();
+        leaf_node.sh_rep.radius = radius.sqrt();
         leaf_node.sh_rep.coefficients = SHCoefficients::new_from_color(avg_color.cast() / 255.);
+    }
+
+    let intermediate_nodes = octree.itermediate_octants();
+    for id in intermediate_nodes.iter().rev() {
+        if let punctum::Node::Intermediate(node) = octree
+            .get_mut(*id)
+            .expect(&format!("cannot find id {:}", id))
+        {
+            let mut centroid = Point3::origin();
+            for child in node.data.iter() {
+                match child {
+                    punctum::Node::Intermediate(child) => {
+                        centroid += child.sh_rep.position.coords;
+                    }
+                    punctum::Node::Leaf(child) => {
+                        centroid += child.sh_rep.position.coords;
+                    }
+                    punctum::Node::Empty => {}
+                }
+            }
+            centroid /= node.data.len() as f64;
+            let mut max_distance = 0.;
+            for child in node.data.iter() {
+                match child {
+                    punctum::Node::Intermediate(child) => {
+                        max_distance = f64::max(
+                            max_distance,
+                            distance(&centroid, &child.sh_rep.position) + child.sh_rep.radius,
+                        )
+                    }
+                    punctum::Node::Leaf(child) => {
+                        max_distance = f64::max(
+                            max_distance,
+                            distance(&centroid, &child.sh_rep.position) + child.sh_rep.radius,
+                        )
+                    }
+                    punctum::Node::Empty => {}
+                }
+            }
+            node.sh_rep = SHVertex::new(
+                centroid,
+                max_distance,
+                SHCoefficients::new_from_color(Vector3::new(1., 0., 0.)),
+            );
+        } else {
+            unreachable!()
+        }
     }
 
     // we check that all ids are unqiue

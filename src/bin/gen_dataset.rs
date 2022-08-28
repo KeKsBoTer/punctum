@@ -12,7 +12,7 @@ use ply_rs::{
     writer::Writer,
 };
 use punctum::{
-    load_cameras, Octant, Octree, OfflineRenderer, OrthographicProjection, PointCloud,
+    load_cameras, LeafNode, Octree, OfflineRenderer, OrthographicProjection, PointCloud,
     PointCloudGPU, RenderSettings, TeeReader, Vertex,
 };
 use std::path::PathBuf;
@@ -111,7 +111,7 @@ fn main() {
         .unwrap();
 
     let octree_iter = octree.into_iter();
-    let all_octants = octree_iter.collect::<Vec<&Octant<f32>>>();
+    let all_octants = octree_iter.collect::<Vec<&LeafNode<f32>>>();
 
     let output_folder = opt.output_folder.as_path();
 

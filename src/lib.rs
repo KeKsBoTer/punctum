@@ -35,7 +35,7 @@ pub use io::{
     export_ply, load_cameras, load_octree_with_progress_bar, load_raw_coefs,
     save_octree_with_progress_bar,
 };
-pub use octree::{Node, Octant, Octree, OctreeIterator};
+pub use octree::{LeafNode, Node, Octree, OctreeIterator};
 pub use pointcloud::{CubeBoundingBox, PointCloud, PointCloudGPU};
 pub use renderer::{
     Frame, LoDMode, OctreeRenderer, PointCloudRenderer, RenderMode, SurfaceFrame, Viewport,
@@ -228,4 +228,10 @@ unsafe impl DeviceOwned for OfflineRenderer {
     fn device(&self) -> &Arc<Device> {
         &self.queue.device()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LoD {
+    SHRep,
+    Full,
 }

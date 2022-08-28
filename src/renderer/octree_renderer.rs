@@ -1,12 +1,11 @@
 use crate::{
     camera::{Camera, Projection, ViewFrustum},
-    octree::OctreeIter,
     sh::calc_sh_grid,
     vertex::Vertex,
-    CubeBoundingBox, Octree, SHVertex, Viewport,
+    CubeBoundingBox, Node, Octree, SHVertex, Viewport,
 };
 use nalgebra::{distance, distance_squared, Matrix4, Point3};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashMap,
     f32::consts::PI,
@@ -67,6 +66,12 @@ pub enum RenderMode {
     Both,
     SHOnly,
     OctantsOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LoD {
+    SHRep,
+    Full,
 }
 
 impl OctreeRenderer {
@@ -135,28 +140,43 @@ impl OctreeRenderer {
 
         let camera_fov = PI / 2.;
         let cam_pos: Point3<f32> = u.camera_pos.into();
+
         let threshold_fn = |bbox: &CubeBoundingBox<f32>| {
             let d = distance(&bbox.center, &cam_pos.cast());
             let radius = bbox.outer_radius();
             let a = 2. * (radius / d).atan();
-            return a / camera_fov <= threshold;
+            if a / camera_fov <= threshold {
+                LoD::SHRep
+            } else {
+                LoD::Full
+            }
+        };
+
+        let lod_fn = |bbox: &CubeBoundingBox<f32>, is_leaf: bool| {
+            if bbox.within_frustum(&frustum) {
+                match mode {
+                    LoDMode::Mixed => Some(threshold_fn(bbox)),
+                    LoDMode::SHOnly => {
+                        if is_leaf {
+                            Some(LoD::SHRep)
+                        } else {
+                            Some(threshold_fn(bbox))
+                        }
+                    }
+                    LoDMode::OctantsOnly => Some(LoD::Full),
+                }
+            } else {
+                None
+            }
         };
 
         // divide octants into the ones that are fully rendered and the
         // ones that get rendered with the spherical harmonics representation
-        let (visible_sh, visible_octants): (Vec<_>, Vec<_>) = self
-            .octree
-            .visible_octants(&frustum)
-            .into_par_iter()
-            .partition(|o| match mode {
-                LoDMode::Mixed => threshold_fn(&o.bbox),
-                LoDMode::SHOnly => true,
-                LoDMode::OctantsOnly => false,
-            });
+        let (visible_octants, visible_shs): (Vec<_>, Vec<_>) = lod(&self.octree, lod_fn);
 
         self.sh_renderer
-            .update_lod(&visible_sh, u.camera_pos.into());
-        self.octant_renderer.update_lod(&visible_octants);
+            .update_lod(visible_shs, u.camera_pos.into());
+        self.octant_renderer.update_lod(visible_octants);
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
@@ -355,16 +375,9 @@ impl SHRenderer {
         }
     }
 
-    pub fn update_lod<'a>(
-        &self,
-        visible_octants: &Vec<OctreeIter<'a, f32>>,
-        camera_pos: Point3<f32>,
-    ) {
+    pub fn update_lod<'a>(&self, visible_octants: Vec<SHVertex<f32>>, camera_pos: Point3<f32>) {
         // calculate indices to all visible sh vertices
-        let mut sh_vertices: Vec<SHVertex<f32>> = visible_octants
-            .par_iter()
-            .map(|octant| octant.octant.sh_rep().clone())
-            .collect();
+        let mut sh_vertices = visible_octants;
 
         sh_vertices.sort_by_key(|v| {
             let d = distance_squared(&camera_pos, &v.position);
@@ -593,13 +606,10 @@ impl OctantRenderer {
         builder.draw(last_len, 1, last_offset, 0).unwrap();
     }
 
-    pub fn update_lod<'a>(&self, visible_octants: &Vec<OctreeIter<'a, f32>>) {
+    pub fn update_lod<'a>(&self, visible_octants: Vec<u64>) {
         let mut new_octants: Vec<(u32, u32)> = visible_octants
             .par_iter()
-            .map(|oc| {
-                let id = oc.octant.id();
-                self.vertex_mapping.get(&id).unwrap().clone()
-            })
+            .map(|id| self.vertex_mapping.get(&id).unwrap().clone())
             .collect();
 
         // merge draw calls together that overlap
@@ -662,5 +672,58 @@ impl OctantRenderer {
             .render_pass(subpass)
             .build(device.clone())
             .unwrap()
+    }
+}
+
+pub fn lod<T>(octree: &Octree<f32>, lod_fn: T) -> (Vec<u64>, Vec<SHVertex<f32>>)
+where
+    T: Fn(&CubeBoundingBox<f32>, bool) -> Option<LoD>,
+{
+    let mut lod_full = Vec::new();
+    let mut lod_sh = Vec::new();
+    match &octree.root {
+        Node::Intermediate(root_octant) => {
+            // most common case: root not has children
+            // this is the core logic:
+            let mut queue = vec![(root_octant, *octree.bbox())];
+            while let Some((node, bbox)) = queue.pop() {
+                if let Some(lod) = lod_fn(&bbox, false) {
+                    match lod {
+                        LoD::SHRep => lod_sh.push(node.sh_rep),
+                        LoD::Full => {
+                            for (i, child) in node.data.iter().enumerate() {
+                                match child {
+                                    Node::Intermediate(child_octant) => {
+                                        let bbox_child = Node::octant_box(i, &bbox);
+                                        queue.push((child_octant, bbox_child));
+                                    }
+                                    Node::Leaf(child) => {
+                                        let bbox_child = Node::octant_box(i, &bbox);
+                                        if let Some(lod) = lod_fn(&bbox_child, true) {
+                                            match lod {
+                                                LoD::SHRep => lod_sh.push(child.sh_rep),
+                                                LoD::Full => lod_full.push(child.id),
+                                            }
+                                        }
+                                    }
+                                    Node::Empty => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return (lod_full, lod_sh);
+        }
+        Node::Leaf(octant) => {
+            if let Some(lod) = lod_fn(octree.bbox(), true) {
+                match lod {
+                    LoD::SHRep => lod_sh.push(octant.sh_rep),
+                    LoD::Full => lod_full.push(octant.id),
+                }
+            }
+            (lod_full, lod_sh)
+        }
+        Node::Empty => (lod_full, lod_sh),
     }
 }
