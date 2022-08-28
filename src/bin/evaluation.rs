@@ -53,7 +53,7 @@ fn render_from_viewpoints(
     target_img_size: [u32; 2],
     culling_mode: LoDMode,
     highlight_sh: bool,
-    octree: Arc<Octree<f32, f32>>,
+    octree: Arc<Octree<f32>>,
     cameras: Vec<PerspectiveCamera>,
     mut pbr: ProgressBar<Pipe>,
     parallel: bool,
@@ -118,7 +118,7 @@ fn render_from_viewpoints(
 
             renderer.set_camera(&camera);
             renderer.update_uniforms();
-            renderer.frustum_culling(culling_mode);
+            renderer.update_lod(culling_mode, 1. / render_size[1] as f32);
 
             let pc_cb = renderer.render(RenderMode::Both, false);
 
@@ -186,7 +186,7 @@ fn main() {
     let opt = Opt::from_args();
     let filename = opt.input;
 
-    let octree: Octree<f32, f32> = load_octree_with_progress_bar(&filename).unwrap().into();
+    let octree: Octree<f32> = load_octree_with_progress_bar(&filename).unwrap().into();
     let octree = Arc::new(octree);
 
     let instance = Instance::new(InstanceCreateInfo::application_from_cargo_toml()).unwrap();

@@ -1,21 +1,20 @@
 use std::{f32::consts::PI, fs::File, io::BufReader, path::PathBuf, sync::Arc};
 
-use nalgebra::Vector4;
+use nalgebra::{Vector3, Vector4};
 use pbr::ProgressBar;
 use punctum::{export_ply, CubeBoundingBox, Octree, TeeReader, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use structopt::StructOpt;
 
-fn angle_to_rgba(angle: f32) -> Vector4<u8> {
+fn angle_to_rgba(angle: f32) -> Vector3<u8> {
     let mut color = Vector4::new(angle, angle - 2. * PI / 3., angle + 2. * PI / 3., 1.0);
     color.x = (color.x.cos() + 1.) / 2.;
     color.y = (color.y.cos() + 1.) / 2.;
     color.z = (color.z.cos() + 1.) / 2.;
-    return Vector4::new(
+    return Vector3::new(
         (color.x * 255.) as u8,
         (color.y * 255.) as u8,
         (color.z * 255.) as u8,
-        255,
     );
 }
 
@@ -43,7 +42,7 @@ fn main() {
         pb.set_units(pbr::Units::Bytes);
         let mut tee = TeeReader::new(&mut buf, &mut pb);
 
-        let octree: Octree<f64, u8> = bincode::deserialize_from(&mut tee).unwrap();
+        let octree: Octree<f64> = bincode::deserialize_from(&mut tee).unwrap();
 
         pb.finish_println("done!");
 
@@ -51,7 +50,7 @@ fn main() {
     });
     let mut rand_gen = StdRng::seed_from_u64(42);
 
-    let mut points: Vec<Vertex<f32, u8>> = Vec::with_capacity(octree.num_points() as usize);
+    let mut points: Vec<Vertex<f32>> = Vec::with_capacity(octree.num_points() as usize);
     let mut pb = ProgressBar::new(octree.num_octants());
     let num_octants = octree.num_octants();
     let mut bboxes = Vec::with_capacity(num_octants as usize);
@@ -67,7 +66,7 @@ fn main() {
                     position: p.position.cast(),
                     color: color,
                 })
-                .collect::<Vec<Vertex<f32, u8>>>(),
+                .collect::<Vec<Vertex<f32>>>(),
         );
         bboxes.push(CubeBoundingBox::from_points(octant.points()).size);
         pb.inc();

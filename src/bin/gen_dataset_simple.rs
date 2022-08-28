@@ -84,24 +84,20 @@ impl RenderPool {
     }
 }
 
-fn export_ply(
-    output_file: &PathBuf,
-    pc: &PointCloud<f32, f32>,
-    observed_colors: &Vec<Vertex<f32, f32>>,
-) {
+fn export_ply(output_file: &PathBuf, pc: &PointCloud<f32>, observed_colors: &Vec<Vertex<f32>>) {
     let mut file = BufWriter::new(File::create(output_file).unwrap());
 
-    let mut ply = Ply::<punctum::Vertex<f32, f32>>::new();
-    let mut elm_def = punctum::Vertex::<f32, f32>::element_def("vertex".to_string());
+    let mut ply = Ply::<punctum::Vertex<f32>>::new();
+    let mut elm_def = punctum::Vertex::<f32>::element_def("vertex".to_string());
     elm_def.count = pc.points().len();
     ply.header.encoding = Encoding::BinaryLittleEndian;
     ply.header.elements.add(elm_def.clone());
 
-    let mut elm_def = Vertex::<f32, f32>::element_def("camera".to_string());
+    let mut elm_def = Vertex::<f32>::element_def("camera".to_string());
     elm_def.count = observed_colors.len();
     ply.header.elements.add(elm_def);
 
-    let w = Writer::<punctum::Vertex<f32, f32>>::new();
+    let w = Writer::<punctum::Vertex<f32>>::new();
     w.write_header(&mut file, &ply.header).unwrap();
     w.write_payload_of_element(
         &mut file,
@@ -132,12 +128,16 @@ fn rand_point(generator: &mut StdRng, dist: &WeightedIndex<f32>) -> Point3<f32> 
     }
 }
 
-fn angle_to_rgba(angle: f32) -> Vector4<f32> {
+fn angle_to_rgba(angle: f32) -> Vector3<u8> {
     let mut color = Vector4::new(angle, angle - 2. * PI / 3., angle + 2. * PI / 3., 1.0);
     color.x = (color.x.cos() + 1.) / 2.;
     color.y = (color.y.cos() + 1.) / 2.;
     color.z = (color.z.cos() + 1.) / 2.;
-    return color;
+    return Vector3::new(
+        (color.x * 255.) as u8,
+        (color.y * 255.) as u8,
+        (color.z * 255.) as u8,
+    );
 }
 
 fn main() {
@@ -172,7 +172,7 @@ fn main() {
         let octant_size: usize =
             ((dist.sample(&mut rand_gen) + 1) * opt.max_octant_size) / OCTREE_SIZE_DIST.len();
 
-        let points: Vec<Vertex<f32, f32>> = (0..octant_size)
+        let points: Vec<Vertex<f32>> = (0..octant_size)
             .map(|j| {
                 let angle = j as f32 / octant_size as f32 * 2. * PI;
                 Vertex {
@@ -182,7 +182,7 @@ fn main() {
             })
             .collect();
 
-        let pc: PointCloud<f32, f32> = points.into();
+        let pc: PointCloud<f32> = points.into();
 
         let renders: Vec<Rgba<u8>> = {
             let renderer = {
@@ -203,12 +203,12 @@ fn main() {
             renders
         };
 
-        let cam_colors: Vec<Vertex<f32, f32>> = renders
+        let cam_colors: Vec<Vertex<f32>> = renders
             .iter()
             .zip(cameras.clone())
             .map(|(color, cam)| Vertex {
                 position: cam.position(),
-                color: Vector4::from(color.0).cast() / 255.,
+                color: Vector3::new(color.0[0], color.0[1], color.0[2]),
             })
             .collect();
 

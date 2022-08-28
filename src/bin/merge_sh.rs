@@ -1,4 +1,4 @@
-use nalgebra::Vector4;
+use nalgebra::Vector3;
 use pbr::ProgressBar;
 use ply_rs::{
     parser::Parser,
@@ -6,7 +6,7 @@ use ply_rs::{
 };
 use punctum::{
     load_octree_with_progress_bar, save_octree_with_progress_bar, sh::lm2flat_index, Octree,
-    PointCloud, SHCoefficients, SHVertex,
+    SHCoefficients,
 };
 use rayon::prelude::*;
 use std::{
@@ -31,7 +31,8 @@ struct Opt {
     output_octree: PathBuf,
 }
 
-fn read_coefs<P: AsRef<Path>, const T: usize>(path: P) -> io::Result<SHCoefficients<T>> {
+fn read_coefs<P: AsRef<Path> + Clone, const T: usize>(path: P) -> io::Result<SHCoefficients<T>> {
+    let path_name = path.as_ref().to_string_lossy().to_string();
     let mut ply_file = std::fs::File::open(path)?;
     let p = Parser::<DefaultElement>::new();
 
@@ -41,19 +42,19 @@ fn read_coefs<P: AsRef<Path>, const T: usize>(path: P) -> io::Result<SHCoefficie
     if coefs.len() < T {
         println!(
             "WARN: '{:}' has only degree {} but expected {}",
-            path.as_ref().to_string_lossy(),
+            path_name,
             coefs.len(),
             T
         );
     } else if coefs.len() > T {
         panic!(
             "'{:}' has only degree {} but expected {}",
-            path.as_ref().to_string_lossy(),
+            path_name,
             coefs.len(),
             T
         );
     }
-    let mut new_coefs = [Vector4::<f32>::zeros(); T];
+    let mut new_coefs = [Vector3::<f32>::zeros(); T];
     for c in coefs {
         let l = if let Property::UChar(l) = c.get("l").unwrap() {
             *l
@@ -71,7 +72,6 @@ fn read_coefs<P: AsRef<Path>, const T: usize>(path: P) -> io::Result<SHCoefficie
             new_coefs[i].x = values[0];
             new_coefs[i].y = values[1];
             new_coefs[i].z = values[2];
-            new_coefs[i].w = values[3];
         } else {
             panic!("coefs must be float list")
         }
@@ -83,25 +83,23 @@ pub fn main() {
     let opt = Opt::from_args();
     let filename = opt.input;
 
-    let mut octree: Octree<f64, u8> = load_octree_with_progress_bar(&filename).unwrap();
+    let mut octree: Octree<f64> = load_octree_with_progress_bar(&filename).unwrap();
     let pb = Mutex::new(ProgressBar::new(octree.num_octants()));
 
     let sh_coefs = octree
         .into_iter()
         .par_bridge()
         .map(|octant| {
-            let pc: &PointCloud<f64, u8> = octant.points().into();
-            let centroid = pc.centroid();
             let ply_file = opt.coefs_dir.join(format!("octant_{}.ply", octant.id()));
-            let sh_approximation = SHVertex::new(centroid, read_coefs(ply_file).unwrap());
+            let sh_coefs = read_coefs(ply_file).unwrap();
             pb.lock().unwrap().inc();
-            (octant.id(), sh_approximation)
+            (octant.id(), sh_coefs)
         })
-        .collect::<HashMap<u64, SHVertex<f64>>>();
+        .collect::<HashMap<u64, SHCoefficients>>();
 
     for octant in octree.borrow_mut().into_iter() {
         let c = *sh_coefs.get(&octant.id()).unwrap();
-        octant.sh_approximation = Some(c);
+        octant.sh_rep.coefficients = c;
     }
 
     save_octree_with_progress_bar(opt.output_octree, &octree).unwrap();

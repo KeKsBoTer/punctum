@@ -32,7 +32,7 @@ fn main() {
         pb.set_units(pbr::Units::Bytes);
         let mut tee = TeeReader::new(&mut buf, &mut pb);
 
-        let octree: Octree<f64, u8> = bincode::deserialize_from(&mut tee).unwrap();
+        let octree: Octree<f64> = bincode::deserialize_from(&mut tee).unwrap();
 
         pb.finish_println("done!");
 
@@ -42,7 +42,7 @@ fn main() {
     let points = octree.flat_points();
 
     let mut rng = &mut rand::thread_rng();
-    let export_points: Vec<Vertex<f64, u8>> =
+    let export_points: Vec<Vertex<f64>> =
         points.into_iter().choose_multiple(&mut rng, opt.max_points);
 
     export_ply(&opt.output, &export_points.into());

@@ -1,9 +1,9 @@
 use nalgebra::{Point3, Vector3};
 use ply_rs::ply::{self, Addable, ElementDef, PropertyDef, PropertyType, ScalarType};
 
-use crate::{BaseColor, BaseFloat, Vertex};
+use crate::{BaseFloat, Vertex};
 
-impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
+impl<F: BaseFloat> ply::PropertyAccess for Vertex<F> {
     fn new() -> Self {
         Vertex {
             position: Point3::origin(),
@@ -22,9 +22,9 @@ impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
             ("nx", ply::Property::Float(_)) => {}
             ("ny", ply::Property::Float(_)) => {}
             ("nz", ply::Property::Float(_)) => {}
-            ("red", ply::Property::UChar(v)) => self.color[0] = C::from_u8(v),
-            ("green", ply::Property::UChar(v)) => self.color[1] = C::from_u8(v),
-            ("blue", ply::Property::UChar(v)) => self.color[2] = C::from_u8(v),
+            ("red", ply::Property::UChar(v)) => self.color[0] = v,
+            ("green", ply::Property::UChar(v)) => self.color[1] = v,
+            ("blue", ply::Property::UChar(v)) => self.color[2] = v,
             ("vertex_indices", _) => {} // ignore
             (_, _) => {}
         };
@@ -36,9 +36,6 @@ impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
             "x" => Some(self.position[0].to_f32().unwrap()),
             "y" => Some(self.position[1].to_f32().unwrap()),
             "z" => Some(self.position[2].to_f32().unwrap()),
-            "red" => Some(<C as Color>::to_f32(self.color[0])),
-            "green" => Some(<C as Color>::to_f32(self.color[1])),
-            "blue" => Some(<C as Color>::to_f32(self.color[2])),
             _ => None,
         }
     }
@@ -55,18 +52,18 @@ impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
     #[inline]
     fn get_uchar(&self, _property_name: &String) -> Option<u8> {
         match _property_name.as_str() {
-            "red" => Some(<C as Color>::to_u8(self.color[0])),
-            "green" => Some(<C as Color>::to_u8(self.color[1])),
-            "blue" => Some(<C as Color>::to_u8(self.color[2])),
+            "red" => Some(self.color.x),
+            "green" => Some(self.color.y),
+            "blue" => Some(self.color.z),
             _ => None,
         }
     }
 }
 
-impl<F: BaseFloat, C: BaseColor> Vertex<F, C> {
+impl<F: BaseFloat> Vertex<F> {
     pub fn element_def(name: String) -> ElementDef {
         let pos_type = PropertyType::Scalar(F::ply_type());
-        let color_type = PropertyType::Scalar(C::ply_type());
+        let color_type = PropertyType::Scalar(ScalarType::UChar);
 
         let mut point_element = ElementDef::new(name);
         let p = PropertyDef::new("x".to_string(), pos_type.clone());
@@ -122,49 +119,5 @@ impl PlyType for u8 {
             ply::Property::UChar(_) => true,
             _ => false,
         }
-    }
-}
-
-pub trait Color {
-    fn from_u8(v: u8) -> Self;
-    fn from_f32(v: f32) -> Self;
-
-    fn to_u8(v: Self) -> u8;
-    fn to_f32(v: Self) -> f32;
-}
-
-impl Color for f32 {
-    fn from_u8(v: u8) -> Self {
-        (v as f32) / 255.
-    }
-
-    fn from_f32(v: f32) -> Self {
-        v
-    }
-
-    fn to_u8(v: Self) -> u8 {
-        (v * 255.) as u8
-    }
-
-    fn to_f32(v: Self) -> f32 {
-        v
-    }
-}
-
-impl Color for u8 {
-    fn from_u8(v: u8) -> Self {
-        v
-    }
-
-    fn from_f32(v: f32) -> Self {
-        (v * 255.) as u8
-    }
-
-    fn to_u8(v: u8) -> u8 {
-        v
-    }
-
-    fn to_f32(v: u8) -> f32 {
-        v as f32 / 255.
     }
 }

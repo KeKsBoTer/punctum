@@ -4,8 +4,8 @@ use std::{borrow::BorrowMut, collections::HashMap, fs::File, io::BufWriter, path
 use tch::{kind, IndexOp, Kind, Tensor};
 use vulkano::buffer::BufferContents;
 
-use nalgebra::Vector4;
-use punctum::{load_octree_with_progress_bar, Octree, PointCloud, SHVertex, TeeWriter};
+use nalgebra::Vector3;
+use punctum::{load_octree_with_progress_bar, Octree, PointCloud, TeeWriter};
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -30,7 +30,7 @@ pub fn main() {
     let device = tch::Device::Cuda(0);
     let model = load_model("traced_model_gpu.pt", device);
 
-    let mut octree: Octree<f64, u8> = load_octree_with_progress_bar(&filename).unwrap();
+    let mut octree: Octree<f64> = load_octree_with_progress_bar(&filename).unwrap();
 
     let mut pb = ProgressBar::new(octree.num_octants());
 
@@ -41,8 +41,8 @@ pub fn main() {
     let mut sh_coefs = HashMap::new();
 
     for octant in octree.into_iter() {
-        let pc: &PointCloud<f64, u8> = octant.points().into();
-        let mut pc: PointCloud<f32, f32> = pc.into();
+        let pc: &PointCloud<f64> = octant.points().into();
+        let mut pc: PointCloud<f32> = pc.into();
         pc.scale_to_unit_sphere();
 
         let raw_points = pc.points().as_bytes();
@@ -71,11 +71,11 @@ pub fn main() {
 
             for idx in 0..batch_indices.len() {
                 let c = coefs.get(idx as i64);
-                let mut new_coefs = [Vector4::<f32>::zeros(); 121];
+                let mut new_coefs = [Vector3::<f32>::zeros(); 25];
 
                 let f_coefs = Vec::<f32>::from(&c);
                 for (i, v) in f_coefs.iter().enumerate() {
-                    new_coefs[i / 4][i % 4] = *v;
+                    new_coefs[i / 3][i % 3] = *v;
                 }
                 sh_coefs.insert(octant.id(), new_coefs);
             }
@@ -83,7 +83,6 @@ pub fn main() {
             points.clear();
             colors.clear();
             batch_indices.clear();
-            // octant.sh_approximation = Some(SHVertex::new(centroid.cast(), new_coefs.into()));
         }
         pb.inc();
     }
@@ -91,11 +90,10 @@ pub fn main() {
 
     println!("updating octree...");
     for octant in octree.borrow_mut().into_iter() {
-        let pc: &PointCloud<f64, u8> = octant.points().into();
-        let pc: PointCloud<f32, f32> = pc.into();
-        let centroid = pc.centroid();
+        let pc: &PointCloud<f64> = octant.points().into();
+        let pc: PointCloud<f32> = pc.into();
         let new_coefs = sh_coefs.get(&octant.id()).unwrap();
-        octant.sh_approximation = Some(SHVertex::new(centroid.cast(), (*new_coefs).into()));
+        octant.sh_rep.coefficients = (*new_coefs).into();
     }
 
     {

@@ -1,33 +1,28 @@
-use std::{fs::File, io::BufWriter, time::Duration};
+use std::{borrow::BorrowMut, fs::File, io::BufWriter, time::Duration};
 
 use bincode::{serialize_into, serialized_size};
 use las::{point::Point, Read as LasRead, Reader};
-use nalgebra::{center, Point3, Vector3};
+use nalgebra::{center, distance_squared, Point3, Vector3};
 use pbr::ProgressBar;
 use ply_rs::parser::Parser;
-use punctum::{BaseColor, BaseFloat, CubeBoundingBox, Octree, TeeWriter, Vertex};
+use punctum::{BaseFloat, CubeBoundingBox, Octree, SHCoefficients, TeeWriter, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use std::path::PathBuf;
 use structopt::StructOpt;
 
-fn vertex_flip_yz<F: BaseFloat, C: BaseColor>(v: Vertex<F, C>) -> Vertex<F, C> {
+fn vertex_flip_yz<F: BaseFloat>(v: Vertex<F>) -> Vertex<F> {
     Vertex {
         position: Point3::new(v.position.x, v.position.z, v.position.y),
         color: v.color,
     }
 }
 
-fn build_octree_from_iter<'a, I, F, C>(
-    points: I,
-    max_node_size: usize,
-    cube_size: F,
-) -> Octree<F, C>
+fn build_octree_from_iter<'a, I, F>(points: I, max_node_size: usize, cube_size: F) -> Octree<F>
 where
-    I: Iterator<Item = Vertex<F, C>>,
+    I: Iterator<Item = Vertex<F>>,
     F: BaseFloat,
-    C: BaseColor,
 {
-    let mut octree: Octree<F, C> = Octree::new(Point3::origin(), cube_size, max_node_size);
+    let mut octree: Octree<F> = Octree::new(Point3::origin(), cube_size, max_node_size);
 
     for point in points {
         octree.insert(point.clone());
@@ -35,20 +30,19 @@ where
     return octree;
 }
 
-fn sample_points<F, C>(rate: usize) -> impl FnMut(&Vertex<F, C>) -> bool
+fn sample_points<F>(rate: usize) -> impl FnMut(&Vertex<F>) -> bool
 where
     F: BaseFloat,
-    C: BaseColor,
 {
     let mut rand_gen = StdRng::seed_from_u64(42);
 
-    return move |_p: &Vertex<F, C>| {
+    return move |_p: &Vertex<F>| {
         let r: usize = rand_gen.gen();
         return r % rate == 0;
     };
 }
 
-fn las_point_to_vertex(point: Point) -> Vertex<f64, u8> {
+fn las_point_to_vertex(point: Point) -> Vertex<f64> {
     let color = point.color.unwrap();
     Vertex {
         position: Point3::new(point.x, point.y, point.z),
@@ -60,11 +54,11 @@ fn las_point_to_vertex(point: Point) -> Vertex<f64, u8> {
     }
 }
 
-fn normalize_point<F: BaseFloat, C: BaseColor>(
+fn normalize_point<F: BaseFloat>(
     bbox: CubeBoundingBox<F>,
     scale_factor: F,
-) -> impl Fn(Vertex<F, C>) -> Vertex<F, C> {
-    return move |v: Vertex<F, C>| Vertex {
+) -> impl Fn(Vertex<F>) -> Vertex<F> {
+    return move |v: Vertex<F>| Vertex {
         position: (&v.position - &bbox.center.coords) * scale_factor / bbox.size,
         color: v.color,
     };
@@ -82,10 +76,7 @@ fn with_progress_bar<T>(total: u64) -> impl FnMut(T) -> T {
 
 fn from_laz<'a>(
     reader: &'a mut Reader,
-) -> (
-    impl Iterator<Item = Vertex<f64, u8>> + 'a,
-    CubeBoundingBox<f64>,
-) {
+) -> (impl Iterator<Item = Vertex<f64>> + 'a, CubeBoundingBox<f64>) {
     let bounds = reader.header().bounds();
 
     let min_point = Point3::new(bounds.min.x, bounds.min.y, bounds.min.z);
@@ -101,7 +92,7 @@ fn from_laz<'a>(
     return (iterator, bbox);
 }
 
-fn build_octree<I, F, C>(
+fn build_octree<I, F>(
     points: I,
     bbox: CubeBoundingBox<F>,
     cube_size: F,
@@ -109,13 +100,12 @@ fn build_octree<I, F, C>(
     max_node_size: usize,
     sample_rate: Option<usize>,
     flip_yz: bool,
-) -> Octree<F, C>
+) -> Octree<F>
 where
-    I: Iterator<Item = Vertex<F, C>>,
+    I: Iterator<Item = Vertex<F>>,
     F: BaseFloat,
-    C: BaseColor,
 {
-    let mut point_iter: Box<dyn Iterator<Item = Vertex<F, C>>> = Box::new(
+    let mut point_iter: Box<dyn Iterator<Item = Vertex<F>>> = Box::new(
         points
             .map(normalize_point(bbox, cube_size))
             .map(with_progress_bar(number_of_points)),
@@ -161,7 +151,7 @@ fn main() {
         opt.input.as_os_str().to_str().unwrap()
     );
 
-    let octree = if opt.input.extension().unwrap() == "las" {
+    let mut octree = if opt.input.extension().unwrap() == "las" {
         let mut reader = Reader::from_path(opt.input).unwrap();
         let number_of_points = reader.header().number_of_points();
 
@@ -177,7 +167,7 @@ fn main() {
         )
     } else {
         let mut ply_file = std::fs::File::open(opt.input).unwrap();
-        let p = Parser::<Vertex<f64, u8>>::new();
+        let p = Parser::<Vertex<f64>>::new();
 
         let ply = p.read_ply(&mut ply_file).unwrap();
 
@@ -197,6 +187,23 @@ fn main() {
         )
     };
 
+    for leaf_node in octree.borrow_mut().into_iter() {
+        let pc = leaf_node.points();
+        let (centroid, avg_color) = pc.centroid_and_color();
+
+        let size = leaf_node
+            .points()
+            .0
+            .iter()
+            .map(|p| distance_squared(&p.position, &centroid))
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap();
+
+        leaf_node.sh_rep.position = centroid;
+        leaf_node.sh_rep.size = size.sqrt();
+        leaf_node.sh_rep.coefficients = SHCoefficients::new_from_color(avg_color.cast() / 255.);
+    }
+
     // we check that all ids are unqiue
     // if not the tree is to deep (or something is wrong in the code :P)
     let mut ids = octree
@@ -211,7 +218,7 @@ fn main() {
     }
 
     for octant in octree.into_octant_iterator() {
-        for p in octant.octant.points() {
+        for p in octant.octant.points().0.iter() {
             if !octant.bbox.contains(&p.position) {
                 panic!(
                     "point {:?} not contained by its bounding box (min: {:?}, max: {:?})",
