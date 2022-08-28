@@ -175,6 +175,20 @@ def to_spherical(coords: torch.Tensor) -> torch.Tensor:
     return spherical
 
 
+def to_cartesian(coords: torch.Tensor) -> torch.Tensor:
+    """Spherical to cartesian coordinate conversion.
+    Args:
+        cords: [N,2] spherical coordinates
+    """
+
+    theta_sin = coords[:,0].sin()
+    x=coords[:,1].cos() * theta_sin
+    y=coords[:,1].sin() * theta_sin
+    z=coords[:,0].cos()
+
+    return torch.stack([x,y,z],dim=-1)
+
+
 def lm2flat_index(l: int, m: int) -> int:
     return l * (l + 1) + m
 

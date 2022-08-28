@@ -4,7 +4,7 @@ import numpy as np
 import glob
 from os.path import join, basename
 import os
-from sh import to_spherical, calc_coeficients, lm2flat_index
+from .sh import to_spherical, calc_coeficients, lm2flat_index
 from tqdm import tqdm
 import torch.multiprocessing as mp
 
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     l_max = args.l_max
     out_folder = args.out_folder
 
-    with mp.Pool() as p:
+    with mp.Pool(8) as p:
         results = []
         args = [
             (f, out_folder, l_max) for f in glob.glob(join(args.in_folder, "*.ply"))

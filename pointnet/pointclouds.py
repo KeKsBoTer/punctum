@@ -38,6 +38,13 @@ class Pointclouds:
         self.batch_index = self.batch_index.pin_memory()
         return self
 
+    def unpack(self, device:torch.device = "cuda"):
+        vertices = self.points_packed().to(device)
+        color = self.features_packed().to(device)
+        batch = self.packed_to_cloud_idx().to(device)
+        return vertices, color, batch
+
+
 
 def collate_batched(pointsclouds: List[Pointclouds]) -> Pointclouds:
     assert all(

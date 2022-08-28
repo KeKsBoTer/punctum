@@ -1,67 +1,25 @@
 import argparse
 import logging
-
+from os import path
 from typing import Tuple
 
-import numpy as np
 import torch
 import torch.utils.data as data
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
-from plyfile import PlyData
 from torch.optim.lr_scheduler import OneCycleLR
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from pointnet.dataset import OctantDataset, lm2flat_index, collate_batched_point_clouds
-from pointnet.sh import calc_sh, to_spherical
-from pointnet.pointclouds import Pointclouds
-from torch.utils.data import DataLoader
-
+from pointnet.dataset import OctantDataset, collate_batched_point_clouds, lm2flat_index
 from pointnet.model import PointNet
+from pointnet.pointclouds import Pointclouds
+from pointnet.sh import calc_sh
+from pointnet.loss import l2_loss, camera_loss
+from pointnet.utils import camera_positions
 
-torch.backends.cudnn.benchmark = True
-
-
-def unpack_pointclouds(pcs: Pointclouds):
-    vertices = pcs.points_packed().cuda()
-    color = pcs.features_packed().cuda()
-    batch = pcs.packed_to_cloud_idx().cuda()
-    return vertices, color, batch
-
-
-def camera_loss(l_max: int, positions: torch.Tensor):
-
-    num_rand = 64
-    offsets = torch.randn((num_rand, *positions.shape)) * 0.1
-    offsets[:, :, 1] *= 2
-
-    rnd_pos = positions + offsets * 0.5
-
-    y = calc_sh(l_max, rnd_pos.flatten(0, 1))
-    y = y.reshape((num_rand, positions.shape[0], (l_max + 1) ** 2))
-
-    def loss(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        r_i = torch.randint(0, len(y), (1,)).item()
-        y_r = y.to(prediction.device)[r_i]
-        pred_img = y_r @ prediction
-        target_img = y_r @ target
-        diff = pred_img - target_img
-        l2 = diff.norm(2, -1).mean(-1)
-        return l2.mean()
-
-    return loss
-
-
-def camera_positions(filename: str) -> torch.Tensor:
-    plydata = PlyData.read(filename)
-    vertex_data = plydata["vertex"].data
-
-    def unpack_data(data, field_names):
-        return torch.from_numpy(np.stack([data[key] for key in field_names]).T)
-
-    cameras = unpack_data(vertex_data, ["x", "y", "z"])
-    return to_spherical(cameras)
+# torch.backends.cudnn.benchmark = True
 
 
 class CoefNormalizer:
@@ -187,15 +145,6 @@ def plot_coefs(
     return fig1, fig2, fig3
 
 
-def l2_loss():
-    def loss(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        diff = prediction - target
-        l2 = diff.square().sum(-1)
-        return l2.mean()
-
-    return loss
-
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train pointnet")
@@ -234,11 +183,16 @@ if __name__ == "__main__":
     epochs = args.epochs
     experiment_name = args.name
 
+    num_color_channels = 4
+
     logging.basicConfig(level=logging.INFO)
     logger.info(f"loading dataset {ds_path}")
 
-    with open("datasets/neuschwanstein/octants_1024max_sh/best.txt", "r") as f:
-        best = [fn.strip() for fn in f.readlines()][:100000]
+    best = None
+    if path.exists(f"{ds_path}/best.txt"):
+        with open(f"{ds_path}/best.txt", "r") as f:
+            best = [fn.strip() for fn in f.readlines()]
+            best = best[: len(best) // 8]
 
     ds = OctantDataset(ds_path, selected_samples=best)
 
@@ -285,9 +239,9 @@ if __name__ == "__main__":
 
     model = PointNet(
         l_max,
-        4,
+        num_color_channels,
         batch_norm=True,
-        use_dropout=0.1,
+        use_dropout=0.05,
         use_spherical=False,
         coef_mean=coef_transform.mean,
         coef_std=coef_transform.std,
@@ -304,17 +258,27 @@ if __name__ == "__main__":
     writer_train = SummaryWriter(f"logs/{experiment_name}/train")
     writer_val = SummaryWriter(f"logs/{experiment_name}/val")
 
+    with open(f"logs/{experiment_name}/train.txt", "w") as f:
+        f.writelines([f"{l}\n" for l in ds.ply_files[ds_train.indices]])
+    with open(f"logs/{experiment_name}/validation.txt", "w") as f:
+        f.writelines([f"{l}\n" for l in ds.ply_files[ds_val.indices]])
+
     sample = next(iter(data_loader_train))
-    writer_train.add_graph(model, unpack_pointclouds(sample.pcs))
+
+    writer_train.add_graph(model, sample.pcs.unpack())
     writer_train.add_figure("coefficients/std", coef_transform.plot(), 0)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
     scheduler = OneCycleLR(
-        optimizer, max_lr=1e-2, steps_per_epoch=len(data_loader_train), epochs=epochs
+        optimizer,
+        max_lr=1e-3,
+        steps_per_epoch=len(data_loader_train),
+        epochs=epochs,
+        pct_start=0.1,
     )
 
-    coef_loss_weight = 1e-5
+    coef_loss_weight = 5e-5
 
     step = 0
     for epoch in range(epochs):
@@ -335,9 +299,8 @@ if __name__ == "__main__":
             optimizer.zero_grad()
 
             target_coefs = coefs[:, : lm2flat_index(l_max, l_max) + 1].cuda()
-            vertices, color, batch = unpack_pointclouds(pcs)
 
-            pred_coefs = model(vertices, color, batch)
+            pred_coefs = model(*pcs.unpack())
             c_loss = loss_fn(pred_coefs, target_coefs)
 
             pred_coefs_n = coef_transform.normalize(pred_coefs)
@@ -379,9 +342,8 @@ if __name__ == "__main__":
                 val_batch = next(val_sampler)
                 pcs, coefs = val_batch.pcs, val_batch.coefs
 
-                vertices, color, batch = unpack_pointclouds(pcs)
                 target_coefs = coefs[:, : lm2flat_index(l_max, l_max) + 1].cuda()
-                pred_coefs = model(vertices, color, batch)
+                pred_coefs = model(*pcs.unpack())
 
                 c_loss = loss_fn(pred_coefs, target_coefs)
 
@@ -417,10 +379,38 @@ if __name__ == "__main__":
 
             step += 1
         if epoch != 0 and epoch % 50 == 0:
-            torch.save(model.state_dict(), f"logs/{experiment_name}/model_weights_{epoch}.pt")
+            torch.save(
+                model.state_dict(), f"logs/{experiment_name}/model_weights_{epoch}.pt"
+            )
 
     writer_train.close()
     writer_val.close()
 
     torch.save(model.state_dict(), f"logs/{experiment_name}/model_weights.pt")
+
+    traced_model = torch.jit.trace_module(
+        model.cpu(),
+        {
+            "forward": [
+                torch.rand((1, 3)),
+                torch.rand((1, num_color_channels)),
+                torch.zeros(1, dtype=torch.long),
+            ]
+        },
+    )
+
+    torch.jit.save(traced_model, f"logs/{experiment_name}/traced_model_cpu.pt")
+
+    traced_model = torch.jit.trace_module(
+        model.cuda(),
+        {
+            "forward": [
+                torch.rand((1, 3)).cuda(),
+                torch.rand((1, num_color_channels)).cuda(),
+                torch.zeros(1, dtype=torch.long).cuda(),
+            ]
+        },
+    )
+
+    torch.jit.save(traced_model, f"logs/{experiment_name}/traced_model_gpu.pt")
 
