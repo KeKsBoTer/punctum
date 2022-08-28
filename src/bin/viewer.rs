@@ -25,7 +25,7 @@ use winit::event_loop::ControlFlow;
 
 use punctum::{
     get_render_pass, load_octree_with_progress_bar, select_physical_device, CameraController,
-    CullingMode, Octree, OctreeRenderer, PerspectiveCamera, RenderMode, SurfaceFrame, Viewport,
+    LoDMode, Octree, OctreeRenderer, PerspectiveCamera, RenderMode, SurfaceFrame, Viewport,
 };
 
 #[derive(StructOpt, Debug)]
@@ -38,8 +38,10 @@ struct Opt {
 struct GuiState {
     highlight_shs: bool,
     render_mode: RenderMode,
-    frustum_culling: Option<CullingMode>,
+    frustum_culling: Option<LoDMode>,
+    lod_threshold: f32,
     debug: bool,
+    sh_transparency: bool,
 
     point_size: u32,
 }
@@ -49,9 +51,11 @@ impl GuiState {
         GuiState {
             highlight_shs: false,
             render_mode: RenderMode::Both,
-            frustum_culling: Some(CullingMode::Mixed),
+            frustum_culling: Some(LoDMode::Mixed),
             point_size: 1,
+            lod_threshold: 0.01,
             debug: false,
+            sh_transparency: false,
         }
     }
 
@@ -73,6 +77,7 @@ impl GuiState {
                     .show(ui, |ui| {
                         ui.checkbox(&mut self.highlight_shs, "Highlight SH Pixels");
                         ui.checkbox(&mut self.debug, "Debug");
+                        ui.checkbox(&mut self.sh_transparency, "SH Transparency");
 
                         ui.horizontal(|ui| {
                             ui.label("Mode:");
@@ -94,20 +99,21 @@ impl GuiState {
                             ui.selectable_value(&mut self.frustum_culling, None, "Off");
                             ui.selectable_value(
                                 &mut self.frustum_culling,
-                                Some(CullingMode::Mixed),
+                                Some(LoDMode::Mixed),
                                 "Mixed",
                             );
                             ui.selectable_value(
                                 &mut self.frustum_culling,
-                                Some(CullingMode::SHOnly),
+                                Some(LoDMode::SHOnly),
                                 "SHs",
                             );
                             ui.selectable_value(
                                 &mut self.frustum_culling,
-                                Some(CullingMode::OctantsOnly),
+                                Some(LoDMode::OctantsOnly),
                                 "Octants",
                             );
                         });
+                        ui.add(egui::DragValue::new(&mut self.lod_threshold).speed(0.001));
                     });
             });
 
@@ -245,8 +251,6 @@ fn main() {
 
     let swapchain_format = Format::B8G8R8A8_SRGB;
 
-    println!("{:?}", swapchain_format);
-
     let render_pass = get_render_pass(device.clone(), swapchain_format);
 
     let mut viewport = Viewport::new(surface.window().inner_size().into());
@@ -283,19 +287,19 @@ fn main() {
     ));
 
     renderer.set_point_size(1);
-    renderer.frustum_culling(CullingMode::Mixed);
+    renderer.update_lod(LoDMode::Mixed, window_size.height as f32);
 
     let renderer_clone = renderer.clone();
     let gui_state_clone = gui_state.clone();
 
     let (tx, rx) = mpsc::channel();
     let frustum_culling_thread = thread::spawn(move || loop {
-        let frustum_culling = {
+        let (frustum_culling, lod_threshold) = {
             let state = gui_state_clone.lock().unwrap();
-            state.frustum_culling
+            (state.frustum_culling, state.lod_threshold)
         };
         if let Some(culling_mode) = frustum_culling {
-            renderer_clone.frustum_culling(culling_mode);
+            renderer_clone.update_lod(culling_mode, lod_threshold);
         }
         match rx.try_recv() {
             Ok(_) | Err(TryRecvError::Disconnected) => {
@@ -391,6 +395,7 @@ fn main() {
             });
             renderer.set_point_size(state.point_size);
             renderer.set_highlight_sh(state.highlight_shs);
+            renderer.set_transparency(state.sh_transparency);
 
             renderer.set_camera(&camera);
             renderer.update_uniforms();

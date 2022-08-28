@@ -1,7 +1,7 @@
 #version 460
 
 layout(location = 0) in vec3 position;
-layout(location = 1) in vec4 color;
+layout(location = 1) in vec3 color;
 
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 world;
@@ -10,6 +10,7 @@ layout(set = 0, binding = 0) uniform UniformData {
     vec3 camera_pos;
     uint point_size;
     bool highlight_sh;
+    bool transparency;
 } uniforms;
 
 
@@ -34,7 +35,7 @@ void main() {
     
     gl_PointSize = uniforms.point_size;
 
-    vertex_color = color;
+    vertex_color = vec4(color,1);
 
     pointSize = gl_PointSize;
     vertex_pos = gl_Position;

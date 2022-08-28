@@ -1,5 +1,5 @@
 use las::{Read as LasRead, Reader};
-use nalgebra::{center, Point3, Vector4};
+use nalgebra::{center, Point3, Vector3, Vector4};
 use pbr::ProgressBar;
 use punctum::{export_ply, Vertex};
 use std::path::PathBuf;
@@ -41,11 +41,10 @@ fn main() {
         let color = point.color.unwrap();
         let point = Vertex {
             position: Point3::new(point.x, point.y, point.z),
-            color: Vector4::new(
+            color: Vector3::new(
                 (color.red / 256) as u8, // 65536 = 2**16
                 (color.green / 256) as u8,
                 (color.blue / 256) as u8,
-                255,
             ),
         };
 

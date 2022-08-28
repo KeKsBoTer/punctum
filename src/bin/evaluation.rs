@@ -16,9 +16,9 @@ use vulkano::image::{ImageDimensions, StorageImage};
 use vulkano::sync::{self, GpuFuture};
 
 use punctum::{
-    get_render_pass, load_cameras, load_octree_with_progress_bar, select_physical_device,
-    CullingMode, Frame, Octree, OctreeRenderer, PerspectiveCamera, PerspectiveProjection,
-    RenderMode, Viewport,
+    get_render_pass, load_cameras, load_octree_with_progress_bar, select_physical_device, Frame,
+    LoDMode, Octree, OctreeRenderer, PerspectiveCamera, PerspectiveProjection, RenderMode,
+    Viewport,
 };
 use structopt::StructOpt;
 use vulkano::device::DeviceExtensions;
@@ -51,7 +51,7 @@ fn render_from_viewpoints(
     image_format: Format,
     render_size: [u32; 2],
     target_img_size: [u32; 2],
-    culling_mode: CullingMode,
+    culling_mode: LoDMode,
     highlight_sh: bool,
     octree: Arc<Octree<f32, f32>>,
     cameras: Vec<PerspectiveCamera>,
@@ -254,7 +254,7 @@ fn main() {
         image_format,
         image_size,
         image_size,
-        CullingMode::Mixed,
+        LoDMode::Mixed,
         false,
         octree.clone(),
         cameras.clone(),
@@ -270,7 +270,7 @@ fn main() {
         image_format,
         image_size,
         image_size,
-        CullingMode::OctantsOnly,
+        LoDMode::OctantsOnly,
         false,
         octree.clone(),
         cameras.clone(),
@@ -286,7 +286,7 @@ fn main() {
         image_format,
         image_size,
         image_size,
-        CullingMode::Mixed,
+        LoDMode::Mixed,
         true,
         octree.clone(),
         cameras.clone(),
@@ -303,7 +303,7 @@ fn main() {
         image_format,
         [image_size[0] * 4, image_size[1] * 4],
         image_size,
-        CullingMode::Mixed,
+        LoDMode::Mixed,
         false,
         octree.clone(),
         cameras.clone(),

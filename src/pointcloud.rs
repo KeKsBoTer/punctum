@@ -12,7 +12,7 @@ use crate::{
     vertex::{BaseColor, BaseFloat, Vertex},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct PointCloud<F: BaseFloat, C: BaseColor>(Vec<Vertex<F, C>>);
 
@@ -100,6 +100,7 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
     pub fn points(&self) -> &Vec<Vertex<F, C>> {
         &self.0
     }
+
     pub fn centroid(&self) -> Point3<F> {
         let mut mean = Point3::origin();
         for v in self.0.iter() {
@@ -109,6 +110,22 @@ impl<F: BaseFloat, C: BaseColor> PointCloud<F, C> {
         mean /= F::from_subset(&length);
 
         return mean;
+    }
+}
+
+impl PointCloud<f32, f32> {
+    pub fn centroid_and_color(&self) -> (Point3<f32>, Vector3<f32>) {
+        let mut centroid = Point3::origin();
+        let mut color = Vector3::zeros();
+        for v in self.0.iter() {
+            centroid += v.position.coords;
+            color += v.color;
+        }
+        let length = self.0.len() as f32;
+        centroid /= length;
+        color /= length;
+
+        return (centroid, color);
     }
 }
 

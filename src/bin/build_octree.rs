@@ -2,7 +2,7 @@ use std::{fs::File, io::BufWriter, time::Duration};
 
 use bincode::{serialize_into, serialized_size};
 use las::{point::Point, Read as LasRead, Reader};
-use nalgebra::{center, Point3, Vector4};
+use nalgebra::{center, Point3, Vector3};
 use pbr::ProgressBar;
 use ply_rs::parser::Parser;
 use punctum::{BaseColor, BaseFloat, CubeBoundingBox, Octree, TeeWriter, Vertex};
@@ -52,11 +52,10 @@ fn las_point_to_vertex(point: Point) -> Vertex<f64, u8> {
     let color = point.color.unwrap();
     Vertex {
         position: Point3::new(point.x, point.y, point.z),
-        color: Vector4::new(
+        color: Vector3::new(
             (color.red / 256) as u8, // 65536 = 2**16
             (color.green / 256) as u8,
             (color.blue / 256) as u8,
-            255,
         ),
     }
 }
@@ -199,7 +198,7 @@ fn main() {
     };
 
     // we check that all ids are unqiue
-    // if not the three is to deep (or something is wrong in the code :P)
+    // if not the tree is to deep (or something is wrong in the code :P)
     let mut ids = octree
         .into_iter()
         .map(|octant| octant.id())
@@ -221,6 +220,14 @@ fn main() {
                     octant.bbox.max_corner()
                 );
             }
+        }
+        if !octant.bbox.contains(&octant.octant.sh_rep.position) {
+            panic!(
+                "sh rep {:?} not contained by its bounding box (min: {:?}, max: {:?})",
+                octant.octant.sh_rep.position,
+                octant.bbox.min_corner(),
+                octant.bbox.max_corner()
+            );
         }
     }
 

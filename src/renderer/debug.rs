@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use nalgebra::Vector4;
+use nalgebra::Vector3;
 use vulkano::{
     buffer::{BufferAccess, BufferUsage, CpuAccessibleBuffer},
     command_buffer::{AutoCommandBufferBuilder, SecondaryAutoCommandBuffer},
@@ -74,14 +74,13 @@ impl OctreeDebugRenderer {
         let mut vertices: Vec<Vertex<f32, f32>> =
             Vec::with_capacity(octree.num_octants() as usize * 8);
         let mut indices = Vec::with_capacity(octree.num_octants() as usize * 24);
-        let mut index = 0;
-        // for bbox in octree.octant_bboxes() {
+        let mut index: u32 = 0;
         for octant in octree.into_octant_iterator() {
             vertices.extend(octant.bbox.corners().map(|p| Vertex {
-                position: p.cast(),
-                color: Vector4::new(1.0, 1., 0., 1.0),
+                position: p,
+                color: Vector3::new(1., 1., 0.),
             }));
-            indices.extend_from_slice(&[
+            let new_indices = [
                 // front
                 index + 0,
                 index + 1,
@@ -110,9 +109,11 @@ impl OctreeDebugRenderer {
                 index + 5,
                 index + 3,
                 index + 7,
-            ]);
-            index += 24;
+            ];
+            index += 8;
+            indices.extend_from_slice(&new_indices);
         }
+
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
             BufferUsage::vertex_buffer(),
@@ -173,8 +174,6 @@ impl OctreeDebugRenderer {
             )
             .unwrap();
     }
-
-    //pub fn frustum_culling<'a>(&self, _visible_octants: &Vec<OctreeIter<'a, f32, f32>>) {}
 
     pub fn set_viewport(&self, viewport: Viewport) {
         let mut pipeline = self.pipeline.write().unwrap();

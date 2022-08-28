@@ -5,7 +5,7 @@ use std::{
 };
 
 use image::Rgba;
-use nalgebra::Vector4;
+use nalgebra::Vector3;
 use pbr::ProgressBar;
 use ply_rs::{
     ply::{Addable, Encoding, Ply},
@@ -180,7 +180,7 @@ fn main() {
                             .zip(cameras.clone())
                             .map(|(color, cam)| Vertex {
                                 position: cam.position(),
-                                color: Vector4::from(color.0),
+                                color: Vector3::from(color.0[0..3]),
                             })
                             .collect();
 

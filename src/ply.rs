@@ -1,4 +1,4 @@
-use nalgebra::{Point3, Vector4};
+use nalgebra::{Point3, Vector3};
 use ply_rs::ply::{self, Addable, ElementDef, PropertyDef, PropertyType, ScalarType};
 
 use crate::{BaseColor, BaseFloat, Vertex};
@@ -7,8 +7,7 @@ impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
     fn new() -> Self {
         Vertex {
             position: Point3::origin(),
-            // normal: Vector3::zeros(),
-            color: Vector4::zeros(),
+            color: Vector3::zeros(),
         }
     }
 
@@ -26,7 +25,6 @@ impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
             ("red", ply::Property::UChar(v)) => self.color[0] = C::from_u8(v),
             ("green", ply::Property::UChar(v)) => self.color[1] = C::from_u8(v),
             ("blue", ply::Property::UChar(v)) => self.color[2] = C::from_u8(v),
-            ("alpha", ply::Property::UChar(v)) => self.color[3] = C::from_u8(v),
             ("vertex_indices", _) => {} // ignore
             (_, _) => {}
         };
@@ -41,7 +39,6 @@ impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
             "red" => Some(<C as Color>::to_f32(self.color[0])),
             "green" => Some(<C as Color>::to_f32(self.color[1])),
             "blue" => Some(<C as Color>::to_f32(self.color[2])),
-            "alpha" => Some(<C as Color>::to_f32(self.color[3])),
             _ => None,
         }
     }
@@ -61,7 +58,6 @@ impl<F: BaseFloat, C: BaseColor> ply::PropertyAccess for Vertex<F, C> {
             "red" => Some(<C as Color>::to_u8(self.color[0])),
             "green" => Some(<C as Color>::to_u8(self.color[1])),
             "blue" => Some(<C as Color>::to_u8(self.color[2])),
-            "alpha" => Some(<C as Color>::to_u8(self.color[3])),
             _ => None,
         }
     }
@@ -84,8 +80,6 @@ impl<F: BaseFloat, C: BaseColor> Vertex<F, C> {
         let p = PropertyDef::new("green".to_string(), color_type.clone());
         point_element.properties.add(p);
         let p = PropertyDef::new("blue".to_string(), color_type.clone());
-        point_element.properties.add(p);
-        let p = PropertyDef::new("alpha".to_string(), color_type);
         point_element.properties.add(p);
         return point_element;
     }
