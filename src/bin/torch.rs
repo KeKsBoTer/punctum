@@ -90,8 +90,6 @@ pub fn main() {
 
     println!("updating octree...");
     for octant in octree.borrow_mut().into_iter() {
-        let pc: &PointCloud<f64> = octant.points().into();
-        let pc: PointCloud<f32> = pc.into();
         let new_coefs = sh_coefs.get(&octant.id()).unwrap();
         octant.sh_rep.coefficients = (*new_coefs).into();
     }

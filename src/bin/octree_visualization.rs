@@ -2,7 +2,7 @@ use std::{f32::consts::PI, fs::File, io::BufReader, path::PathBuf, sync::Arc};
 
 use nalgebra::{Vector3, Vector4};
 use pbr::ProgressBar;
-use punctum::{export_ply, CubeBoundingBox, Octree, TeeReader, Vertex};
+use punctum::{export_ply, Octree, TeeReader, Vertex};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use structopt::StructOpt;
 
@@ -53,7 +53,6 @@ fn main() {
     let mut points: Vec<Vertex<f32>> = Vec::with_capacity(octree.num_points() as usize);
     let mut pb = ProgressBar::new(octree.num_octants());
     let num_octants = octree.num_octants();
-    let mut bboxes = Vec::with_capacity(num_octants as usize);
 
     for octant in octree.into_iter() {
         let color_id = rand_gen.gen::<u64>() % num_octants;
@@ -61,6 +60,7 @@ fn main() {
         points.extend(
             octant
                 .points()
+                .0
                 .iter()
                 .map(|p| Vertex {
                     position: p.position.cast(),
@@ -68,7 +68,6 @@ fn main() {
                 })
                 .collect::<Vec<Vertex<f32>>>(),
         );
-        bboxes.push(CubeBoundingBox::from_points(octant.points()).size);
         pb.inc();
     }
     println!("num_points: {}", points.len());

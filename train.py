@@ -285,7 +285,7 @@ if __name__ == "__main__":
 
     model = PointNet(
         l_max,
-        4,
+        3,
         batch_norm=True,
         use_dropout=0.1,
         use_spherical=False,
@@ -417,7 +417,9 @@ if __name__ == "__main__":
 
             step += 1
         if epoch != 0 and epoch % 50 == 0:
-            torch.save(model.state_dict(), f"logs/{experiment_name}/model_weights_{epoch}.pt")
+            torch.save(
+                model.state_dict(), f"logs/{experiment_name}/model_weights_{epoch}.pt"
+            )
 
     writer_train.close()
     writer_val.close()

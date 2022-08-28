@@ -1,5 +1,5 @@
 use las::{Read as LasRead, Reader};
-use nalgebra::{center, Point3, Vector3, Vector4};
+use nalgebra::{center, Point3, Vector3};
 use pbr::ProgressBar;
 use punctum::{export_ply, Vertex};
 use std::path::PathBuf;
