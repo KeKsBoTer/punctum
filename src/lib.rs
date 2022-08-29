@@ -282,6 +282,9 @@ pub fn merge_shs(
         })
         .collect();
 
+    // calculate the new coefficients using torches
+    // least squares solver
+
     let y_t = tch::Tensor::of_data_size(
         y.as_bytes(),
         &[y.len() as i64, NUM_COEFS as i64],

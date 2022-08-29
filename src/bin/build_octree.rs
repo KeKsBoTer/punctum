@@ -199,7 +199,8 @@ fn main() {
             opt.flip_yz,
         )
     };
-
+    let mut pb = ProgressBar::new(octree.num_octants());
+    pb.message("sh leaf nodes ");
     for leaf_node in octree.borrow_mut().into_iter() {
         let pc = leaf_node.points();
         let (centroid, avg_color) = pc.centroid_and_color();
@@ -215,7 +216,9 @@ fn main() {
         leaf_node.sh_rep.position = centroid;
         leaf_node.sh_rep.radius = radius.sqrt();
         leaf_node.sh_rep.coefficients = SHCoefficients::new_from_color(avg_color.cast() / 255.);
+        pb.inc();
     }
+    pb.finish();
 
     let cameras: Vec<Point3<f32>> = load_cameras(
         "sphere.ply",
@@ -230,6 +233,9 @@ fn main() {
     .collect();
 
     let intermediate_nodes = octree.itermediate_octants();
+
+    let mut pb = ProgressBar::new(intermediate_nodes.len() as u64);
+    pb.message("sh intermediate nodes ");
     for id in intermediate_nodes.iter().rev() {
         if let Some(node) = octree.get_mut(*id) {
             if let punctum::Node::Intermediate(i_node) = node {
@@ -283,6 +289,7 @@ fn main() {
             unreachable!("id must be present in octree")
         }
     }
+    pb.finish();
 
     #[cfg(debug_assertions)]
     {
