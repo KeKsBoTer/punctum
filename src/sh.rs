@@ -1,4 +1,4 @@
-use nalgebra::Vector2;
+use nalgebra::{Point3, Vector2};
 use num_traits::Float;
 use rayon::prelude::*;
 use std::f32::consts::{FRAC_2_SQRT_PI, PI};
@@ -138,6 +138,26 @@ pub fn calc_sh_sparse(l_max: u64, coords: Vec<Vector2<f32>>) -> Vec<Vec<f32>> {
                 .collect::<Vec<f32>>()
         })
         .collect::<Vec<Vec<f32>>>()
+}
+
+pub fn calc_sh_fixed<const T: usize>(coords: Vec<Vector2<f32>>) -> Vec<[f32; T]> {
+    coords
+        .iter()
+        .map(|pos| {
+            let theta = pos.x;
+            let phi = pos.y;
+            let mut sh_values = [0.; T];
+            for i in 0..T {
+                let (l, m) = flat2lm_index(i);
+                sh_values[i] = sh_at_point(l, m, phi, theta);
+            }
+            return sh_values;
+        })
+        .collect()
+}
+
+pub fn to_spherical(pos: &Point3<f32>) -> Vector2<f32> {
+    Vector2::new(pos.z.acos(), pos.y.atan2(pos.x) + PI)
 }
 
 pub const SH_0: f32 = 0.25 * FRAC_2_SQRT_PI;

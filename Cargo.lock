@@ -702,6 +702,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dot_graph"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b310edef633ba5dde93f7b916ca82ee872dd3571c22f4ee98b44877d40995e2e"
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1933,6 +1939,7 @@ dependencies = [
  "approx",
  "bincode",
  "bytemuck",
+ "dot_graph",
  "egui_winit_vulkano",
  "half",
  "image 0.24.3",

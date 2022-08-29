@@ -56,9 +56,13 @@ impl From<Vertex<f64>> for Vertex<f32> {
     }
 }
 
+pub const NUM_COEFS: usize = (4 + 1) * (4 + 1);
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Zeroable)]
 #[repr(C)]
-pub struct SHCoefficients<const T: usize = 25>(#[serde(with = "BigArray")] [Vector3<f32>; T]);
+pub struct SHCoefficients<const T: usize = NUM_COEFS>(
+    #[serde(with = "BigArray")] pub [Vector3<f32>; T],
+);
 
 unsafe impl<const T: usize> VertexMember for SHCoefficients<T> {
     #[inline]
@@ -75,6 +79,10 @@ impl<const T: usize> SHCoefficients<T> {
         coefs[0].y = color.y / SH_0;
         coefs[0].z = color.z / SH_0;
         SHCoefficients(coefs)
+    }
+
+    pub fn l_max() -> u64 {
+        (T as f32).sqrt() as u64 - 1
     }
 }
 
@@ -105,18 +113,18 @@ impl Into<SHVertex<f32>> for SHVertex<f64> {
 }
 
 impl<F: BaseFloat> SHVertex<F> {
-    pub fn new(position: Point3<F>, size: F, coefficients: SHCoefficients) -> Self {
+    pub fn new(position: Point3<F>, radius: F, coefficients: SHCoefficients) -> Self {
         Self {
             position,
-            radius: size,
+            radius,
             coefficients,
         }
     }
 
-    pub fn new_with_color(position: Point3<F>, size: F, color: Vector3<f32>) -> Self {
+    pub fn new_with_color(position: Point3<F>, radius: F, color: Vector3<f32>) -> Self {
         Self {
             position,
-            radius: size,
+            radius,
             coefficients: SHCoefficients::new_from_color(color),
         }
     }

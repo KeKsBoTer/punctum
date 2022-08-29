@@ -8,7 +8,7 @@ const uint num_coefs = 25;
 
 
 layout(location = 0) in vec3 position;
-layout(location = 1) in float size;
+layout(location = 1) in float radius;
 layout(location = 2) in vec3 coefficients[num_coefs];
 
 layout(set = 0, binding = 0) uniform UniformData {
@@ -51,7 +51,7 @@ vec3 sh_color(vec2 angle){
 float calc_point_size(vec2 screen_pos,float cam_distance){
     float a = length(vec2(screen_pos.x*16/9,screen_pos.y)-0.5);
     
-    float screen_p = 2* atan(size/(2*cam_distance));
+    float screen_p = 2* atan(radius/(2*cam_distance));
     float fovy = PI;
 
     return 2 * screen_p/fovy * 1080; //* (1 +  2*tan(0.5*a*fovy/2));

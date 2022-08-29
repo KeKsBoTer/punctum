@@ -5,7 +5,10 @@ use las::{point::Point, Read as LasRead, Reader};
 use nalgebra::{center, distance, distance_squared, Point3, Vector3};
 use pbr::ProgressBar;
 use ply_rs::parser::Parser;
-use punctum::{BaseFloat, CubeBoundingBox, Octree, SHCoefficients, SHVertex, TeeWriter, Vertex};
+use punctum::{
+    load_cameras, merge_shs, BaseFloat, CubeBoundingBox, Octree, OrthographicProjection,
+    SHCoefficients, SHVertex, TeeWriter, Vertex,
+};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -34,6 +37,7 @@ fn sample_points<F>(rate: usize) -> impl FnMut(&Vertex<F>) -> bool
 where
     F: BaseFloat,
 {
+    // use fixed seed for reproducability
     let mut rand_gen = StdRng::seed_from_u64(42);
 
     return move |_p: &Vertex<F>| {
@@ -144,6 +148,15 @@ struct Opt {
     flip_yz: bool,
 }
 
+pub fn debug_id(id: u64) -> String {
+    let mut ids = Vec::with_capacity(16);
+    for i in 0..16 {
+        let index = (id >> i * 3) & 0b111;
+        ids.push(index);
+    }
+    format!("{ids:?}")
+}
+
 fn main() {
     let opt = Opt::from_args();
     println!(
@@ -204,89 +217,113 @@ fn main() {
         leaf_node.sh_rep.coefficients = SHCoefficients::new_from_color(avg_color.cast() / 255.);
     }
 
+    let cameras: Vec<Point3<f32>> = load_cameras(
+        "sphere.ply",
+        OrthographicProjection {
+            width: 2.,
+            height: 2.,
+        },
+    )
+    .unwrap()
+    .iter()
+    .map(|c| c.position())
+    .collect();
+
     let intermediate_nodes = octree.itermediate_octants();
     for id in intermediate_nodes.iter().rev() {
-        if let punctum::Node::Intermediate(node) = octree
-            .get_mut(*id)
-            .expect(&format!("cannot find id {:}", id))
-        {
-            let mut centroid = Point3::origin();
-            for child in node.data.iter() {
-                match child {
-                    punctum::Node::Intermediate(child) => {
-                        centroid += child.sh_rep.position.coords;
+        if let Some(node) = octree.get_mut(*id) {
+            if let punctum::Node::Intermediate(i_node) = node {
+                let mut centroid = Point3::origin();
+                let mut n = 0;
+                for child in i_node.data.iter() {
+                    match child {
+                        punctum::Node::Intermediate(child) => {
+                            centroid += child.sh_rep.position.coords;
+                            n += 1;
+                        }
+                        punctum::Node::Leaf(child) => {
+                            centroid += child.sh_rep.position.coords;
+                            n += 1;
+                        }
+                        punctum::Node::Empty => {}
                     }
-                    punctum::Node::Leaf(child) => {
-                        centroid += child.sh_rep.position.coords;
-                    }
-                    punctum::Node::Empty => {}
                 }
-            }
-            centroid /= node.data.len() as f64;
-            let mut max_distance = 0.;
-            for child in node.data.iter() {
-                match child {
-                    punctum::Node::Intermediate(child) => {
-                        max_distance = f64::max(
-                            max_distance,
-                            distance(&centroid, &child.sh_rep.position) + child.sh_rep.radius,
-                        )
+                centroid /= n as f64;
+                let mut max_distance = 0.;
+                for child in i_node.data.iter() {
+                    match child {
+                        punctum::Node::Intermediate(child) => {
+                            max_distance = f64::max(
+                                max_distance,
+                                distance(&centroid, &child.sh_rep.position) + child.sh_rep.radius,
+                            )
+                        }
+                        punctum::Node::Leaf(child) => {
+                            max_distance = f64::max(
+                                max_distance,
+                                distance(&centroid, &child.sh_rep.position) + child.sh_rep.radius,
+                            )
+                        }
+                        punctum::Node::Empty => {}
                     }
-                    punctum::Node::Leaf(child) => {
-                        max_distance = f64::max(
-                            max_distance,
-                            distance(&centroid, &child.sh_rep.position) + child.sh_rep.radius,
-                        )
-                    }
-                    punctum::Node::Empty => {}
                 }
+
+                let child_coefs = [0, 1, 2, 3, 4, 5, 6, 7].map(|i| match &i_node.data[i] {
+                    punctum::Node::Intermediate(o) => Some(o.sh_rep.coefficients),
+                    punctum::Node::Leaf(o) => Some(o.sh_rep.coefficients),
+                    punctum::Node::Empty => None,
+                });
+                let new_coefs = merge_shs(child_coefs, &cameras);
+
+                i_node.sh_rep = SHVertex::new(centroid, max_distance, new_coefs);
+            } else {
+                unreachable!("only intermediate nodes should be found!")
             }
-            node.sh_rep = SHVertex::new(
-                centroid,
-                max_distance,
-                SHCoefficients::new_from_color(Vector3::new(1., 0., 0.)),
-            );
         } else {
-            unreachable!()
+            unreachable!("id must be present in octree")
         }
     }
 
-    // we check that all ids are unqiue
-    // if not the tree is to deep (or something is wrong in the code :P)
-    let mut ids = octree
-        .into_iter()
-        .map(|octant| octant.id())
-        .collect::<Vec<u64>>();
-    ids.sort_unstable();
+    #[cfg(debug_assertions)]
+    {
+        // we check that all ids are unqiue
+        // if not the tree is to deep (or something is wrong in the code :P)
+        let mut ids = octree
+            .into_iter()
+            .map(|octant| octant.id())
+            .collect::<Vec<u64>>();
+        ids.sort_unstable();
 
-    let in_order = ids.iter().zip(ids.iter().skip(1)).find(|(a, b)| **a == **b);
-    if let Some(duplicate) = in_order {
-        panic!("duplicate id {:}!", duplicate.0);
-    }
+        let in_order = ids.iter().zip(ids.iter().skip(1)).find(|(a, b)| **a == **b);
+        if let Some(duplicate) = in_order {
+            panic!("duplicate id {:}!", duplicate.0);
+        }
 
-    for octant in octree.into_octant_iterator() {
-        for p in octant.octant.points().0.iter() {
-            if !octant.bbox.contains(&p.position) {
+        // we check if all points are contained by their bounding boxes
+        for octant in octree.into_octant_iterator() {
+            for p in octant.octant.points().0.iter() {
+                if !octant.bbox.contains(&p.position) {
+                    panic!(
+                        "point {:?} not contained by its bounding box (min: {:?}, max: {:?})",
+                        p,
+                        octant.bbox.min_corner(),
+                        octant.bbox.max_corner()
+                    );
+                }
+            }
+            if !octant.bbox.contains(&octant.octant.sh_rep.position) {
                 panic!(
-                    "point {:?} not contained by its bounding box (min: {:?}, max: {:?})",
-                    p,
+                    "sh rep {:?} not contained by its bounding box (min: {:?}, max: {:?})",
+                    octant.octant.sh_rep.position,
                     octant.bbox.min_corner(),
                     octant.bbox.max_corner()
                 );
             }
         }
-        if !octant.bbox.contains(&octant.octant.sh_rep.position) {
-            panic!(
-                "sh rep {:?} not contained by its bounding box (min: {:?}, max: {:?})",
-                octant.octant.sh_rep.position,
-                octant.bbox.min_corner(),
-                octant.bbox.max_corner()
-            );
-        }
     }
 
     println!(
-        "octree stats:\n\tnum_points:\t{}\n\tmax_depth:\t{}\n\tnum_octants:\t{}",
+        "octree stats:\n\tnum_points:\t{}\n\tmax_depth:\t{}\n\tleaf_octants:\t{}",
         octree.num_points(),
         octree.depth(),
         octree.num_octants()

@@ -30,6 +30,7 @@ num-traits = "0.2.14"
 structopt = "0.3"
 
 egui_winit_vulkano = "0.18.0"
+dot_graph = "0.2.3"
 
 tch = "0.8.0"
 

@@ -1,10 +1,9 @@
+use dot_graph::{Edge, Graph, Kind, Node as DotNode};
 use serde::{Deserialize, Serialize};
 
 use nalgebra::{convert, Point3, Vector3};
 
-use crate::{
-    camera::ViewFrustum, vertex::BaseFloat, CubeBoundingBox, PointCloud, SHVertex, Vertex,
-};
+use crate::{vertex::BaseFloat, CubeBoundingBox, PointCloud, SHVertex, Vertex};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Node<F: BaseFloat> {
@@ -201,8 +200,8 @@ impl<F: BaseFloat> LeafNode<F> {
             }
         }
         return IntermediateNode {
-            id: self.id | (1 << 63),
-            sh_rep: self.sh_rep, // TODO calculate new sh_rep based on children
+            id: self.id | ((level as u64) << 57), // we use the 7 most significant bytes to indicate the level
+            sh_rep: self.sh_rep,
             data: new_data,
         };
     }
@@ -218,22 +217,9 @@ impl<F: BaseFloat> LeafNode<F> {
     pub fn sh_rep(&self) -> &SHVertex<F> {
         &self.sh_rep
     }
-
-    pub fn level(&self) -> u32 {
-        (u32::BITS - self.id.leading_zeros()) / 3
-    }
 }
 
 pub type IntermediateNode<F> = Octant<F, Box<[Node<F>; 8]>>;
-
-impl<F: BaseFloat> IntermediateNode<F> {
-    pub fn level(&self) -> u32 {
-        // set most significant bit to zero
-        // for leading_zeros to work correctly
-        let id = self.id & !(1 << 63);
-        (u32::BITS - id.leading_zeros()) / 3
-    }
-}
 
 impl<F: BaseFloat> IntermediateNode<F> {
     fn filled_octants(&self) -> u64 {
@@ -328,49 +314,6 @@ impl<F: BaseFloat> Octree<F> {
         BBoxOctreeIterator { stack: stack }
     }
 
-    pub fn visible_octants<'a>(&'a self, frustum: &ViewFrustum<F>) -> Vec<OctreeIter<'a, F>> {
-        match &self.root {
-            Node::Intermediate(Octant { data: root, .. }) => {
-                let mut visible_octants = Vec::new();
-                let mut queue = vec![(root, self.bbox)];
-                while let Some((node, bbox)) = queue.pop() {
-                    if bbox.within_frustum(&frustum) {
-                        for (i, child) in node.iter().enumerate() {
-                            match child {
-                                Node::Intermediate(Octant { data: children, .. }) => {
-                                    let bbox_child = Node::<F>::octant_box(i, &bbox);
-                                    queue.push((children, bbox_child));
-                                }
-                                Node::Leaf(child) => {
-                                    let bbox_child = Node::<F>::octant_box(i, &bbox);
-                                    if bbox_child.within_frustum(&frustum) {
-                                        visible_octants.push(OctreeIter {
-                                            octant: child,
-                                            bbox: bbox_child,
-                                        })
-                                    }
-                                }
-                                Node::Empty => {}
-                            }
-                        }
-                    }
-                }
-                return visible_octants;
-            }
-            Node::Leaf(octant) => {
-                if self.bbox.within_frustum(&frustum) {
-                    vec![OctreeIter {
-                        octant,
-                        bbox: self.bbox,
-                    }]
-                } else {
-                    Vec::new()
-                }
-            }
-            Node::Empty => Vec::new(),
-        }
-    }
-
     pub fn get<'a>(&'a self, id: u64) -> Option<&'a Node<F>> {
         let mut node = &self.root;
         let mut level = 0;
@@ -410,11 +353,13 @@ impl<F: BaseFloat> Octree<F> {
             }
             match node {
                 Node::Intermediate(octant) => {
-                    let index = (octant.id >> (3 * level)) & 7;
+                    let index = (id >> (3 * level)) & 7;
                     node = &mut octant.data[index as usize];
                     level += 1;
                 }
-                _ => return None,
+                _ => {
+                    return None;
+                }
             }
         }
     }
@@ -430,8 +375,7 @@ impl<F: BaseFloat> Octree<F> {
                 Node::Intermediate(octant) => {
                     octants.push(octant.id);
                     for child in octant.data.iter() {
-                        if let Node::Intermediate(o) = child {
-                            octants.push(o.id);
+                        if let Node::Intermediate(_) = child {
                             stack.push(child);
                         }
                     }
@@ -440,6 +384,63 @@ impl<F: BaseFloat> Octree<F> {
             }
         }
         return octants;
+    }
+
+    pub fn id_path<'a>(&'a self, id: u64) -> Vec<&'a Node<F>> {
+        let mut node = &self.root;
+        let mut path = Vec::new();
+        let mut level = 0;
+        loop {
+            let node_id = node.id();
+            if node_id.is_some() && node_id.unwrap() == id {
+                path.push(node);
+                break;
+            }
+            match node {
+                Node::Intermediate(octant) => {
+                    path.push(node);
+                    let index = (octant.id >> (3 * level)) & 7;
+                    node = &octant.data[index as usize];
+                    level += 1;
+                }
+                _ => break,
+            }
+        }
+        return path;
+    }
+
+    pub fn dot_graph(&self) -> Graph {
+        let mut graph = Graph::new("octree", Kind::Digraph);
+        let mut stack = vec![&self.root];
+        while let Some(node) = stack.pop() {
+            match node {
+                Node::Intermediate(Octant {
+                    id, data: octants, ..
+                }) => {
+                    graph.add_node(DotNode::new(&format!("N{id}")).label(&format!("{:#b}", id)));
+
+                    for (i, o) in octants.iter().enumerate() {
+                        if let Node::Empty = o {
+                        } else {
+                            let c_id = o.id().unwrap();
+                            graph.add_edge(Edge::new(
+                                &format!("N{id}"),
+                                &format!("N{c_id}"),
+                                &format!("{}", i),
+                            ));
+                            stack.push(o);
+                        }
+                    }
+                }
+                Node::Leaf(Octant { id, .. }) => {
+                    graph.add_node(DotNode::new(&format!("N{id}")).label(&format!("{id:#b}")));
+                }
+                Node::Empty => {
+                    panic!("unreachable")
+                }
+            }
+        }
+        graph
     }
 }
 

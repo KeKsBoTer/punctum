@@ -1,9 +1,13 @@
-use std::sync::Arc;
+use std::{f32::consts::FRAC_1_PI, sync::Arc};
 
 use camera::Projection;
 use image::{ImageBuffer, Rgba};
+use nalgebra::{Point3, Vector2, Vector3};
+use sh::{calc_sh_fixed, to_spherical};
+use tch::Kind;
+use vertex::NUM_COEFS;
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer},
+    buffer::{BufferContents, BufferUsage, CpuAccessibleBuffer},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType, QueueFamily},
         Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned, Queue, QueueCreateInfo,
@@ -234,4 +238,70 @@ unsafe impl DeviceOwned for OfflineRenderer {
 pub enum LoD {
     SHRep,
     Full,
+}
+
+pub fn merge_shs(
+    shs: [Option<SHCoefficients>; 8],
+    sample_locations: &Vec<Point3<f32>>,
+) -> SHCoefficients {
+    if !shs.iter().any(|s| s.is_some()) {
+        return shs.iter().find(|s| s.is_some()).unwrap().unwrap();
+    }
+
+    let normals = [0, 1, 2, 3, 4, 5, 6, 7].map(|i| {
+        let z = i / 4;
+        let y = (i - 4 * z) / 2;
+        let x = i % 2;
+
+        let sf = 2. / (3f32).sqrt();
+        Vector3::new(x as f32 - 0.5f32, y as f32 - 0.5f32, z as f32 - 0.5f32) * sf
+    });
+    let sph_pos: Vec<Vector2<f32>> = sample_locations.iter().map(|p| to_spherical(p)).collect();
+    let y = calc_sh_fixed::<NUM_COEFS>(sph_pos);
+
+    let new_colors: Vec<Vector3<f32>> = sample_locations
+        .iter()
+        .enumerate()
+        .map(|(p_i, p)| {
+            let mut w_sum = 0.;
+            let mut color = Vector3::zeros();
+
+            for (i, sh_rep) in shs.iter().enumerate() {
+                if let Some(sh_coefficients) = sh_rep {
+                    let n = normals[i];
+                    let w = 1. - FRAC_1_PI * n.angle(&p.coords);
+                    let mut a_color = Vector3::zeros();
+                    for y_i in 0..NUM_COEFS {
+                        a_color += y[p_i][y_i] * sh_coefficients.0[y_i];
+                    }
+                    color += w * a_color;
+                    w_sum += w;
+                }
+            }
+            color / w_sum
+        })
+        .collect();
+
+    let y_t = tch::Tensor::of_data_size(
+        y.as_bytes(),
+        &[y.len() as i64, NUM_COEFS as i64],
+        Kind::Float,
+    );
+    let target = tch::Tensor::of_data_size(
+        new_colors.as_bytes(),
+        &[new_colors.len() as i64, 3],
+        Kind::Float,
+    );
+
+    let a = y_t.transpose(0, 1).matmul(&y_t);
+    let b = y_t.transpose(0, 1).matmul(&target);
+
+    let solution = a.linalg_lstsq(&b, None, "gelsy").0;
+
+    let mut new_coefs = SHCoefficients([Vector3::zeros(); NUM_COEFS]);
+    for (i, v) in Vec::<f32>::from(solution).iter().enumerate() {
+        new_coefs.0[i / 3][i % 3] = *v;
+    }
+
+    new_coefs
 }
