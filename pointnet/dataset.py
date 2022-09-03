@@ -19,9 +19,10 @@ class OctantDataset(Dataset):
     """ Dataset containing pointclouds and their respective SH coefficients"""
 
     def __init__(
-        self, data_dir: str, sub_sample: int = None, selected_samples: list[str] = None,
+        self, data_dir: str, sub_sample: int = None, selected_samples: list[str] = None, with_alpha : bool = False
     ):
         self.data_dir = data_dir
+        self.with_alpha = with_alpha
         if selected_samples is not None:
             self.ply_files = np.array(selected_samples)
         else:
@@ -49,11 +50,11 @@ class OctantDataset(Dataset):
         color = vertex_data[:, 3:] / 255
 
         sh_coef = torch.empty(
-            (plydata["sh_coefficients"].count, 4), requires_grad=False
+            (plydata["sh_coefficients"].count, 4 if self.with_alpha else 3), requires_grad=False
         )
 
         for (l, m, values) in plydata["sh_coefficients"].data:
-            sh_coef[lm2flat_index(l, m)] = torch.tensor(values)
+            sh_coef[lm2flat_index(l, m)] = torch.tensor(values)[:sh_coef.shape[-1]]
 
         before = len(coords)
         nan_mask = coords.isnan().any(-1)
@@ -113,14 +114,14 @@ class CamerasDataset(Dataset):
 
     def load_ply(self, file: str) -> Tuple[Pointclouds, torch.Tensor]:
         plydata = PlyData.read(file)
-        vertex_data = unpack_data(
-            plydata["vertex"].data, ["x", "y", "z", "red", "green", "blue", "alpha"]
-        )
-        vertex_pos = vertex_data[:, :3]
-        vertex_color = vertex_data[:, 3:] / 255
+
+        fields = ["x", "y", "z", "red", "green", "blue"]
+        print( plydata["camera"].dtype)
+        if "alpha" in plydata["camera"].data:
+            fields += ["alpha"]
 
         camera_data = unpack_data(
-            plydata["camera"].data, ["x", "y", "z", "red", "green", "blue", "alpha"]
+            plydata["camera"].data, fields
         )
         pos = camera_data[:, :3]
         colors = camera_data[:, 3:] / 255
@@ -128,7 +129,7 @@ class CamerasDataset(Dataset):
         sh_coef = None
         if "sh_coefficients" in plydata:
             sh_coef = torch.empty(
-                (plydata["sh_coefficients"].count, 4), requires_grad=False
+                (plydata["sh_coefficients"].count, len(fields)-3), requires_grad=False
             )
 
             for (l, m, values) in plydata["sh_coefficients"].data:

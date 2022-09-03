@@ -1,7 +1,7 @@
 import torch
 from pointnet.sh import calc_sh
 
-def camera_color(l_max: int, positions: torch.Tensor, random_offset: bool = True):
+def camera_color(l_max: int, positions: torch.Tensor):
 
     y = calc_sh(l_max, positions.flatten(0, 1))
     y = y.reshape((positions.shape[0], (l_max + 1) ** 2))

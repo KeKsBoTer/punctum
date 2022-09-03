@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, fs::File, io::BufWriter, time::Duration};
+use std::{borrow::BorrowMut, collections::HashMap, fs::File, io::BufWriter, time::Duration};
 
 use bincode::{serialize_into, serialized_size};
 use las::{point::Point, Read as LasRead, Reader};
@@ -7,11 +7,13 @@ use pbr::ProgressBar;
 use ply_rs::parser::Parser;
 use punctum::{
     load_cameras, merge_shs, BaseFloat, CubeBoundingBox, Octree, OrthographicProjection,
-    SHCoefficients, SHVertex, TeeWriter, Vertex,
+    PointCloud, SHCoefficients, SHVertex, TeeWriter, Vertex,
 };
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use std::path::PathBuf;
 use structopt::StructOpt;
+use tch::{kind, IndexOp, Kind, Tensor};
+use vulkano::buffer::BufferContents;
 
 fn vertex_flip_yz<F: BaseFloat>(v: Vertex<F>) -> Vertex<F> {
     Vertex {
@@ -127,78 +129,89 @@ where
     return octree;
 }
 
-#[derive(StructOpt, Debug)]
-#[structopt(name = "Octree Builder")]
-struct Opt {
-    /// .las or .ply input file
-    #[structopt(name = "input_file", parse(from_os_str))]
-    input: PathBuf,
-
-    #[structopt(name = "output", parse(from_os_str))]
-    output: PathBuf,
-
-    #[structopt(long, default_value = "1024")]
-    max_octant_size: usize,
-
-    #[structopt(long)]
-    sample_rate: Option<usize>,
-
-    /// flip y and z values
-    #[structopt(long)]
-    flip_yz: bool,
+fn load_model<P: AsRef<std::path::Path>>(path: P, device: tch::Device) -> tch::CModule {
+    let mut model = tch::CModule::load_on_device(path, device).expect("cannot load model");
+    model.set_eval();
+    return model;
 }
 
-pub fn debug_id(id: u64) -> String {
-    let mut ids = Vec::with_capacity(16);
-    for i in 0..16 {
-        let index = (id >> i * 3) & 0b111;
-        ids.push(index);
-    }
-    format!("{ids:?}")
-}
+const COLOR_CHANNELS: usize = 3;
 
-fn main() {
-    let opt = Opt::from_args();
-    println!(
-        "Building octree from {}:",
-        opt.input.as_os_str().to_str().unwrap()
-    );
-
-    let mut octree = if opt.input.extension().unwrap() == "las" {
-        let mut reader = Reader::from_path(opt.input).unwrap();
-        let number_of_points = reader.header().number_of_points();
-
-        let (points, bbox) = from_laz(&mut reader);
-        build_octree(
-            points,
-            bbox,
-            100.,
-            number_of_points,
-            opt.max_octant_size,
-            opt.sample_rate,
-            opt.flip_yz,
-        )
+fn calculate_leaf_sh<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>, model_path: P) {
+    let device = if tch::Cuda::is_available() {
+        tch::Device::Cuda(0)
     } else {
-        let mut ply_file = std::fs::File::open(opt.input).unwrap();
-        let p = Parser::<Vertex<f64>>::new();
-
-        let ply = p.read_ply(&mut ply_file).unwrap();
-
-        let points = ply.payload.get("vertex").unwrap();
-
-        let bbox = CubeBoundingBox::from_points(points);
-
-        let number_of_points = points.len() as u64;
-        build_octree(
-            points.iter().map(|p| *p),
-            bbox,
-            100.,
-            number_of_points,
-            opt.max_octant_size,
-            opt.sample_rate,
-            opt.flip_yz,
-        )
+        println!("warning: no cuda support, using CPU");
+        tch::Device::Cpu
     };
+    let model = load_model(model_path, device);
+    let mut pb = ProgressBar::new(octree.num_octants());
+
+    let mut points = Vec::new();
+    let mut colors = Vec::new();
+    let mut batch_indices = Vec::new();
+
+    let mut sh_coefs = HashMap::new();
+
+    for octant in octree.into_iter() {
+        let pc: &PointCloud<f64> = octant.points().into();
+        let mut pc: PointCloud<f32> = pc.into();
+        pc.scale_to_unit_sphere();
+
+        let raw_points = pc.points().as_bytes();
+        let vertex_data = Tensor::of_data_size(
+            raw_points,
+            &[pc.points().len() as i64, (3 + COLOR_CHANNELS) as i64],
+            Kind::Float,
+        )
+        .to(device);
+
+        let pos = vertex_data.i((.., ..3));
+        let color = vertex_data.i((.., 3..(3 + COLOR_CHANNELS) as i64));
+
+        let batch_idx = batch_indices.len() as i64;
+        let batch = Tensor::ones(&[pc.points().len() as i64], kind::INT64_CUDA) * batch_idx;
+
+        points.push(pos);
+        colors.push(color);
+        batch_indices.push(batch);
+
+        if batch_idx == 512 {
+            let pos_batch = Tensor::cat(points.as_slice(), 0);
+            let color_batch = Tensor::cat(colors.as_slice(), 0);
+            let batch_batch = Tensor::cat(batch_indices.as_slice(), 0);
+
+            let coefs = model
+                .forward_ts(&[&pos_batch, &color_batch, &batch_batch])
+                .unwrap();
+
+            for idx in 0..batch_indices.len() {
+                let c = coefs.get(idx as i64);
+                let mut new_coefs = [Vector3::<f32>::zeros(); 25];
+
+                let f_coefs = Vec::<f32>::from(&c);
+                for (i, v) in f_coefs.iter().enumerate() {
+                    new_coefs[i / COLOR_CHANNELS][i % COLOR_CHANNELS] = *v;
+                }
+                sh_coefs.insert(octant.id(), new_coefs);
+            }
+
+            points.clear();
+            colors.clear();
+            batch_indices.clear();
+        }
+        pb.inc();
+    }
+    println!("");
+
+    println!("updating octree...");
+    for octant in octree.borrow_mut().into_iter() {
+        let new_coefs = sh_coefs.get(&octant.id()).unwrap();
+        octant.sh_rep.coefficients = (*new_coefs).into();
+    }
+}
+
+fn calculate_leaf_mean(octree: &mut Octree<f64>) {
     let mut pb = ProgressBar::new(octree.num_octants());
     pb.message("sh leaf nodes ");
     for leaf_node in octree.borrow_mut().into_iter() {
@@ -219,7 +232,9 @@ fn main() {
         pb.inc();
     }
     pb.finish();
+}
 
+fn calculate_intermediate(octree: &mut Octree<f64>) {
     let cameras: Vec<Point3<f32>> = load_cameras(
         "sphere.ply",
         OrthographicProjection {
@@ -290,6 +305,81 @@ fn main() {
         }
     }
     pb.finish();
+}
+
+#[derive(StructOpt, Debug)]
+#[structopt(name = "Octree Builder")]
+struct Opt {
+    /// .las or .ply input file
+    #[structopt(name = "input_file", parse(from_os_str))]
+    input: PathBuf,
+
+    #[structopt(name = "output", parse(from_os_str))]
+    output: PathBuf,
+
+    #[structopt(long, default_value = "1024")]
+    max_octant_size: usize,
+
+    #[structopt(long)]
+    sample_rate: Option<usize>,
+
+    /// flip y and z values
+    #[structopt(long)]
+    flip_yz: bool,
+
+    #[structopt(long, parse(from_os_str))]
+    sh_model: Option<PathBuf>,
+}
+
+fn main() {
+    let opt = Opt::from_args();
+    println!(
+        "Building octree from {}:",
+        opt.input.as_os_str().to_str().unwrap()
+    );
+
+    let mut octree = if opt.input.extension().unwrap() == "las" {
+        let mut reader = Reader::from_path(opt.input).unwrap();
+        let number_of_points = reader.header().number_of_points();
+
+        let (points, bbox) = from_laz(&mut reader);
+        build_octree(
+            points,
+            bbox,
+            100.,
+            number_of_points,
+            opt.max_octant_size,
+            opt.sample_rate,
+            opt.flip_yz,
+        )
+    } else {
+        let mut ply_file = std::fs::File::open(opt.input).unwrap();
+        let p = Parser::<Vertex<f64>>::new();
+
+        let ply = p.read_ply(&mut ply_file).unwrap();
+
+        let points = ply.payload.get("vertex").unwrap();
+
+        let bbox = CubeBoundingBox::from_points(points);
+
+        let number_of_points = points.len() as u64;
+        build_octree(
+            points.iter().map(|p| *p),
+            bbox,
+            100.,
+            number_of_points,
+            opt.max_octant_size,
+            opt.sample_rate,
+            opt.flip_yz,
+        )
+    };
+    if let Some(model_path) = opt.sh_model {
+        calculate_leaf_sh(&mut octree, model_path);
+    } else {
+        calculate_leaf_mean(&mut octree);
+    }
+
+    calculate_intermediate(&mut octree);
 
     #[cfg(debug_assertions)]
     {

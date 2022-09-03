@@ -4,7 +4,7 @@ import numpy as np
 import glob
 from os.path import join, basename
 import os
-from .sh import to_spherical, calc_coeficients, lm2flat_index
+from pointnet.sh import to_spherical, calc_coeficients, lm2flat_index
 from tqdm import tqdm
 import torch.multiprocessing as mp
 
@@ -17,9 +17,12 @@ def export_sh(args):
     def unpack_data(data, field_names):
         return torch.from_numpy(np.stack([data[key] for key in field_names]).T)
 
+    alpha = len(vertex_data.dtype)==3+4
+
     cameras = unpack_data(vertex_data, ["x", "y", "z"]).to("cuda")
+    color_channels =   ["red", "green", "blue", "alpha"] if alpha else  ["red", "green", "blue"]
     perceived_colors = (
-        unpack_data(vertex_data, ["red", "green", "blue", "alpha"]).float().to("cuda")
+        unpack_data(vertex_data,color_channels).float().to("cuda")
         / 255.0
     )
 
@@ -35,7 +38,7 @@ def export_sh(args):
             coef_data.append((l, -l + m, list(sh.numpy())))
 
     ply_sh_data = np.array(
-        coef_data, dtype=[("l", "u1"), ("m", "i1"), ("coefficients", "f4", (4,))]
+        coef_data, dtype=[("l", "u1"), ("m", "i1"), ("coefficients", "f4", (len(color_channels),))]
     )
 
     sh_elm = PlyElement.describe(ply_sh_data, "sh_coefficients")

@@ -5,7 +5,7 @@ use tch::{kind, IndexOp, Kind, Tensor};
 use vulkano::buffer::BufferContents;
 
 use nalgebra::Vector3;
-use punctum::{load_octree_with_progress_bar, Octree, PointCloud, TeeWriter};
+use punctum::{load_octree_with_progress_bar, Octree, PointCloud, TeeWriter, Vertex};
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -22,6 +22,8 @@ fn load_model<P: AsRef<std::path::Path>>(path: P, device: tch::Device) -> tch::C
     model.set_eval();
     return model;
 }
+
+const COLOR_CHANNELS: usize = 3;
 
 pub fn main() {
     let opt = Opt::from_args();
@@ -46,12 +48,15 @@ pub fn main() {
         pc.scale_to_unit_sphere();
 
         let raw_points = pc.points().as_bytes();
-        let vertex_data =
-            Tensor::of_data_size(raw_points, &[pc.points().len() as i64, 7], Kind::Float)
-                .to(device);
+        let vertex_data = Tensor::of_data_size(
+            raw_points,
+            &[pc.points().len() as i64, (3 + COLOR_CHANNELS) as i64],
+            Kind::Float,
+        )
+        .to(device);
 
         let pos = vertex_data.i((.., ..3));
-        let color = vertex_data.i((.., 3..6));
+        let color = vertex_data.i((.., 3..(3 + COLOR_CHANNELS) as i64));
 
         let batch_idx = batch_indices.len() as i64;
         let batch = Tensor::ones(&[pc.points().len() as i64], kind::INT64_CUDA) * batch_idx;
@@ -75,7 +80,7 @@ pub fn main() {
 
                 let f_coefs = Vec::<f32>::from(&c);
                 for (i, v) in f_coefs.iter().enumerate() {
-                    new_coefs[i / 3][i % 3] = *v;
+                    new_coefs[i / COLOR_CHANNELS][i % COLOR_CHANNELS] = *v;
                 }
                 sh_coefs.insert(octant.id(), new_coefs);
             }

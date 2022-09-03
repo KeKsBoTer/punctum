@@ -20,7 +20,6 @@ from pointnet.pointclouds import Pointclouds
 from pointnet.sh import calc_sh
 from pointnet.utils import camera_positions
 
-
 class CoefNormalizer:
     def __init__(self, mean: torch.Tensor, std: torch.Tensor):
         self.mean = mean
@@ -39,11 +38,16 @@ class CoefNormalizer:
         ax.plot(x, self.std[:, 0].cpu(), label="red")
         ax.plot(x, self.std[:, 1].cpu(), label="green")
         ax.plot(x, self.std[:, 2].cpu(), label="blue")
-        ax.plot(x, self.std[:, 3].cpu(), label="alpha")
+        if self.std.shape[1] == 4:
+            ax.plot(x, self.std[:, 3].cpu(), label="alpha")
         ax.set_xlabel("coefs.")  #
         ax.legend()
         return fig
 
+def stds(colors:torch.Tensor,batch_idx:torch.Tensor):
+    stds = torch.stack([colors[batch_idx==b].std(0).max() for b in range(batch_idx.max().item()+1)])
+    stds[stds.isnan() | (stds==0)]=1e-3
+    return stds
 
 def plot_samples(
     prediction_coefs: torch.Tensor,
@@ -53,6 +57,8 @@ def plot_samples(
     num_samples: int = 8,
     res: int = 100,
 ):
+    color_channels = target_coefs.shape[-1]
+    alpha = color_channels == 4
     x = torch.arange(0, 1, 1 / res)
     grid_x, grid_y = torch.meshgrid(x * torch.pi, x * 2 * torch.pi, indexing="ij")
     coords = torch.stack((grid_x.flatten(), grid_y.flatten())).T
@@ -61,11 +67,10 @@ def plot_samples(
 
     rand_sample = torch.randint(0, len(prediction_coefs), (num_samples,))
 
-    cols = 5
+    cols = 5 if alpha else 3
     fig, axes = plt.subplots(num_samples, cols, figsize=(cols * 2, num_samples * 2))
     fig.tight_layout()
 
-    color_channels = target_coefs.shape[-1]
 
     targets = torch.empty((len(rand_sample), res, res, color_channels))
     predictions = torch.empty((len(rand_sample), res, res, color_channels))
@@ -79,7 +84,7 @@ def plot_samples(
         errors[i] = (predictions[i] - targets[i]).square().mean(-1)
 
     for i, s in enumerate(rand_sample):
-        ax1, ax2, ax3, ax4, ax5 = axes[i]
+        ax1, ax2, ax3 = axes[i][:3]
 
         name = pc.file_names[s].split("/")[-1]
         ax1.set_title(f"target ({name})")
@@ -94,13 +99,15 @@ def plot_samples(
         ax3.set_axis_off()
         ax3.imshow(errors[i], vmin=errors.min(), vmax=errors.max(), cmap="winter")
 
-        ax4.set_title("alpha target.")
-        ax4.set_axis_off()
-        ax4.imshow(targets[i][:, :, 3], vmin=0, vmax=1)
+        if alpha:
+            ax4, ax5 = axes[i][3:]
+            ax4.set_title("alpha target.")
+            ax4.set_axis_off()
+            ax4.imshow(targets[i][:, :, 3], vmin=0, vmax=1)
 
-        ax5.set_title("alpha pred.")
-        ax5.set_axis_off()
-        ax5.imshow(predictions[i][:, :, 3], vmin=0, vmax=1)
+            ax5.set_title("alpha pred.")
+            ax5.set_axis_off()
+            ax5.imshow(predictions[i][:, :, 3], vmin=0, vmax=1)
 
     return fig
 
@@ -108,6 +115,7 @@ def plot_samples(
 def plot_coefs(
     pred: torch.Tensor, targets: torch.Tensor
 ) -> Tuple[Figure, Figure, Figure]:
+    alpha = target_coefs.shape[-1] == 4
 
     fig1, ax = plt.subplots()
 
@@ -126,7 +134,8 @@ def plot_coefs(
     ax.plot(error[:, 0].cpu(), label="red")
     ax.plot(error[:, 1].cpu(), label="green")
     ax.plot(error[:, 2].cpu(), label="blue")
-    ax.plot(error[:, 3].cpu(), label="alpha")
+    if alpha:
+        ax.plot(error[:, 3].cpu(), label="alpha")
     ax.legend()
 
     fig3, ax = plt.subplots()
@@ -137,7 +146,8 @@ def plot_coefs(
     ax.plot(error[:, 0].cpu(), label="red")
     ax.plot(error[:, 1].cpu(), label="green")
     ax.plot(error[:, 2].cpu(), label="blue")
-    ax.plot(error[:, 3].cpu(), label="alpha")
+    if alpha:
+        ax.plot(error[:, 3].cpu(), label="alpha")
     ax.legend()
     ax.set_yscale("log")
 
@@ -207,7 +217,7 @@ if __name__ == "__main__":
         shuffle=True,
         num_workers=12,
         collate_fn=collate_batched_point_clouds,
-        pin_memory=True,
+        pin_memory=False,
         drop_last=False,
         prefetch_factor=10,
         pin_memory_device="cuda:0",
@@ -219,7 +229,7 @@ if __name__ == "__main__":
         shuffle=True,
         num_workers=12,
         collate_fn=collate_batched_point_clouds,
-        pin_memory=True,
+        pin_memory=False,
         drop_last=False,
         prefetch_factor=10,
         pin_memory_device="cuda:0",
@@ -240,7 +250,7 @@ if __name__ == "__main__":
         l_max,
         num_color_channels,
         batch_norm=True,
-        use_dropout=0.05,
+        use_dropout=0.3,
         use_spherical=False,
         coef_mean=coef_transform.mean,
         coef_std=coef_transform.std,
@@ -299,8 +309,10 @@ if __name__ == "__main__":
 
             target_coefs = coefs[:, : lm2flat_index(l_max, l_max) + 1].cuda()
 
-            pred_coefs = model(*pcs.unpack())
-            c_loss = loss_fn(pred_coefs, target_coefs)
+            vertices, color, batch =pcs.unpack()
+            pred_coefs = model(vertices, color, batch)
+            sample_weight = stds(color, batch)
+            c_loss = loss_fn(pred_coefs, target_coefs,sample_weight)
 
             pred_coefs_n = coef_transform.normalize(pred_coefs)
             target_coefs_n = coef_transform.normalize(target_coefs)
@@ -342,9 +354,12 @@ if __name__ == "__main__":
                 pcs, coefs = val_batch.pcs, val_batch.coefs
 
                 target_coefs = coefs[:, : lm2flat_index(l_max, l_max) + 1].cuda()
-                pred_coefs = model(*pcs.unpack())
 
-                c_loss = loss_fn(pred_coefs, target_coefs)
+                vertices, color, batch =pcs.unpack()
+                pred_coefs = model(vertices, color, batch)
+
+                sample_weight = stds(color, batch)
+                c_loss = loss_fn(pred_coefs, target_coefs,sample_weight)
 
                 target_coefs_n = coef_transform.normalize(target_coefs)
                 pred_coefs_n = coef_transform.normalize(pred_coefs)
@@ -384,6 +399,7 @@ if __name__ == "__main__":
 
     writer_train.close()
     writer_val.close()
+    model.eval()
 
     torch.save(model.state_dict(), f"logs/{experiment_name}/model_weights.pt")
 

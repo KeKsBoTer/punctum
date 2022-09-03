@@ -24,13 +24,15 @@ def camera_loss(l_max: int, positions: torch.Tensor, random_offset: bool = True)
     y = calc_sh(l_max, rnd_pos.flatten(0, 1))
     y = y.reshape((num_rand, positions.shape[0], (l_max + 1) ** 2))
 
-    def loss(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def loss(prediction: torch.Tensor, target: torch.Tensor, sample_weight:torch.Tensor = None) -> torch.Tensor:
         r_i = torch.randint(0, len(y), (1,)).item()
         y_r = y.to(prediction.device)[r_i]
         pred_img = y_r @ prediction
         target_img = y_r @ target
         diff = pred_img - target_img
         l2 = diff.norm(2, -1).mean(-1)
+        if sample_weight is not None:
+            l2 *= sample_weight
         return l2.mean()
 
     return loss

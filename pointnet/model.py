@@ -7,13 +7,13 @@ from torch import nn
 import torch.nn.functional as F
 
 
-def scatter_max(x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
+def scatter_reduce(x: torch.Tensor, batch: torch.Tensor,reduce="amax") -> torch.Tensor:
     batch_idx = batch.unsqueeze(-1).repeat(1, x.shape[1])
     target: torch.Tensor = torch.zeros(
         (batch_idx.max() + 1, x.shape[1])
-    ,device=x.get_device())
+    ,device=x.device)
 
-    return target.scatter_reduce(0, batch_idx, x, reduce="amax")
+    return target.scatter_reduce(0, batch_idx, x, reduce=reduce)
 
 
 class FeatureNet(nn.Module):
@@ -69,7 +69,7 @@ class FeatureNet(nn.Module):
             x = self.conv3(x)
 
         x = x.squeeze(0).T
-        x_max = scatter_max(x, batch)
+        x_max = scatter_reduce(x, batch)
         return x_max
 
 def to_spherical(coords: torch.Tensor) -> torch.Tensor:
@@ -91,7 +91,7 @@ class PointNet(nn.Module):
     def __init__(
         self,
         l: int = 10,
-        color_channels: int = 4,
+        color_channels: int = 3,
         batch_norm: bool = False,
         use_dropout: bool = False,
         use_spherical: bool = False,
@@ -131,12 +131,13 @@ class PointNet(nn.Module):
 
         Args:
             points (torch.Tensor[N,3]): vertex positions
-            color (torch.Tensor[N,3]): colors
+            color (torch.Tensor[N,C]): colors c = self.color_channels
             batch (torch.Tensor[N]): tensor indicating the batch number of each point
 
         Returns:
             torch.Tensor[B,K,C]: coefficients
         """
+        #mean_color = scatter_reduce(color,batch,"mean")
         if self.use_spherical:
             points = to_spherical(points)
         x = self.feat(points, color, batch)
@@ -157,5 +158,7 @@ class PointNet(nn.Module):
         x = x.reshape(-1, (self.l + 1) ** 2, self.color_channels)
 
         x = x * self.coef_std + self.coef_mean
+
+        #x[:,0] += mean_color *2*torch.pi**0.5
 
         return x
