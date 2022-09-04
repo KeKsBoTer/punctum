@@ -285,16 +285,20 @@ pub fn merge_shs(
     // calculate the new coefficients using torches
     // least squares solver
 
+    let device = tch::Device::Cpu;
+
     let y_t = tch::Tensor::of_data_size(
         y.as_bytes(),
         &[y.len() as i64, NUM_COEFS as i64],
         Kind::Float,
-    );
+    )
+    .to(device);
     let target = tch::Tensor::of_data_size(
         new_colors.as_bytes(),
         &[new_colors.len() as i64, 3],
         Kind::Float,
-    );
+    )
+    .to(device);
 
     let a = y_t.transpose(0, 1).matmul(&y_t);
     let b = y_t.transpose(0, 1).matmul(&target);

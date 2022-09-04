@@ -129,6 +129,23 @@ impl<F: BaseFloat> PointCloud<F> {
     }
 }
 
+impl PointCloud<f32> {
+    pub fn position_color(self) -> (Vec<f32>, Vec<f32>) {
+        let mut color = Vec::with_capacity(self.0.len());
+        let mut pos = Vec::with_capacity(self.0.len());
+        for v in self.0 {
+            color.push(v.color.x as f32 / 255.);
+            color.push(v.color.y as f32 / 255.);
+            color.push(v.color.z as f32 / 255.);
+
+            pos.push(v.position.x);
+            pos.push(v.position.y);
+            pos.push(v.position.z);
+        }
+        return (pos, color);
+    }
+}
+
 pub struct PointCloudGPU {
     gpu_buffer: Arc<CpuAccessibleBuffer<[Vertex<f32>]>>,
 }

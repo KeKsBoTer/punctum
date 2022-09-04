@@ -12,8 +12,7 @@ use punctum::{
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use std::path::PathBuf;
 use structopt::StructOpt;
-use tch::{kind, IndexOp, Kind, Tensor};
-use vulkano::buffer::BufferContents;
+use tch::{kind, Tensor};
 
 fn vertex_flip_yz<F: BaseFloat>(v: Vertex<F>) -> Vertex<F> {
     Vertex {
@@ -137,7 +136,7 @@ fn load_model<P: AsRef<std::path::Path>>(path: P, device: tch::Device) -> tch::C
 
 const COLOR_CHANNELS: usize = 3;
 
-fn calculate_leaf_sh<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>, model_path: P) {
+fn calculate_leaf_sh_batched<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>, model_path: P) {
     let device = if tch::Cuda::is_available() {
         tch::Device::Cuda(0)
     } else {
@@ -149,7 +148,10 @@ fn calculate_leaf_sh<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>, model_
 
     let mut points = Vec::new();
     let mut colors = Vec::new();
+    let mut octant_ids = Vec::new();
     let mut batch_indices = Vec::new();
+
+    let batch_size = 64;
 
     let mut sh_coefs = HashMap::new();
 
@@ -158,25 +160,24 @@ fn calculate_leaf_sh<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>, model_
         let mut pc: PointCloud<f32> = pc.into();
         pc.scale_to_unit_sphere();
 
-        let raw_points = pc.points().as_bytes();
-        let vertex_data = Tensor::of_data_size(
-            raw_points,
-            &[pc.points().len() as i64, (3 + COLOR_CHANNELS) as i64],
-            Kind::Float,
-        )
-        .to(device);
+        let (pos, color) = pc.position_color();
 
-        let pos = vertex_data.i((.., ..3));
-        let color = vertex_data.i((.., 3..(3 + COLOR_CHANNELS) as i64));
+        let pos_t = Tensor::of_slice(pos.as_slice())
+            .reshape(&[-1, 3])
+            .to_device(device);
 
+        let color_t = Tensor::of_slice(color.as_slice())
+            .reshape(&[-1, 3])
+            .to_device(device);
         let batch_idx = batch_indices.len() as i64;
-        let batch = Tensor::ones(&[pc.points().len() as i64], kind::INT64_CUDA) * batch_idx;
+        let batch = Tensor::ones(&[pos_t.size()[0] as i64], kind::INT64_CUDA) * batch_idx;
 
-        points.push(pos);
-        colors.push(color);
+        points.push(pos_t);
+        colors.push(color_t);
         batch_indices.push(batch);
+        octant_ids.push(octant.id);
 
-        if batch_idx == 512 {
+        if batch_idx == batch_size {
             let pos_batch = Tensor::cat(points.as_slice(), 0);
             let color_batch = Tensor::cat(colors.as_slice(), 0);
             let batch_batch = Tensor::cat(batch_indices.as_slice(), 0);
@@ -185,7 +186,7 @@ fn calculate_leaf_sh<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>, model_
                 .forward_ts(&[&pos_batch, &color_batch, &batch_batch])
                 .unwrap();
 
-            for idx in 0..batch_indices.len() {
+            for idx in 0..octant_ids.len() {
                 let c = coefs.get(idx as i64);
                 let mut new_coefs = [Vector3::<f32>::zeros(); 25];
 
@@ -193,21 +194,44 @@ fn calculate_leaf_sh<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>, model_
                 for (i, v) in f_coefs.iter().enumerate() {
                     new_coefs[i / COLOR_CHANNELS][i % COLOR_CHANNELS] = *v;
                 }
-                sh_coefs.insert(octant.id(), new_coefs);
+                sh_coefs.insert(octant_ids[idx], new_coefs);
             }
 
             points.clear();
             colors.clear();
             batch_indices.clear();
+            octant_ids.clear();
         }
         pb.inc();
     }
-    println!("");
+    if points.len() > 0 {
+        let pos_batch = Tensor::cat(points.as_slice(), 0);
+        let color_batch = Tensor::cat(colors.as_slice(), 0);
+        let batch_batch = Tensor::cat(batch_indices.as_slice(), 0);
+
+        let coefs = model
+            .forward_ts(&[&pos_batch, &color_batch, &batch_batch])
+            .unwrap();
+
+        for idx in 0..octant_ids.len() {
+            let c = coefs.get(idx as i64);
+            let mut new_coefs = [Vector3::<f32>::zeros(); 25];
+
+            let f_coefs = Vec::<f32>::from(&c);
+            for (i, v) in f_coefs.iter().enumerate() {
+                new_coefs[i / COLOR_CHANNELS][i % COLOR_CHANNELS] = *v;
+            }
+            sh_coefs.insert(octant_ids[idx], new_coefs);
+        }
+    }
 
     println!("updating octree...");
-    for octant in octree.borrow_mut().into_iter() {
-        let new_coefs = sh_coefs.get(&octant.id()).unwrap();
-        octant.sh_rep.coefficients = (*new_coefs).into();
+    for octant in octree.into_iter() {
+        if let Some(coefs) = sh_coefs.get(&octant.id()) {
+            octant.sh_rep.coefficients = (*coefs).into();
+        } else {
+            panic!("cannot find octant with id: {:}", octant.id);
+        }
     }
 }
 
@@ -374,8 +398,9 @@ fn main() {
         )
     };
     if let Some(model_path) = opt.sh_model {
-        calculate_leaf_sh(&mut octree, model_path);
+        calculate_leaf_sh_batched(&mut octree, model_path);
     } else {
+        println!("warning: no model provided, will use mean color for sh representatives");
         calculate_leaf_mean(&mut octree);
     }
 

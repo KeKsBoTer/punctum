@@ -5,7 +5,7 @@ use tch::{kind, IndexOp, Kind, Tensor};
 use vulkano::buffer::BufferContents;
 
 use nalgebra::Vector3;
-use punctum::{load_octree_with_progress_bar, Octree, PointCloud, TeeWriter, Vertex};
+use punctum::{load_octree_with_progress_bar, Octree, PointCloud, TeeWriter};
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -30,7 +30,10 @@ pub fn main() {
     let filename = opt.input;
 
     let device = tch::Device::Cuda(0);
-    let model = load_model("traced_model_gpu.pt", device);
+    let model = load_model(
+        "logs/8192 octants l=4 rgb final/traced_model_gpu.pt",
+        device,
+    );
 
     let mut octree: Octree<f64> = load_octree_with_progress_bar(&filename).unwrap();
 
@@ -69,6 +72,14 @@ pub fn main() {
             let pos_batch = Tensor::cat(points.as_slice(), 0);
             let color_batch = Tensor::cat(colors.as_slice(), 0);
             let batch_batch = Tensor::cat(batch_indices.as_slice(), 0);
+
+            println!(
+                "pos: {:?}, color: {:?}, batch:{:?}",
+                pos_batch.size(),
+                color_batch.size(),
+                batch_batch.size()
+            );
+            println!("max: {:?}, min: {:?}", batch_batch.min(), batch_batch.max(),);
 
             let coefs = model
                 .forward_ts(&[&pos_batch, &color_batch, &batch_batch])
