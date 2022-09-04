@@ -2,13 +2,12 @@ use crate::{
     camera::{Camera, Projection, ViewFrustum},
     sh::calc_sh_grid,
     vertex::Vertex,
-    CubeBoundingBox, Node, Octree, SHVertex, Viewport,
+    Node, Octree, SHVertex, Viewport,
 };
 use nalgebra::{distance, distance_squared, Matrix4, Point3};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashMap,
-    f32::consts::PI,
     sync::{Arc, RwLock},
 };
 use vulkano::{
@@ -138,13 +137,13 @@ impl OctreeRenderer {
 
         let frustum = self.frustum.read().unwrap();
 
-        let camera_fov = PI / 2.;
+        // calculate fovy from projection matrix
+        let camera_fov = 2. * (1. / u.proj[1][1]).atan();
         let cam_pos: Point3<f32> = u.camera_pos.into();
 
-        let threshold_fn = |bbox: &CubeBoundingBox<f32>| {
-            let d = distance(&bbox.center, &cam_pos.cast());
-            let radius = bbox.outer_radius();
-            let a = 2. * (radius / d).atan();
+        let threshold_fn = |sh_rep: &SHVertex<f32>| {
+            let d = distance(&sh_rep.position, &cam_pos.cast());
+            let a = 2. * (sh_rep.radius / d).atan();
             if a / camera_fov <= threshold {
                 LoD::SHRep
             } else {
@@ -152,15 +151,15 @@ impl OctreeRenderer {
             }
         };
 
-        let lod_fn = |bbox: &CubeBoundingBox<f32>, is_leaf: bool| {
-            if bbox.within_frustum(&frustum) {
+        let lod_fn = |sh_rep: &SHVertex<f32>, is_leaf: bool| {
+            if frustum.sphere_visible(sh_rep.position, sh_rep.radius) {
                 match mode {
-                    LoDMode::Mixed => Some(threshold_fn(bbox)),
+                    LoDMode::Mixed => Some(threshold_fn(sh_rep)),
                     LoDMode::SHOnly => {
                         if is_leaf {
                             Some(LoD::SHRep)
                         } else {
-                            Some(threshold_fn(bbox))
+                            Some(threshold_fn(sh_rep))
                         }
                     }
                     LoDMode::OctantsOnly => Some(LoD::Full),
@@ -180,6 +179,8 @@ impl OctreeRenderer {
     }
 
     pub fn set_viewport(&self, viewport: Viewport) {
+        let mut uniforms = self.uniforms.write().unwrap();
+        uniforms.data.screen_size = viewport.size();
         self.sh_renderer.set_viewport(viewport.clone());
         self.octant_renderer.set_viewport(viewport.clone());
         self.debug_renderer.set_viewport(viewport.clone());
@@ -677,7 +678,7 @@ impl OctantRenderer {
 
 pub fn lod<T>(octree: &Octree<f32>, lod_fn: T) -> (Vec<u64>, Vec<SHVertex<f32>>)
 where
-    T: Fn(&CubeBoundingBox<f32>, bool) -> Option<LoD>,
+    T: Fn(&SHVertex<f32>, bool) -> Option<LoD>,
 {
     let mut lod_full = Vec::new();
     let mut lod_sh = Vec::new();
@@ -687,7 +688,7 @@ where
             // this is the core logic:
             let mut queue = vec![(root_octant, *octree.bbox())];
             while let Some((node, bbox)) = queue.pop() {
-                if let Some(lod) = lod_fn(&bbox, false) {
+                if let Some(lod) = lod_fn(&node.sh_rep, false) {
                     match lod {
                         LoD::SHRep => lod_sh.push(node.sh_rep),
                         LoD::Full => {
@@ -699,7 +700,7 @@ where
                                     }
                                     Node::Leaf(child) => {
                                         let bbox_child = Node::octant_box(i, &bbox);
-                                        if let Some(lod) = lod_fn(&bbox_child, true) {
+                                        if let Some(lod) = lod_fn(&child.sh_rep, true) {
                                             match lod {
                                                 LoD::SHRep => lod_sh.push(child.sh_rep),
                                                 LoD::Full => lod_full.push(child.id),
@@ -716,7 +717,7 @@ where
             return (lod_full, lod_sh);
         }
         Node::Leaf(octant) => {
-            if let Some(lod) = lod_fn(octree.bbox(), true) {
+            if let Some(lod) = lod_fn(&octant.sh_rep, true) {
                 match lod {
                     LoD::SHRep => lod_sh.push(octant.sh_rep),
                     LoD::Full => lod_full.push(octant.id),

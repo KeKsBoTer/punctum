@@ -11,6 +11,7 @@ layout(set = 0, binding = 0) uniform UniformData {
     uint point_size;
     bool highlight_sh;
     bool transparency;
+    vec2 screen_size;
 } uniforms;
 
 
@@ -19,9 +20,6 @@ out gl_PerVertex
 	vec4 gl_Position;
 	float gl_PointSize;
 };
-
-
-
 
 layout(location = 0) out vec4 vertex_color;
 layout(location = 1) out vec4 vertex_pos;

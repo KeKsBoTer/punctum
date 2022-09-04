@@ -259,11 +259,9 @@ impl<F: BaseFloat> CubeBoundingBox<F> {
             .contains(&true)
     }
 
-    // TODO something here is not working correctly!
     pub fn within_frustum(&self, frustum: &ViewFrustum<F>) -> bool {
         let radius = self.outer_radius();
 
-        // return self.corners().iter().any(|c| frustum.point_visible(&c));
         return frustum.sphere_visible(self.center, radius);
     }
 

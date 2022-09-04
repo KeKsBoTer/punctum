@@ -244,11 +244,6 @@ fn main() {
 
     let queue = queues.next().unwrap();
 
-    // let swapchain_format = physical_device
-    //     .surface_formats(&surface, Default::default())
-    //     .unwrap()[0]
-    //     .0;
-
     let swapchain_format = Format::B8G8R8A8_SRGB;
 
     let render_pass = get_render_pass(device.clone(), swapchain_format);
