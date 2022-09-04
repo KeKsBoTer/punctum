@@ -270,11 +270,7 @@ fn main() {
 
     let window_size = surface.window().inner_size();
     let aspect_ratio = window_size.width as f32 / window_size.height as f32;
-    let mut camera = PerspectiveCamera::new(
-        Point3::new(-1.309, -19.021, -28.548),
-        Vector3::new(-0.367, 1.367, -0.130),
-        aspect_ratio,
-    );
+    let mut camera = PerspectiveCamera::new(Point3::origin(), Vector3::zeros(), aspect_ratio);
     camera.adjust_znear_zfar(octree.bbox());
 
     let renderer = Arc::new(OctreeRenderer::new(

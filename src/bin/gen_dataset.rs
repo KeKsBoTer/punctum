@@ -191,4 +191,5 @@ fn main() {
             .count();
     });
     pb.lock().unwrap().finish();
+    println!("done")
 }
