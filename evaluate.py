@@ -1,5 +1,7 @@
 import argparse
+import csv
 import logging
+from os import path
 
 import numpy as np
 import torch
@@ -11,9 +13,7 @@ from tqdm import tqdm
 from pointnet.dataset import OctantDataset, collate_batched_point_clouds, lm2flat_index
 from pointnet.model import PointNet
 from pointnet.sh import to_spherical
-from pointnet.loss import l2_loss, camera_loss, CoefNormalizer
-
-# torch.backends.cudnn.benchmark = True
+from pointnet.metrics import camera_color
 
 
 def camera_positions(filename: str) -> torch.Tensor:
@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
     logger.info(f"loading dataset {ds_path}")
-    ds = OctantDataset(ds_path)
+    ds = OctantDataset(ds_path,load_cam_colors=True)
 
     data_loader = DataLoader(
         ds,
@@ -73,33 +73,46 @@ if __name__ == "__main__":
         pin_memory_device="cuda:0",
     )
 
-    coefs_samples = torch.stack(
-        [
-            ds[i][1][: lm2flat_index(l_max, l_max) + 1]
-            for i in torch.randint(0, len(ds), (10000,))
-        ]
-    )
-    model = PointNet(l_max, 4, batch_norm=True, use_spherical=False,).cuda()
+    color_channels = 3
+    model = PointNet(l_max, color_channels, batch_norm=True, use_spherical=False,).cuda()
     model.eval()
     model.load_state_dict(torch.load(model_weights))
 
-    coef_transform = CoefNormalizer(model.coef_mean.clone(), model.coef_std.clone())
-
     cameras_pos = camera_positions("sphere.ply")
 
-    loss_fn = camera_loss(l_max, cameras_pos)
-    coef_loss_fn = l2_loss()
+    loss_fn = camera_color(l_max, cameras_pos)
+    
+    loss_values = []
+    cam_color_variance = []
 
     for i, (batch) in tqdm(enumerate(data_loader), total=len(data_loader),):
-        pcs, coefs = batch.pcs, batch.coefs
+        pcs, coefs,cam_colors = batch.pcs, batch.coefs,batch.cam_colors
 
         target_coefs = coefs[:, : lm2flat_index(l_max, l_max) + 1].cuda()
-        pred_coefs = model(pcs.unpack())
 
-        c_loss = loss_fn(pred_coefs, target_coefs)
+        pos, color, batch =pcs.unpack()
+        pred_coefs = model(pos, color, batch)
 
-        target_coefs_n = coef_transform.normalize(target_coefs)
-        pred_coefs_n = coef_transform.normalize(pred_coefs)
-        coef_loss = coef_loss_fn(pred_coefs_n, target_coefs_n)
+        c_loss:torch.Tensor = loss_fn(pred_coefs, target_coefs)
+        loss_values.extend(c_loss.tolist())
 
-        val_loss = c_loss + coef_loss
+        color_variance:torch.Tensor = cam_colors.var(1).max(1).values
+        cam_color_variance.extend(color_variance.tolist())
+
+    loss_values = torch.Tensor(loss_values)
+    cam_color_variance = torch.Tensor(cam_color_variance)
+
+    num_steps = 10
+    max_v = cam_color_variance.max()
+    min_v = cam_color_variance.min()
+    steps = [min_v+(max_v.max()-min_v)*i*1/num_steps for i in range(num_steps)]
+    
+    out_file = path.join(path.dirname(ds_path),"evaluation.csv")
+    with open(out_file, 'w') as csvfile: 
+        writer = csv.writer(csvfile)
+        writer.writerow(["dataset","model_weights"]+[f">= {s:.4f}" for s in steps])
+        writer.writerow([ds_path,model_weights]+[
+            loss_values[cam_color_variance >=s].mean().item() for s in steps
+        ])
+
+    logger.info(f"saved results to '{out_file}'")

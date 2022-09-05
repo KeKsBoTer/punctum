@@ -90,7 +90,7 @@ class PointNet(nn.Module):
 
     def __init__(
         self,
-        l: int = 10,
+        l: int = 4,
         color_channels: int = 3,
         batch_norm: bool = False,
         use_dropout: bool = False,
@@ -137,7 +137,7 @@ class PointNet(nn.Module):
         Returns:
             torch.Tensor[B,K,C]: coefficients
         """
-        #mean_color = scatter_reduce(color,batch,"mean")
+
         if self.use_spherical:
             points = to_spherical(points)
         x = self.feat(points, color, batch)
@@ -158,7 +158,5 @@ class PointNet(nn.Module):
         x = x.reshape(-1, (self.l + 1) ** 2, self.color_channels)
 
         x = x * self.coef_std + self.coef_mean
-
-        #x[:,0] += mean_color *2*torch.pi**0.5
 
         return x

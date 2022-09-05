@@ -194,6 +194,8 @@ if __name__ == "__main__":
 
     num_color_channels = 3
 
+    sample_weighting = False
+
     logging.basicConfig(level=logging.INFO)
     logger.info(f"loading dataset {ds_path}")
 
@@ -250,7 +252,7 @@ if __name__ == "__main__":
         l_max,
         num_color_channels,
         batch_norm=True,
-        use_dropout=0.3,
+        use_dropout=0.4,
         use_spherical=False,
         coef_mean=coef_transform.mean,
         coef_std=coef_transform.std,
@@ -311,7 +313,7 @@ if __name__ == "__main__":
 
             vertices, color, batch =pcs.unpack()
             pred_coefs = model(vertices, color, batch)
-            sample_weight = stds(color, batch)
+            sample_weight = stds(color, batch) if sample_weighting else None
             c_loss = loss_fn(pred_coefs, target_coefs,sample_weight)
 
             pred_coefs_n = coef_transform.normalize(pred_coefs)
@@ -358,7 +360,7 @@ if __name__ == "__main__":
                 vertices, color, batch =pcs.unpack()
                 pred_coefs = model(vertices, color, batch)
 
-                sample_weight = stds(color, batch)
+                sample_weight = stds(color, batch) if sample_weighting else None
                 c_loss = loss_fn(pred_coefs, target_coefs,sample_weight)
 
                 target_coefs_n = coef_transform.normalize(target_coefs)

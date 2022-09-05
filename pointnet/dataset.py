@@ -19,10 +19,11 @@ class OctantDataset(Dataset):
     """ Dataset containing pointclouds and their respective SH coefficients"""
 
     def __init__(
-        self, data_dir: str, sub_sample: int = None, selected_samples: list[str] = None, with_alpha : bool = False
+        self, data_dir: str, sub_sample: int = None, selected_samples: list[str] = None, with_alpha : bool = False,load_cam_colors:bool = False
     ):
         self.data_dir = data_dir
         self.with_alpha = with_alpha
+        self.load_cam_colors = load_cam_colors
         if selected_samples is not None:
             self.ply_files = np.array(selected_samples)
         else:
@@ -39,6 +40,17 @@ class OctantDataset(Dataset):
 
     def filename(self, index: int) -> str:
         return self.ply_files[index]
+
+    def cam_colors(self,plydata:PlyData):
+        fields = ["x", "y", "z", "red", "green", "blue"]
+        if self.with_alpha:
+            fields += ["alpha"]
+
+        camera_data = unpack_data(
+            plydata["camera"].data, fields
+        )
+        colors = camera_data[:, 3:] / 255.
+        return colors
 
     @lru_cache(maxsize=100000)
     def load_ply(self, file: str) -> Tuple[Pointclouds, torch.Tensor]:
@@ -68,7 +80,12 @@ class OctantDataset(Dataset):
             print(f"warning: {file} has no coords")
 
         pc = Pointclouds(coords, features=color, file_names=[file])
-        return (pc, sh_coef)
+
+        if self.load_cam_colors:
+            cam_colors = self.cam_colors(plydata)
+            return (pc, sh_coef,cam_colors)
+        else:
+            return (pc, sh_coef)
 
     def __getitem__(self, idx: int) -> Tuple[Pointclouds, torch.Tensor]:
         return self.load_fn(self.ply_files[idx])
@@ -79,13 +96,16 @@ def unpack_data(data, field_names):
 
 
 class OctantBatch:
-    def __init__(self, pcs, coefs):
+    def __init__(self, pcs:torch.Tensor, coefs:torch.Tensor,cam_colors:torch.Tensor = None):
         self.pcs = pcs
         self.coefs = coefs
+        self.cam_colors = cam_colors
 
     def pin_memory(self):
         self.pcs = self.pcs.pin_memory()
         self.coefs = self.coefs.pin_memory()
+        if self.cam_colors is not None:
+            self.cam_colors = self.cam_colors.pin_memory()
         return self
 
 
@@ -93,8 +113,11 @@ def collate_batched_point_clouds(
     batch: list[tuple[Pointclouds, torch.Tensor]]
 ) -> OctantBatch:
     coefs = torch.stack([x[1] for x in batch])
-    pcs = collate_batched([pc for pc, _ in batch])
-    return OctantBatch(pcs, coefs)
+    pcs = collate_batched([x[0] for x in batch])
+    cam_colors = None
+    if len(batch[0])==3:
+        cam_colors = torch.stack([x[2] for x in batch])
+    return OctantBatch(pcs, coefs,cam_colors)
 
 
 class CamerasDataset(Dataset):
@@ -116,7 +139,6 @@ class CamerasDataset(Dataset):
         plydata = PlyData.read(file)
 
         fields = ["x", "y", "z", "red", "green", "blue"]
-        print( plydata["camera"].dtype)
         if "alpha" in plydata["camera"].data:
             fields += ["alpha"]
 

@@ -111,10 +111,11 @@ fn render_from_viewpoints(
     camera.adjust_znear_zfar(octree.bbox());
 
     renderer.set_camera(&camera);
+    renderer.set_viewport(Viewport::new(render_size));
     renderer.update_uniforms();
     renderer.update_lod(culling_mode, lod_threshold);
 
-    let pc_cb = renderer.render(RenderMode::OctantsOnly, false);
+    let pc_cb = renderer.render(RenderMode::Both, false);
 
     let future = frame.render(queue.clone(), pc_cb.clone(), None);
 
@@ -194,12 +195,6 @@ fn main() {
 
     let camera =
         PerspectiveCamera::look_at_origin(Point3::new(opt.x_camera, opt.y_camera, opt.z_camera));
-    // let camera = PerspectiveCamera::new(
-    //     Point3::origin(),
-    //     Vector3::zeros(),
-    //     opt.width as f32 / opt.height as f32,
-    // );
-    // camera.set_aspect_ratio(opt.width as f32 / opt.height as f32);
 
     render_from_viewpoints(
         opt.output_file.clone(),
@@ -208,7 +203,7 @@ fn main() {
         render_pass.clone(),
         image_format,
         image_size,
-        LoDMode::OctantsOnly,
+        LoDMode::Mixed,
         octree.clone(),
         camera,
         opt.lod_threshold,
