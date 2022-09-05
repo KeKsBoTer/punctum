@@ -1,4 +1,4 @@
-use nalgebra::{Point3, Vector2};
+use nalgebra::{Point3, Vector2, Vector3};
 use num_traits::Float;
 use rayon::prelude::*;
 use std::f32::consts::{FRAC_2_SQRT_PI, PI};
@@ -158,6 +158,13 @@ pub fn calc_sh_fixed<const T: usize>(coords: Vec<Vector2<f32>>) -> Vec<[f32; T]>
 
 pub fn to_spherical(pos: &Point3<f32>) -> Vector2<f32> {
     Vector2::new(pos.z.acos(), pos.y.atan2(pos.x) + PI)
+}
+pub fn to_cartesian(angle: &Vector2<f32>) -> Vector3<f32> {
+    Vector3::new(
+        angle.x.sin() * angle.y.cos(),
+        angle.x.sin() * angle.y.sin(),
+        angle.x.cos(),
+    )
 }
 
 pub const SH_0: f32 = 0.25 * FRAC_2_SQRT_PI;

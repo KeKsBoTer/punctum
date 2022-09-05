@@ -4,7 +4,7 @@ use crate::{
     vertex::Vertex,
     Node, Octree, SHVertex, Viewport,
 };
-use nalgebra::{distance, distance_squared, Matrix4, Point3};
+use nalgebra::{distance_squared, Matrix4, Point3};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashMap,
@@ -129,7 +129,7 @@ impl OctreeRenderer {
         }
     }
 
-    pub fn update_lod(&self, mode: LoDMode, threshold: f32) {
+    pub fn update_lod(&self, mode: LoDMode, threshold: u32) {
         let u = {
             let uniforms = self.uniforms.read().unwrap();
             uniforms.data.clone()
@@ -138,13 +138,15 @@ impl OctreeRenderer {
         let frustum = self.frustum.read().unwrap();
 
         // calculate fovy from projection matrix
-        let camera_fov = 2. * (1. / u.proj[1][1]).atan();
-        let cam_pos: Point3<f32> = u.camera_pos.into();
+        let fovy = (1. / u.proj[1][1]).atan();
 
         let threshold_fn = |sh_rep: &SHVertex<f32>| {
-            let d = distance(&sh_rep.position, &cam_pos.cast());
-            let a = 2. * (sh_rep.radius / d).atan();
-            if a / camera_fov <= threshold {
+            let view_pos: Point3<f32> =
+                Point3::from_homogeneous(Matrix4::from(u.view) * sh_rep.position.to_homogeneous())
+                    .unwrap();
+            let a = (sh_rep.radius / view_pos.z.abs()).atan();
+            let pixel_size = (2. * a / fovy * u.screen_size[1]) as u32;
+            if pixel_size <= threshold {
                 LoD::SHRep
             } else {
                 LoD::Full
@@ -686,20 +688,18 @@ where
         Node::Intermediate(root_octant) => {
             // most common case: root not has children
             // this is the core logic:
-            let mut queue = vec![(root_octant, *octree.bbox())];
-            while let Some((node, bbox)) = queue.pop() {
+            let mut queue = vec![root_octant];
+            while let Some(node) = queue.pop() {
                 if let Some(lod) = lod_fn(&node.sh_rep, false) {
                     match lod {
                         LoD::SHRep => lod_sh.push(node.sh_rep),
                         LoD::Full => {
-                            for (i, child) in node.data.iter().enumerate() {
+                            for child in node.data.iter() {
                                 match child {
                                     Node::Intermediate(child_octant) => {
-                                        let bbox_child = Node::octant_box(i, &bbox);
-                                        queue.push((child_octant, bbox_child));
+                                        queue.push(child_octant);
                                     }
                                     Node::Leaf(child) => {
-                                        let bbox_child = Node::octant_box(i, &bbox);
                                         if let Some(lod) = lod_fn(&child.sh_rep, true) {
                                             match lod {
                                                 LoD::SHRep => lod_sh.push(child.sh_rep),

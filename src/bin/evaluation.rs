@@ -118,7 +118,7 @@ fn render_from_viewpoints(
 
             renderer.set_camera(&camera);
             renderer.update_uniforms();
-            renderer.update_lod(culling_mode, 1. / render_size[1] as f32);
+            renderer.update_lod(culling_mode, 1);
 
             let pc_cb = renderer.render(RenderMode::Both, false);
 

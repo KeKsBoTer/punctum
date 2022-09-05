@@ -39,7 +39,7 @@ struct GuiState {
     highlight_shs: bool,
     render_mode: RenderMode,
     frustum_culling: Option<LoDMode>,
-    lod_threshold: f32,
+    lod_threshold: u32,
     debug: bool,
     sh_transparency: bool,
 
@@ -53,7 +53,7 @@ impl GuiState {
             render_mode: RenderMode::Both,
             frustum_culling: Some(LoDMode::Mixed),
             point_size: 1,
-            lod_threshold: 0.01,
+            lod_threshold: 1,
             debug: false,
             sh_transparency: false,
         }
@@ -113,7 +113,7 @@ impl GuiState {
                                 "Octants",
                             );
                         });
-                        ui.add(egui::DragValue::new(&mut self.lod_threshold).speed(0.001));
+                        ui.add(egui::DragValue::new(&mut self.lod_threshold));
                     });
             });
 
@@ -264,8 +264,7 @@ fn main() {
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
     let window_size = surface.window().inner_size();
-    let aspect_ratio = window_size.width as f32 / window_size.height as f32;
-    let mut camera = PerspectiveCamera::new(Point3::origin(), Vector3::zeros(), aspect_ratio);
+    let mut camera = PerspectiveCamera::look_at_origin(Point3::new(-2.899, 30.564, 43.745));
     camera.adjust_znear_zfar(octree.bbox());
 
     let renderer = Arc::new(OctreeRenderer::new(
@@ -278,7 +277,7 @@ fn main() {
     ));
 
     renderer.set_point_size(1);
-    renderer.update_lod(LoDMode::Mixed, window_size.height as f32);
+    renderer.update_lod(LoDMode::Mixed, 4);
 
     let renderer_clone = renderer.clone();
     let gui_state_clone = gui_state.clone();

@@ -328,6 +328,29 @@ impl Camera<PerspectiveProjection> {
         return c;
     }
 
+    pub fn look_at_origin(cam_pos: Point3<f32>) -> Self {
+        let fovy: f32 = PI / 2.;
+
+        let view_matrix = Matrix4::look_at_rh(
+            &cam_pos.into(),
+            &Point3::origin(),
+            &Vector3::new(0., 1., 0.),
+        );
+
+        let mut c = Camera {
+            view: view_matrix,
+            proj: Matrix4::identity(),
+            projection: PerspectiveProjection {
+                fovy: fovy,
+                aspect_ratio: 1.0,
+            },
+            znear: 0.001,
+            zfar: 100.,
+        };
+        c.update_proj_matrix();
+        return c;
+    }
+
     pub fn set_aspect_ratio(&mut self, aspect_ratio: f32) {
         self.projection.aspect_ratio = aspect_ratio;
         self.update_proj_matrix();
