@@ -2,6 +2,7 @@ use image::{ImageBuffer, Rgba};
 use nalgebra::Point3;
 use pbr::{MultiBar, Pipe, ProgressBar};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use std::f32::consts::PI;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -15,8 +16,9 @@ use vulkano::image::{ImageDimensions, StorageImage};
 use vulkano::sync::{self, GpuFuture};
 
 use punctum::{
-    get_render_pass, load_octree_with_progress_bar, select_physical_device, Frame, LoDMode, Octree,
-    OctreeRenderer, PerspectiveCamera, RenderMode, Viewport,
+    get_render_pass, load_cameras, load_octree_with_progress_bar, select_physical_device, Frame,
+    LoDMode, Octree, OctreeRenderer, PerspectiveCamera, PerspectiveProjection, RenderMode,
+    Viewport,
 };
 use structopt::StructOpt;
 use vulkano::device::DeviceExtensions;
@@ -40,6 +42,8 @@ struct Opt {
 
     #[structopt(long)]
     parallel: bool,
+    #[structopt(long, default_value = "4")]
+    lod_threshold: u32,
 }
 
 fn render_from_viewpoints(
@@ -114,6 +118,8 @@ fn render_from_viewpoints(
 
         for (i, camera) in cameras.iter().enumerate() {
             let mut camera = camera.clone();
+            let c_pos = camera.view().transform_point(&Point3::origin());
+            camera.translate(c_pos.coords * 50. * 3f32.sqrt());
             camera.adjust_znear_zfar(octree.bbox());
             camera.set_aspect_ratio(render_size[0] as f32 / render_size[1] as f32);
 
@@ -221,20 +227,16 @@ fn main() {
 
     let image_size = [opt.width, opt.height];
 
-    // let aspect_ratio = image_size[0] as f32 / image_size[1] as f32;
+    let aspect_ratio = image_size[0] as f32 / image_size[1] as f32;
 
-    // let cameras = load_cameras(
-    //     "sphere.ply",
-    //     PerspectiveProjection {
-    //         fovy: PI / 2.,
-    //         aspect_ratio: aspect_ratio,
-    //     },
-    // )
-    // .unwrap();
-
-    let cameras = vec![PerspectiveCamera::look_at_origin(Point3::new(
-        -2.899, 30.564, 43.745,
-    ))];
+    let cameras = load_cameras(
+        "sphere.ply",
+        PerspectiveProjection {
+            fovy: PI / 2.,
+            aspect_ratio: aspect_ratio,
+        },
+    )
+    .unwrap();
 
     if !opt.output_folder.exists() {
         std::fs::create_dir(opt.output_folder.clone()).unwrap();
@@ -250,7 +252,7 @@ fn main() {
 
     let pb_thread = thread::spawn(move || mb.listen());
 
-    let threshold: u32 = 6;
+    let threshold: u32 = opt.lod_threshold;
 
     let render_sh = render_from_viewpoints(
         "render_sh".to_string(),

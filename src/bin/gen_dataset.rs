@@ -2,6 +2,7 @@ use std::{
     fs::{self, File},
     io::{BufReader, BufWriter},
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use image::Rgba;
@@ -32,6 +33,10 @@ struct Opt {
     /// WARNING: this createa A LOT of images  (162 per octant)
     #[structopt(long)]
     export_images: bool,
+
+    /// if set no ply files are exported (used for performance measurement)
+    #[structopt(long)]
+    measure: bool,
 }
 
 fn export_ply(output_file: &PathBuf, pc: PointCloud<f32>, observed_colors: &Vec<Vertex<f32>>) {
@@ -77,7 +82,9 @@ fn main() {
         let mut pb = ProgressBar::new(in_file.metadata().unwrap().len());
 
         let mut buf = BufReader::new(in_file);
-
+        if opt.measure {
+            pb.set_max_refresh_rate(Some(Duration::from_secs(60 * 60 * 1000)));
+        }
         pb.message(&format!("decoding {}: ", filename));
 
         pb.set_units(pbr::Units::Bytes);
@@ -101,7 +108,11 @@ fn main() {
 
     let pb = Arc::new(Mutex::new(ProgressBar::new(octree.num_octants())));
     {
-        pb.lock().unwrap().message(&format!("exporting octants: "));
+        let mut pb = pb.lock().unwrap();
+        pb.message(&format!("exporting octants: "));
+        if opt.measure {
+            pb.set_max_refresh_rate(Some(Duration::from_secs(60 * 60 * 1000)));
+        }
     }
 
     let num_workers = 12;
@@ -115,6 +126,7 @@ fn main() {
 
     let output_folder = opt.output_folder.as_path();
 
+    let start = Instant::now();
     rayon::scope(|s| {
         all_octants
             .chunks(octree.num_octants() as usize / num_workers)
@@ -142,7 +154,7 @@ fn main() {
                                 PointCloudGPU::from_point_cloud(device.clone(), pc.clone());
 
                             let img_folder = output_folder.join(format!("octant_{}", octant.id()));
-                            if opt.export_images && !img_folder.exists() {
+                            if !opt.measure && opt.export_images && !img_folder.exists() {
                                 fs::create_dir(img_folder.clone()).unwrap();
                             }
 
@@ -151,7 +163,7 @@ fn main() {
                                 .enumerate()
                                 .map(|(view_idx, c)| {
                                     let avg_color = renderer.render(c.clone(), &pc_gpu);
-                                    if opt.export_images {
+                                    if !opt.measure && opt.export_images {
                                         let img = renderer.last_image();
 
                                         img.save(img_folder.join(format!(
@@ -180,8 +192,11 @@ fn main() {
                             })
                             .collect();
 
-                        let out_file = output_folder.join(format!("octant_{}.ply", octant.id()));
-                        export_ply(&out_file, pc, &cam_colors);
+                        if !opt.measure {
+                            let out_file =
+                                output_folder.join(format!("octant_{}.ply", octant.id()));
+                            export_ply(&out_file, pc, &cam_colors);
+                        }
 
                         let mut pb = pb_clone.lock().unwrap();
                         pb.inc();
@@ -191,5 +206,5 @@ fn main() {
             .count();
     });
     pb.lock().unwrap().finish();
-    println!("done")
+    println!("done! Duration: {}s", start.elapsed().as_secs_f32());
 }

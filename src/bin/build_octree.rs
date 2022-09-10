@@ -1,4 +1,10 @@
-use std::{borrow::BorrowMut, collections::HashMap, fs::File, io::BufWriter, time::Duration};
+use std::{
+    borrow::BorrowMut,
+    collections::HashMap,
+    fs::File,
+    io::BufWriter,
+    time::{Duration, Instant},
+};
 
 use bincode::{serialize_into, serialized_size};
 use las::{point::Point, Read as LasRead, Reader};
@@ -105,16 +111,18 @@ fn build_octree<I, F>(
     max_node_size: usize,
     sample_rate: Option<usize>,
     flip_yz: bool,
+    with_pb: bool,
 ) -> Octree<F>
 where
     I: Iterator<Item = Vertex<F>>,
     F: BaseFloat,
 {
-    let mut point_iter: Box<dyn Iterator<Item = Vertex<F>>> = Box::new(
-        points
-            .map(normalize_point(bbox, cube_size))
-            .map(with_progress_bar(number_of_points)),
-    );
+    let mut point_iter: Box<dyn Iterator<Item = Vertex<F>>> =
+        Box::new(points.map(normalize_point(bbox, cube_size)));
+
+    if with_pb {
+        point_iter = Box::new(point_iter.map(with_progress_bar(number_of_points)));
+    }
 
     if flip_yz {
         point_iter = Box::new(point_iter.map(vertex_flip_yz));
@@ -136,7 +144,11 @@ fn load_model<P: AsRef<std::path::Path>>(path: P, device: tch::Device) -> tch::C
 
 const COLOR_CHANNELS: usize = 3;
 
-fn calculate_leaf_sh_batched<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>, model_path: P) {
+fn calculate_leaf_sh_batched<P: AsRef<std::path::Path>>(
+    octree: &mut Octree<f64>,
+    model_path: P,
+    with_pb: bool,
+) {
     let device = if tch::Cuda::is_available() {
         tch::Device::Cuda(0)
     } else {
@@ -144,7 +156,11 @@ fn calculate_leaf_sh_batched<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>
         tch::Device::Cpu
     };
     let model = load_model(model_path, device);
-    let mut pb = ProgressBar::new(octree.num_octants());
+    let mut pb = if with_pb {
+        Some(ProgressBar::new(octree.num_octants()))
+    } else {
+        None
+    };
 
     let mut points = Vec::new();
     let mut colors = Vec::new();
@@ -202,7 +218,9 @@ fn calculate_leaf_sh_batched<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>
             batch_indices.clear();
             octant_ids.clear();
         }
-        pb.inc();
+        if let Some(pb) = &mut pb {
+            pb.inc();
+        }
     }
     if points.len() > 0 {
         let pos_batch = Tensor::cat(points.as_slice(), 0);
@@ -269,7 +287,7 @@ fn calculate_leaf_mean(octree: &mut Octree<f64>) {
     pb.finish();
 }
 
-fn calculate_intermediate(octree: &mut Octree<f64>) {
+fn calculate_intermediate(octree: &mut Octree<f64>, with_pb: bool) {
     let cameras: Vec<Point3<f32>> = load_cameras(
         "sphere.ply",
         OrthographicProjection {
@@ -283,9 +301,13 @@ fn calculate_intermediate(octree: &mut Octree<f64>) {
     .collect();
 
     let intermediate_nodes = octree.itermediate_octants();
-
-    let mut pb = ProgressBar::new(intermediate_nodes.len() as u64);
-    pb.message("sh intermediate nodes ");
+    let mut pb = if with_pb {
+        let mut pb = ProgressBar::new(intermediate_nodes.len() as u64);
+        pb.message("sh intermediate nodes ");
+        Some(pb)
+    } else {
+        None
+    };
     for id in intermediate_nodes.iter().rev() {
         if let Some(node) = octree.get_mut(*id) {
             if let punctum::Node::Intermediate(i_node) = node {
@@ -332,6 +354,9 @@ fn calculate_intermediate(octree: &mut Octree<f64>) {
                 let new_coefs = merge_shs(child_coefs, &cameras);
 
                 i_node.sh_rep = SHVertex::new(centroid, max_distance, new_coefs);
+                if let Some(pb) = &mut pb {
+                    pb.inc();
+                }
             } else {
                 unreachable!("only intermediate nodes should be found!")
             }
@@ -339,7 +364,9 @@ fn calculate_intermediate(octree: &mut Octree<f64>) {
             unreachable!("id must be present in octree")
         }
     }
-    pb.finish();
+    if let Some(pb) = &mut pb {
+        pb.finish();
+    }
 }
 
 #[derive(StructOpt, Debug)]
@@ -364,6 +391,10 @@ struct Opt {
 
     #[structopt(long, parse(from_os_str))]
     sh_model: Option<PathBuf>,
+
+    /// no progress bar
+    #[structopt(long)]
+    no_pb: bool,
 }
 
 fn main() {
@@ -386,6 +417,7 @@ fn main() {
             opt.max_octant_size,
             opt.sample_rate,
             opt.flip_yz,
+            !opt.no_pb,
         )
     } else {
         let mut ply_file = std::fs::File::open(opt.input).unwrap();
@@ -406,16 +438,19 @@ fn main() {
             opt.max_octant_size,
             opt.sample_rate,
             opt.flip_yz,
+            !opt.no_pb,
         )
     };
+    let now = Instant::now();
     if let Some(model_path) = opt.sh_model {
-        calculate_leaf_sh_batched(&mut octree, model_path);
+        calculate_leaf_sh_batched(&mut octree, model_path, !opt.no_pb);
     } else {
         println!("warning: no model provided, will use mean color for sh representatives");
         calculate_leaf_mean(&mut octree);
     }
+    let sh_compute_time = now.elapsed();
 
-    calculate_intermediate(&mut octree);
+    calculate_intermediate(&mut octree, !opt.no_pb);
 
     #[cfg(debug_assertions)]
     {
@@ -456,6 +491,11 @@ fn main() {
     }
 
     println!(
+        "SH leaf computation time: {:}",
+        sh_compute_time.as_secs_f32()
+    );
+
+    println!(
         "octree stats:\n\tnum_points:\t{}\n\tmax_depth:\t{}\n\tleaf_octants:\t{}",
         octree.num_points(),
         octree.depth(),
@@ -467,14 +507,23 @@ fn main() {
     );
 
     {
-        let mut pb = ProgressBar::new(serialized_size(&octree).unwrap());
-        pb.set_units(pbr::Units::Bytes);
+        let mut pb = if !opt.no_pb {
+            let mut pb = ProgressBar::new(serialized_size(&octree).unwrap());
+            pb.set_units(pbr::Units::Bytes);
+            Some(pb)
+        } else {
+            None
+        };
 
         let out_file = File::create(opt.output).unwrap();
         let mut out_writer = BufWriter::new(&out_file);
-        let mut tee = TeeWriter::new(&mut out_writer, &mut pb);
-        serialize_into(&mut tee, &octree).unwrap();
 
-        pb.finish_println("done!");
+        if let Some(pb) = &mut pb {
+            let mut tee = TeeWriter::new(&mut out_writer, pb);
+            serialize_into(&mut tee, &octree).unwrap();
+            pb.finish_println("done!");
+        } else {
+            serialize_into(&mut out_writer, &octree).unwrap();
+        }
     }
 }
