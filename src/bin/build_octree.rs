@@ -228,6 +228,17 @@ fn calculate_leaf_sh_batched<P: AsRef<std::path::Path>>(octree: &mut Octree<f64>
     println!("updating octree...");
     for octant in octree.into_iter() {
         if let Some(coefs) = sh_coefs.get(&octant.id()) {
+            let pc = octant.points();
+            let (centroid, _) = pc.centroid_and_color();
+
+            let radius =
+                pc.0.iter()
+                    .map(|p| distance_squared(&p.position, &centroid))
+                    .max_by(|a, b| a.total_cmp(b))
+                    .unwrap();
+
+            octant.sh_rep.position = centroid;
+            octant.sh_rep.radius = radius.sqrt();
             octant.sh_rep.coefficients = (*coefs).into();
         } else {
             panic!("cannot find octant with id: {:}", octant.id);

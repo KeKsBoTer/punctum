@@ -1,6 +1,6 @@
 use egui_winit_vulkano::egui::{CollapsingHeader, Context, Visuals};
 use egui_winit_vulkano::{egui, Gui};
-use nalgebra::{Point3, Vector3};
+use nalgebra::Point3;
 use std::path::PathBuf;
 use std::sync::mpsc::TryRecvError;
 use std::sync::{mpsc, Arc, Mutex};
@@ -53,7 +53,7 @@ impl GuiState {
             render_mode: RenderMode::Both,
             frustum_culling: Some(LoDMode::Mixed),
             point_size: 1,
-            lod_threshold: 1,
+            lod_threshold: 8,
             debug: false,
             sh_transparency: false,
         }
@@ -213,13 +213,12 @@ fn main() {
     let mut event_loop = EventLoop::new(); // ignore this for now
     let surface = WindowBuilder::new()
         .with_title("puncTUM")
-        .with_inner_size(PhysicalSize::new(800, 600))
+        .with_inner_size(PhysicalSize::new(720, 540))
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 
     let device_extensions = DeviceExtensions {
         khr_swapchain: true,
-        ext_buffer_device_address: true,
         ..DeviceExtensions::none()
     };
 
@@ -244,7 +243,7 @@ fn main() {
 
     let queue = queues.next().unwrap();
 
-    let swapchain_format = Format::B8G8R8A8_SRGB;
+    let swapchain_format = Format::B8G8R8A8_SRGB; // R8G8B8A8_UNORM
 
     let render_pass = get_render_pass(device.clone(), swapchain_format);
 
@@ -263,7 +262,6 @@ fn main() {
 
     let scene_subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let window_size = surface.window().inner_size();
     let mut camera = PerspectiveCamera::look_at_origin(Point3::new(-2.899, 30.564, 43.745));
     camera.adjust_znear_zfar(octree.bbox());
 
@@ -275,9 +273,6 @@ fn main() {
         octree.clone(),
         &camera,
     ));
-
-    renderer.set_point_size(1);
-    renderer.update_lod(LoDMode::Mixed, 4);
 
     let renderer_clone = renderer.clone();
     let gui_state_clone = gui_state.clone();
@@ -369,11 +364,7 @@ fn main() {
             fps = 1. / time_since_last_frame.as_secs_f32();
             last_update_inst = Instant::now();
 
-            let moved = camera_controller.update_camera(&mut camera, time_since_last_frame);
-
-            if moved {
-                camera.adjust_znear_zfar(octree.bbox());
-            }
+            camera_controller.update_camera(&mut camera, time_since_last_frame);
 
             surface.window().request_redraw();
         }
@@ -387,6 +378,7 @@ fn main() {
             renderer.set_highlight_sh(state.highlight_shs);
             renderer.set_transparency(state.sh_transparency);
 
+            camera.adjust_znear_zfar(octree.bbox());
             renderer.set_camera(&camera);
             renderer.update_uniforms();
             let pc_cb = renderer.render(state.render_mode, state.debug);

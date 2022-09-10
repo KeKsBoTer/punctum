@@ -2,7 +2,6 @@ use image::{ImageBuffer, Rgba};
 use nalgebra::Point3;
 use pbr::{MultiBar, Pipe, ProgressBar};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::f32::consts::PI;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -16,9 +15,8 @@ use vulkano::image::{ImageDimensions, StorageImage};
 use vulkano::sync::{self, GpuFuture};
 
 use punctum::{
-    get_render_pass, load_cameras, load_octree_with_progress_bar, select_physical_device, Frame,
-    LoDMode, Octree, OctreeRenderer, PerspectiveCamera, PerspectiveProjection, RenderMode,
-    Viewport,
+    get_render_pass, load_octree_with_progress_bar, select_physical_device, Frame, LoDMode, Octree,
+    OctreeRenderer, PerspectiveCamera, RenderMode, Viewport,
 };
 use structopt::StructOpt;
 use vulkano::device::DeviceExtensions;
@@ -36,7 +34,9 @@ struct Opt {
     output_folder: PathBuf,
 
     #[structopt(long, default_value = "256")]
-    img_size: u32,
+    width: u32,
+    #[structopt(long, default_value = "256")]
+    height: u32,
 
     #[structopt(long)]
     parallel: bool,
@@ -55,6 +55,7 @@ fn render_from_viewpoints(
     highlight_sh: bool,
     octree: Arc<Octree<f32>>,
     cameras: Vec<PerspectiveCamera>,
+    threshold: u32,
     mut pbr: ProgressBar<Pipe>,
     parallel: bool,
 ) -> Option<JoinHandle<()>> {
@@ -109,16 +110,16 @@ fn render_from_viewpoints(
         let mut images = Vec::with_capacity(cameras.len());
 
         renderer.set_highlight_sh(highlight_sh);
+        renderer.set_viewport(Viewport::new(render_size));
 
         for (i, camera) in cameras.iter().enumerate() {
             let mut camera = camera.clone();
-            let c_pos = camera.view().transform_point(&Point3::origin());
-            camera.translate(c_pos.coords * 50. * 3f32.sqrt());
             camera.adjust_znear_zfar(octree.bbox());
+            camera.set_aspect_ratio(render_size[0] as f32 / render_size[1] as f32);
 
             renderer.set_camera(&camera);
             renderer.update_uniforms();
-            renderer.update_lod(culling_mode, 1);
+            renderer.update_lod(culling_mode, threshold);
 
             let pc_cb = renderer.render(RenderMode::Both, false);
 
@@ -218,18 +219,22 @@ fn main() {
 
     let render_pass = get_render_pass(device.clone(), image_format);
 
-    let image_size = [opt.img_size, opt.img_size];
+    let image_size = [opt.width, opt.height];
 
-    let aspect_ratio = image_size[0] as f32 / image_size[1] as f32;
+    // let aspect_ratio = image_size[0] as f32 / image_size[1] as f32;
 
-    let cameras = load_cameras(
-        "sphere.ply",
-        PerspectiveProjection {
-            fovy: PI / 2.,
-            aspect_ratio: aspect_ratio,
-        },
-    )
-    .unwrap();
+    // let cameras = load_cameras(
+    //     "sphere.ply",
+    //     PerspectiveProjection {
+    //         fovy: PI / 2.,
+    //         aspect_ratio: aspect_ratio,
+    //     },
+    // )
+    // .unwrap();
+
+    let cameras = vec![PerspectiveCamera::look_at_origin(Point3::new(
+        -2.899, 30.564, 43.745,
+    ))];
 
     if !opt.output_folder.exists() {
         std::fs::create_dir(opt.output_folder.clone()).unwrap();
@@ -245,6 +250,8 @@ fn main() {
 
     let pb_thread = thread::spawn(move || mb.listen());
 
+    let threshold: u32 = 6;
+
     let render_sh = render_from_viewpoints(
         "render_sh".to_string(),
         opt.output_folder.clone(),
@@ -258,6 +265,7 @@ fn main() {
         false,
         octree.clone(),
         cameras.clone(),
+        threshold,
         p_render_sh,
         opt.parallel,
     );
@@ -274,6 +282,7 @@ fn main() {
         false,
         octree.clone(),
         cameras.clone(),
+        threshold,
         p_render_no_sh,
         opt.parallel,
     );
@@ -290,6 +299,7 @@ fn main() {
         true,
         octree.clone(),
         cameras.clone(),
+        threshold,
         p_sh_mask,
         opt.parallel,
     );
@@ -303,10 +313,11 @@ fn main() {
         image_format,
         [image_size[0] * 4, image_size[1] * 4],
         image_size,
-        LoDMode::Mixed,
+        LoDMode::OctantsOnly,
         false,
         octree.clone(),
         cameras.clone(),
+        threshold,
         p_multi_sampling,
         opt.parallel,
     );
