@@ -33,6 +33,12 @@ use punctum::{
 struct Opt {
     #[structopt(name = "input_octree", parse(from_os_str))]
     input: PathBuf,
+
+    #[structopt(long, default_value = "720")]
+    width: u32,
+
+    #[structopt(long, default_value = "540")]
+    height: u32,
 }
 
 struct GuiState {
@@ -213,7 +219,7 @@ fn main() {
     let mut event_loop = EventLoop::new(); // ignore this for now
     let surface = WindowBuilder::new()
         .with_title("puncTUM")
-        .with_inner_size(PhysicalSize::new(720, 540))
+        .with_inner_size(PhysicalSize::new(opt.width, opt.height))
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 

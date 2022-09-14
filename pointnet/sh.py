@@ -238,7 +238,7 @@ def calc_coeficients(
     """
     assert (l_max + 1) ** 2 < coords.shape[0], "to few samples"
     sh = calc_sh(l_max, coords)
-    A = sh.T @ sh
-    B = sh.T @ target
+    A = sh
+    B = target
     return torch.linalg.lstsq(A, B).solution
 
