@@ -28,3 +28,4 @@ tests/sh_errors
 **/*.las
 evaluation/
 old_stuff/
+tests/**/*.png

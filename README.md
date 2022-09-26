@@ -63,6 +63,9 @@ Adding the flag `--help` will prompt all options for the tool.
 
 **NOTE:** If a deep learning model should be used for the coefficient calculation, it has to be specified with `--sh-model <model_file>`. 
 
+![Bunny Octree](figures/bunny_octree.png)
+
+
 ### Opening the renderer
 
 The interactive renderer can be invoked with:
@@ -96,6 +99,8 @@ There is also an offline renderer that will render the point cloud with given se
 ```
 cargo run --release --bin offline_render [OPTIONS] <input_octree> <output_image>
 ``` 
+
+![Neuschwanstein Example Render](figures/neuschwanstein_cutout.png)
 
 ## Deep Learning Model
 
