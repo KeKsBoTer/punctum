@@ -21,11 +21,13 @@ use structopt::StructOpt;
 use vulkano::device::DeviceOwned;
 
 #[derive(StructOpt, Debug, Clone)]
-#[structopt(name = "Octree Builder")]
+#[structopt(name = "Dataset generator")]
 struct Opt {
+    /// octree file
     #[structopt(name = "input_octree", parse(from_os_str))]
     input: PathBuf,
 
+    /// target folder where the ply files will be saved to
     #[structopt(name = "output", parse(from_os_str))]
     output_folder: PathBuf,
 

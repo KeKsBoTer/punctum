@@ -376,12 +376,15 @@ struct Opt {
     #[structopt(name = "input_file", parse(from_os_str))]
     input: PathBuf,
 
+    // octree output file
     #[structopt(name = "output", parse(from_os_str))]
     output: PathBuf,
 
-    #[structopt(long, default_value = "1024")]
+    /// maximum number of points per leaf node
+    #[structopt(long, default_value = "8192")]
     max_octant_size: usize,
 
+    /// sample every n-th point (random)
     #[structopt(long)]
     sample_rate: Option<usize>,
 
@@ -389,6 +392,7 @@ struct Opt {
     #[structopt(long)]
     flip_yz: bool,
 
+    /// TorchScript model for calculating the sh coefficients
     #[structopt(long, parse(from_os_str))]
     sh_model: Option<PathBuf>,
 

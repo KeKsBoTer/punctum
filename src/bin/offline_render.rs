@@ -22,7 +22,7 @@ use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::render_pass::{RenderPass, Subpass};
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "Octree Builder")]
+#[structopt(name = "Offline Renderer")]
 struct Opt {
     #[structopt(name = "input_octree", parse(from_os_str))]
     input: PathBuf,
@@ -30,9 +30,11 @@ struct Opt {
     #[structopt(name = "output_file", parse(from_os_str))]
     output_file: PathBuf,
 
+    // image/render width
     #[structopt(long, short, default_value = "256")]
     width: u32,
 
+    // image/render height
     #[structopt(long, short, default_value = "256")]
     height: u32,
 
@@ -40,10 +42,13 @@ struct Opt {
     #[structopt(long, default_value = "1")]
     lod_threshold: u32,
 
+    /// camera x position
     #[structopt(long, short, default_value = "0.")]
     x_camera: f32,
+    /// camera y position
     #[structopt(long, short, default_value = "0.")]
     y_camera: f32,
+    /// camera z position
     #[structopt(long, short, default_value = "0.")]
     z_camera: f32,
 }

@@ -8,7 +8,7 @@ import torch
 from plyfile import PlyData
 from torch.utils.data import Dataset
 
-from tqdm import tqdm
+import numpy as np
 
 from .pointclouds import Pointclouds, collate_batched
 
@@ -19,13 +19,12 @@ class OctantDataset(Dataset):
     """ Dataset containing pointclouds and their respective SH coefficients"""
 
     def __init__(
-        self, data_dir: str, sub_sample: int = None, selected_samples: list[str] = None, with_alpha : bool = False,load_cam_colors:bool = False
+        self, data_dir: str, sub_sample: int = None,with_alpha : bool = False,load_cam_colors:bool = False
     ):
-        self.data_dir = data_dir
         self.with_alpha = with_alpha
         self.load_cam_colors = load_cam_colors
-        if selected_samples is not None:
-            self.ply_files = np.array(selected_samples)
+        if data_dir.endswith(".txt"):
+            self.ply_files = np.genfromtxt(data_dir,dtype='str')
         else:
             self.ply_files = np.array(glob.glob(os.path.join(data_dir, "*.ply")))
             if len(self.ply_files) == 0:
@@ -123,10 +122,10 @@ def collate_batched_point_clouds(
 class CamerasDataset(Dataset):
     """ Dataset containing pointclouds and their respective SH coefficients"""
 
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str,with_alpha : bool = False,):
         self.data_dir = data_dir
         self.ply_files = np.array(glob.glob(os.path.join(data_dir, "*.ply")))
-
+        self.with_alpha = with_alpha
         self.load_fn = self.load_ply
 
     def __len__(self):
@@ -139,7 +138,7 @@ class CamerasDataset(Dataset):
         plydata = PlyData.read(file)
 
         fields = ["x", "y", "z", "red", "green", "blue"]
-        if "alpha" in plydata["camera"].data:
+        if self.with_alpha:
             fields += ["alpha"]
 
         camera_data = unpack_data(

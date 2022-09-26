@@ -29,14 +29,16 @@ use punctum::{
 };
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "Octree Builder")]
+#[structopt(name = "puntum Viewer")]
 struct Opt {
     #[structopt(name = "input_octree", parse(from_os_str))]
     input: PathBuf,
 
+    /// initial window width
     #[structopt(long, default_value = "720")]
     width: u32,
 
+    /// initial window height
     #[structopt(long, default_value = "540")]
     height: u32,
 }

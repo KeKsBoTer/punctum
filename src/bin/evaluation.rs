@@ -27,21 +27,28 @@ use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::render_pass::{RenderPass, Subpass};
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "Octree Builder")]
+#[structopt(name = "Renderer Evaluation")]
 struct Opt {
+    /// input octree
     #[structopt(name = "input_octree", parse(from_os_str))]
     input: PathBuf,
 
+    /// output folder for images
     #[structopt(name = "output_folder", parse(from_os_str))]
     output_folder: PathBuf,
 
+    /// render/image width
     #[structopt(long, default_value = "256")]
     width: u32,
+    /// render/image height
     #[structopt(long, default_value = "256")]
     height: u32,
 
+    /// perform multithreaded rendering (requires more GPU RAM)
     #[structopt(long)]
     parallel: bool,
+
+    /// Lod threshold in pixel
     #[structopt(long, default_value = "4")]
     lod_threshold: u32,
 }

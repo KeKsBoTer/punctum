@@ -19,7 +19,7 @@ fn angle_to_rgba(angle: f32) -> Vector3<u8> {
 }
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "Octree Builder")]
+#[structopt(name = "Octree Visualization")]
 struct Opt {
     #[structopt(name = "input_octree", parse(from_os_str))]
     input: PathBuf,

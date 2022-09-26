@@ -199,13 +199,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logger.info(f"loading dataset {ds_path}")
 
-    best = None
-    if path.exists(f"{ds_path}/best.txt"):
-        with open(f"{ds_path}/best.txt", "r") as f:
-            best = [fn.strip() for fn in f.readlines()]
-            best = best[: len(best) // 8]
-
-    ds = OctantDataset(ds_path, selected_samples=best)
+    ds = OctantDataset(ds_path)
 
     num_train = int(0.8 * len(ds))
 

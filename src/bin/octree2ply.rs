@@ -6,7 +6,7 @@ use rand::prelude::IteratorRandom;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "Octree Builder")]
+#[structopt(name = "Octree to PLY converter")]
 struct Opt {
     #[structopt(name = "input_octree", parse(from_os_str))]
     input: PathBuf,
@@ -14,6 +14,7 @@ struct Opt {
     #[structopt(name = "output_ply", parse(from_os_str))]
     output: PathBuf,
 
+    /// number of points sampled from input point cloud
     #[structopt(long, default_value = "1000000")]
     max_points: usize,
 }
