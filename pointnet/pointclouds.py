@@ -5,6 +5,7 @@ import torch
 
 
 class Pointclouds:
+    """Point clouds implementation similar to pytorch3d [Pointclouds](https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/structures/pointclouds.html)"""
     def __init__(
         self,
         points: torch.Tensor,
@@ -47,6 +48,14 @@ class Pointclouds:
 
 
 def collate_batched(pointsclouds: List[Pointclouds]) -> Pointclouds:
+    """collates a list of point clouds into one point cloud
+
+    Args:
+        pointsclouds (List[Pointclouds]): list of point clouds
+
+    Returns:
+        Pointclouds: resulting point cloud containing given point clouds
+    """
     assert all(
         len(pc.file_names) == 1 for pc in pointsclouds
     ), "only pointclouds containing only one pointcloud are supported"

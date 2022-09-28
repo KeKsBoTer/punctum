@@ -1,3 +1,4 @@
+/// these Tee classes act as middleware for reads and writes in order to add a progress bar
 use std::io::{Read, Stdout, Write};
 
 use pbr::ProgressBar;
@@ -9,6 +10,7 @@ pub struct TeeWriter<'a, T1: Write + 'a> {
     counter: u64,
 }
 
+/// Tee (T-Split) writer with progress bar.
 impl<'a, T1> TeeWriter<'a, T1>
 where
     T1: Write + 'a,
@@ -42,7 +44,7 @@ where
     }
 }
 
-/// Tee (T-Split) Writer writes the same data to two child writers.
+/// Tee (T-Split) reader with progress bar.
 pub struct TeeReader<'a, T1: Read + 'a> {
     w1: &'a mut T1,
     w2: &'a mut ProgressBar<Stdout>,

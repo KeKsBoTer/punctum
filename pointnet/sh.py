@@ -101,8 +101,7 @@ def lpmv(l: int, m: int, x: torch.Tensor) -> torch.Tensor:
     if l - m_abs > 1:
         y -= ((l + m_abs - 1) / (l - m_abs)) * CACHE[(l - 2, m_abs)]
 
-    if m < 0:
-        y = negative_lpmv(l, m, y)
+    y = negative_lpmv(l, m, y)
     return y
 
 
@@ -200,6 +199,16 @@ def flat2lm_index(i: int) -> Tuple[int, int]:
 
 
 def evalute_sh(coefs: torch.Tensor, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """evaluates spherical harmonics for given coefficients and position 
+
+    Args:
+        coefs (torch.Tensor[C]): sh coefficients
+        x (torch.Tensor[N]): spherical positions theta
+        y (torch.Tensor[N]): spherical positions phi
+
+    Returns:
+        torch.Tensor[N]: resulting function values
+    """
     device = coefs.device
     l_max = int(math.sqrt(coefs.shape[0])) - 1
     Y = torch.zeros((*x.shape, coefs.shape[-1]), device=device)
@@ -212,6 +221,15 @@ def evalute_sh(coefs: torch.Tensor, x: torch.Tensor, y: torch.Tensor) -> torch.T
 
 
 def calc_sh(l_max: int, coords: torch.Tensor) -> torch.Tensor:
+    """calculates the coefficients up to l_max for the given spherical coordinates
+
+    Args:
+        l_max (int): maximum degree for l
+        coords (torch.Tensor[N,2]): spherical coordinates
+
+    Returns:
+        torch.Tensor[N,(l_max+1)**2]: sh values
+    """
     values = torch.zeros((coords.shape[0], (l_max + 1) ** 2), device=coords.device)
     clear_spherical_harmonics_cache()
     for l in range(l_max + 1):
@@ -223,15 +241,15 @@ def calc_sh(l_max: int, coords: torch.Tensor) -> torch.Tensor:
 def calc_coeficients(
     l_max: int, coords: torch.Tensor, target: torch.Tensor
 ) -> torch.Tensor:
-    """ Spherical Harmonics ceofficients calculation.
-    Computes the ceofficients by formulating them as a least squares problem.
+    """ Spherical Harmonics coefficients calculation.
+    Computes the coefficients by formulating them as a least squares problem.
     See https://math.stackexchange.com/questions/54880/calculate-nearest-spherical-harmonic-for-a-3d-distribution-over-a-grid
     Args:
         l_max (int): maximum degree to compute
-        coords ([N,2]): sperical coordinates 
+        coords ([N,2]): spherical coordinates 
         target ([N,D]): values for coords
     Returns:
-        [(l_max+1)**2,D] ceofficients
+        [(l_max+1)**2,D] coefficients
     Throws:
         Assertion if (l_max+1)**2 >= N
 

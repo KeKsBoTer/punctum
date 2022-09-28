@@ -10,6 +10,7 @@ use vulkano::pipeline::graphics::vertex_input::{VertexMember, VertexMemberTy};
 use crate::{ply::PlyType, sh::SH_0};
 use serde_big_array::BigArray;
 
+/// Generic float type (either 32 or 64 bit)
 pub trait BaseFloat:
     Scalar + ToPrimitive + Default + RealField + PlyType + Copy + Zeroable + AddAssign
 {
@@ -19,6 +20,8 @@ impl<T: Scalar + ToPrimitive + Default + RealField + PlyType + Copy + Zeroable +
 {
 }
 
+/// Vertex data used on CPU and GPU
+/// contains point position and color
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Zeroable)]
 #[repr(C)]
 pub struct Vertex<F: BaseFloat> {
@@ -26,6 +29,8 @@ pub struct Vertex<F: BaseFloat> {
     pub color: Vector3<u8>,
 }
 
+/// custom memory mapping for GLSL shader to allow for 8bit color packing
+/// (the color is packed into one unsigned 32-bit integer and unpacked in the shader)
 unsafe impl VulkanoVertex for Vertex<f32> {
     fn member(name: &str) -> Option<VertexMemberInfo> {
         match name {
@@ -56,8 +61,11 @@ impl From<Vertex<f64>> for Vertex<f32> {
     }
 }
 
-pub const NUM_COEFS: usize = (4 + 1) * (4 + 1);
+/// maximum degree l to use for spherical harmonics coefficients
+pub const L_MAX: usize = 4;
+pub const NUM_COEFS: usize = (L_MAX + 1) * (L_MAX + 1);
 
+/// GPU data for SH coefficients
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Zeroable)]
 #[repr(C)]
 pub struct SHCoefficients<const T: usize = NUM_COEFS>(
@@ -94,6 +102,8 @@ impl<const T: usize> Into<SHCoefficients<T>> for [Vector3<f32>; T] {
 
 unsafe impl Pod for SHCoefficients {}
 
+/// vertex data for SH representatives
+/// used on CPU and GPU
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Zeroable)]
 #[repr(C)]
 pub struct SHVertex<F: BaseFloat> {

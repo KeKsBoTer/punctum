@@ -21,6 +21,17 @@ class OctantDataset(Dataset):
     def __init__(
         self, data_dir: str, sub_sample: int = None,with_alpha : bool = False,load_cam_colors:bool = False
     ):
+        """loads a dataset from files
+
+        Args:
+            data_dir (str): directory containing ply files or a txt file listing the ply files locations
+            sub_sample (int, optional): size of a random subsample of the dataset. Defaults to None.
+            with_alpha (bool, optional): load alpha channel. Defaults to False.
+            load_cam_colors (bool, optional): load average camera colors. Defaults to False.
+
+        Raises:
+            FileNotFoundError: directory does not contain ply files
+        """
         self.with_alpha = with_alpha
         self.load_cam_colors = load_cam_colors
         if data_dir.endswith(".txt"):
@@ -117,46 +128,3 @@ def collate_batched_point_clouds(
     if len(batch[0])==3:
         cam_colors = torch.stack([x[2] for x in batch])
     return OctantBatch(pcs, coefs,cam_colors)
-
-
-class CamerasDataset(Dataset):
-    """ Dataset containing pointclouds and their respective SH coefficients"""
-
-    def __init__(self, data_dir: str,with_alpha : bool = False,):
-        self.data_dir = data_dir
-        self.ply_files = np.array(glob.glob(os.path.join(data_dir, "*.ply")))
-        self.with_alpha = with_alpha
-        self.load_fn = self.load_ply
-
-    def __len__(self):
-        return len(self.ply_files)
-
-    def filename(self, index: int) -> str:
-        return self.ply_files[index]
-
-    def load_ply(self, file: str) -> Tuple[Pointclouds, torch.Tensor]:
-        plydata = PlyData.read(file)
-
-        fields = ["x", "y", "z", "red", "green", "blue"]
-        if self.with_alpha:
-            fields += ["alpha"]
-
-        camera_data = unpack_data(
-            plydata["camera"].data, fields
-        )
-        pos = camera_data[:, :3]
-        colors = camera_data[:, 3:] / 255
-
-        sh_coef = None
-        if "sh_coefficients" in plydata:
-            sh_coef = torch.empty(
-                (plydata["sh_coefficients"].count, len(fields)-3), requires_grad=False
-            )
-
-            for (l, m, values) in plydata["sh_coefficients"].data:
-                sh_coef[lm2flat_index(l, m)] = torch.tensor(values)
-
-        return (pos, colors, file)
-
-    def __getitem__(self, idx: int) -> Tuple[Pointclouds, torch.Tensor]:
-        return self.load_fn(self.ply_files[idx])

@@ -6,6 +6,15 @@ from .sh import to_spherical
 
 
 def camera_positions(filename: str,cartesian:bool = True) -> torch.Tensor:
+    """loads camera positions from ply file
+
+    Args:
+        filename (str): ply file containing the camera positions
+        cartesian (bool, optional): cartesian coordinates if true, else spherical. Defaults to True.
+
+    Returns:
+        torch.Tensor: camera positions as spherical or cartesian coordinates
+    """
     plydata = PlyData.read(filename)
     vertex_data = plydata["vertex"].data
 

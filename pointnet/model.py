@@ -8,6 +8,16 @@ import torch.nn.functional as F
 
 
 def scatter_reduce(x: torch.Tensor, batch: torch.Tensor,reduce="amax") -> torch.Tensor:
+    """ scatter reduce similar to [pytorch-scatter](https://pytorch-scatter.readthedocs.io/en/latest/functions/scatter.html).
+
+    Args:
+        x (torch.Tensor[N,C]): point features with
+        batch (torch.Tensor[N]): batch index
+        reduce (str, optional): reduce function (one of "axmin","amax","mean,"sum"). Defaults to "amax".
+
+    Returns:
+        torch.Tensor[B,C]: batch wise features
+    """
     batch_idx = batch.unsqueeze(-1).repeat(1, x.shape[1])
     target: torch.Tensor = torch.zeros(
         (batch_idx.max() + 1, x.shape[1])

@@ -140,6 +140,7 @@ pub fn calc_sh_sparse(l_max: u64, coords: Vec<Vector2<f32>>) -> Vec<Vec<f32>> {
         .collect::<Vec<Vec<f32>>>()
 }
 
+/// calculates sh function values for a fixed number of
 pub fn calc_sh_fixed<const T: usize>(coords: Vec<Vector2<f32>>) -> Vec<[f32; T]> {
     coords
         .iter()
@@ -156,9 +157,12 @@ pub fn calc_sh_fixed<const T: usize>(coords: Vec<Vector2<f32>>) -> Vec<[f32; T]>
         .collect()
 }
 
+/// converts cartesian to spherical coordinates
 pub fn to_spherical(pos: &Point3<f32>) -> Vector2<f32> {
     Vector2::new(pos.z.acos(), pos.y.atan2(pos.x) + PI)
 }
+
+/// converts spherical to cartesian coordinates
 pub fn to_cartesian(angle: &Vector2<f32>) -> Vector3<f32> {
     Vector3::new(
         angle.x.sin() * angle.y.cos(),
