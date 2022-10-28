@@ -1,0 +1,32 @@
+Building octree from datasets/kaiserburg/3DRM_kaiserburg_d002.las:
+updating octree...
+SH computation time: 21.010794
+octree stats:
+	num_points:	114545254
+	max_depth:	10
+	leaf_octants:	44103
+writing octree to datasets/kaiserburg/kaiserburg_8192max_sh.bin:
+Building octree from datasets/navvis_tum_audimax/navvis_tum_audimax.ply:
+updating octree...
+SH computation time: 11.972953
+octree stats:
+	num_points:	58859843
+	max_depth:	9
+	leaf_octants:	17595
+writing octree to datasets/navvis_tum_audimax/navvis_tum_audimax_8192max_sh.bin:
+Building octree from datasets/navvis_office/navvis_office.ply:
+updating octree...
+SH computation time: 14.268219
+octree stats:
+	num_points:	75008915
+	max_depth:	9
+	leaf_octants:	24529
+writing octree to datasets/navvis_office/navvis_office_8192max_sh.bin:
+Building octree from datasets/neuschwanstein/3DRM_neuschwanstein_original.las:
+updating octree...
+SH computation time: 44.867054
+octree stats:
+	num_points:	272530238
+	max_depth:	11
+	leaf_octants:	105238
+writing octree to datasets/neuschwanstein/neuschwanstein_8192max_sh.bin:

@@ -1,0 +1,7 @@
+decoding datasets/kaiserburg/kaiserburg_8192max_sh.bin: 10.00 MB / 4.62 GB  0.21 % 372.42 MB/s 13s
+decoding datasets/kaiserburg/kaiserburg_8192max_sh.bin: 4.62 GB / 4.62 GB  100.00 % 378.14 MB/s
+done!
+
+exporting octants: 44103 / 44103 [===========================] 100.00 % 27.51/s 
+exporting octants: 44103 / 44103 [===========================] 100.00 % 27.51/s done!
+Duration: 1603.442s
